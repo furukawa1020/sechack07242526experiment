@@ -1,0 +1,32 @@
+{
+  "name": "sechack-experiment-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SecHack365 participant-study presentation system",
+  "scripts": {
+    "dev": "tsx src/server/index.ts",
+    "build:client": "vite build",
+    "build:server": "node scripts/build-server.mjs",
+    "build": "npm run build:client && npm run build:server",
+    "start": "node dist-server/index.js",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "vitest run --coverage",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "screenshots": "playwright test tests/e2e/screenshots.spec.ts --project=chromium"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "serialport": "^13.0.0",
+    "ws": "^8.21.1",
+    "zod": "^4.4.3"
+  }
+}

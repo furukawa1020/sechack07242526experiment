@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-server/
+data/sessions/
+data/e2e-sessions/
+artifacts/coverage/
+artifacts/playwright-report/
+artifacts/test-results/
+playwright/.cache/
+*.log
+.env
