@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": "R8-010-2x2-mock-v1",
+  "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
+  "bindHost": "127.0.0.1",
+  "port": 4173,
+  "researchIdPattern": "^SH26-[0-9]{3}$",
+  "orders": [
+    "ABDC",
+    "BCAD",
+    "CDBA",
+    "DACB"
+  ],
+  "fixedState": {
+    "score": 72,
+    "label": "高ストレス",
+    "pufferLevel": 0.6
+  },
+  "timingMs": {
+    "handling": 8000,
+    "processing": 3000,
+    "result": 15000,
+    "reset": 7000,
+    "inflateRamp": 6000,
+    "deflateRamp": 6000
+  },
+  "device": {
+    "mode": "mock",
+    "serialPath": "",
+    "baudRate": 115200,
+    "ackTimeout": 1000,
+    "allowMockInProduction": false
+  },
+  "formUrl": "",
+  "logging": {
+    "directory": "./data/sessions",
+    "includeAbortedInOrderBalancing": true
+  },
+  "network": {
+    "allowLan": false,
+    "allowExternalRuntimeRequests": false
+  }
+}
