@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-server/
+artifacts/
+data/
+SecHack_Experiment_Codex_Package/
+package-lock.json

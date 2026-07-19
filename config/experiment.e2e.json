@@ -8,12 +8,12 @@
   "orders": ["ABDC", "BCAD", "CDBA", "DACB"],
   "fixedState": { "score": 72, "label": "高ストレス", "pufferLevel": 0.6 },
   "timingMs": {
-    "handling": 80,
-    "processing": 50,
-    "result": 100,
-    "reset": 80,
-    "inflateRamp": 25,
-    "deflateRamp": 25
+    "handling": 100,
+    "processing": 80,
+    "result": 500,
+    "reset": 100,
+    "inflateRamp": 50,
+    "deflateRamp": 50
   },
   "device": {
     "mode": "mock",
