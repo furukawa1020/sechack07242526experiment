@@ -88,23 +88,12 @@ select:focus-visible {
   white-space: pre-line;
 }
 
-.message-eyebrow {
-  width: fit-content;
-  margin: 0 0 18px;
-  padding-left: 10px;
-  border-left: 3px solid var(--heading);
-  color: #3d4b61;
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 0;
-}
-
 .participant-intro,
 .participant-centered {
   display: grid;
   min-height: 0;
-  align-items: center;
-  padding: 30px 48px;
+  align-items: start;
+  padding: 36px 48px 30px;
 }
 
 .intro-card,
@@ -492,12 +481,6 @@ select:focus-visible {
   text-align: left;
 }
 
-.summary-heading .message-eyebrow {
-  margin-bottom: 10px;
-  padding-left: 0;
-  border-left: 0;
-}
-
 .summary-heading h1 {
   font-size: clamp(36px, 3vw, 48px);
 }
@@ -653,6 +636,10 @@ select:focus-visible {
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.08em;
+}
+
+.device-mode-badge {
+  margin: 0;
 }
 
 .connection-pill::before {
@@ -1045,7 +1032,8 @@ button:disabled {
 }
 
 .device-status-hero .device-mode-badge { border-color: #aebbcf; color: #304467; background: #f3f6fa; }
-.device-status-hero h2 { margin: 13px 0 22px; font: 800 42px/1 ui-monospace, Consolas, monospace; text-transform: uppercase; }
+.device-state-heading { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
+.device-status-hero h2 { margin: 0; font: 800 42px/1 ui-monospace, Consolas, monospace; text-transform: uppercase; }
 .device-hero-details { display: grid; gap: 9px; margin: 0; }
 .device-hero-details div { display: flex; justify-content: space-between; gap: 16px; padding-top: 9px; border-top: 1px solid var(--line); }
 .device-hero-details dt { color: var(--muted-text); }
@@ -1485,8 +1473,12 @@ button:disabled {
   }
 
   .device-status-hero h2 {
-    margin: 10px 0 16px;
+    margin: 0;
     font-size: 34px;
+  }
+
+  .device-state-heading {
+    margin-bottom: 16px;
   }
 
   .device-illustration {

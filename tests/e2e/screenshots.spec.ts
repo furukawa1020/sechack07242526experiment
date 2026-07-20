@@ -133,6 +133,13 @@ async function expectRenderedLineCount(locator: Locator, expected: number): Prom
   expect(lineCount).toBe(expected);
 }
 
+async function expectHeadingInUpperLeftReadingArea(locator: Locator): Promise<void> {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.x).toBeLessThan(160);
+  expect(box?.y).toBeLessThan(160);
+}
+
 test("主要画面の承認用スクリーンショットを生成する", async ({ page, request }) => {
   test.setTimeout(90_000);
   await ensureDevice(request);
@@ -175,7 +182,9 @@ test("主要画面の承認用スクリーンショットを生成する", async
 
     const introHeading = page.getByRole("heading", { name: "同じ身体データを、4つの方法で提示します" });
     await expect(introHeading).toBeVisible();
+    await expect(page.locator(".message-eyebrow")).toHaveCount(0);
     await expectRenderedLineCount(introHeading, 1);
+    await expectHeadingInUpperLeftReadingArea(introHeading);
     await capture(page, `participant-intro-${viewport.label}`);
 
     await sessionAction(request, labelSession.id, "start");
@@ -183,9 +192,12 @@ test("主要画面の承認用スクリーンショットを生成する", async
       timeout: 5_000,
     });
     await capture(page, `participant-label-result-${viewport.label}`);
-    await expect(page.getByRole("heading", { name: "4つの提示は終了しました" })).toBeVisible({
+    const summaryHeading = page.getByRole("heading", { name: "4つの提示は終了しました" });
+    await expect(summaryHeading).toBeVisible({
       timeout: 15_000,
     });
+    await expect(page.locator(".message-eyebrow")).toHaveCount(0);
+    await expectHeadingInUpperLeftReadingArea(summaryHeading);
     await expect(page.getByRole("img", { name: "Googleフォームを開くQRコード" })).toBeVisible();
     await capture(page, `participant-summary-${viewport.label}`);
     await sessionAction(request, labelSession.id, "confirm-form-complete");

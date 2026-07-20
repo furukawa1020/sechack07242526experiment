@@ -26,7 +26,7 @@ interface BuiltServerModule {
 type JsonRecord = Record<string, unknown>;
 
 const WORKSPACE = resolve(import.meta.dirname, "../..");
-const FORM_URL = "https://docs.google.com/forms/d/e/TEST_FORM_ID/viewform";
+const FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
 
 let temporaryRoot: string | null = null;
 let deployment: RunningBuiltServer | null = null;
@@ -91,6 +91,7 @@ async function buildAndStartProductionServer(): Promise<RunningBuiltServer> {
     `${JSON.stringify({
       ...config,
       port,
+      formUrl: FORM_URL,
       logging: { ...logging, directory: "./data/sessions" },
       // This temporary deployment is an automated UI audit, never a production approval.
       device: { ...device, allowMockInProduction: false },
@@ -289,6 +290,11 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   await expectNoDocumentOverflow(display);
   await expectNoDocumentOverflow(operator);
 
+  const displayToken = decodeURIComponent(displayPath.slice("/display/".length));
+  const publicResponse = await request.get(`${baseUrl}/api/display/${encodeURIComponent(displayToken)}`);
+  expect(publicResponse.ok()).toBeTruthy();
+  expect(record(record(await publicResponse.json()).snapshot)["formUrl"]).toBe(FORM_URL);
+
   const formLink = display.getByRole("link", { name: "Googleフォームに戻って回答する" });
   await expect(formLink).toHaveAttribute("href", FORM_URL);
   await expect(formLink).toHaveAttribute("target", "_blank");
@@ -307,6 +313,8 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   const pngBytes = Buffer.from(qrSource?.split(",", 2)[1] ?? "", "base64");
   expect(pngBytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
 
+  expect(display.url()).toBe(`${baseUrl}${displayPath}`);
+  expect(context.pages()).toHaveLength(2);
   expect(externalRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
 

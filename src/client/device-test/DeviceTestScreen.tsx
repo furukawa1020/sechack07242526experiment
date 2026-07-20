@@ -126,8 +126,10 @@ export function DeviceTestScreen(): React.JSX.Element {
             <i /><i /><i />
           </div>
           <div>
-            <p className="device-mode-badge">装置モード: {device.mode === "mock" ? "Mock" : "Serial"}</p>
-            <h2 id="device-state-title">{device.state}</h2>
+            <div className="device-state-heading">
+              <h2 id="device-state-title">{device.state}</h2>
+              <p className="device-mode-badge">装置モード: {device.mode === "mock" ? "Mock" : "Serial"}</p>
+            </div>
             <dl className="device-hero-details">
               <div><dt>接続</dt><dd>{device.connected ? "接続済み" : "未接続"}</dd></div>
               <div><dt>正規化レベル</dt><dd>{device.level === null ? "—" : device.level.toFixed(2)}</dd></div>

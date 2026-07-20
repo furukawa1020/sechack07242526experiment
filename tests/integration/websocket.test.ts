@@ -129,8 +129,9 @@ describe("WebSocket synchronization", () => {
     expect(serialized).not.toMatch(/SH26|ABDC|conditionCode|researchId|sessionId/u);
 
     socket.send(JSON.stringify({ type: "display.ready" }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(true);
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(true);
+    });
     socket.send(JSON.stringify({ type: "display.fullscreenState", payload: { fullscreen: true } }));
     await vi.waitFor(() => {
       expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayFullscreen).toBe(true);

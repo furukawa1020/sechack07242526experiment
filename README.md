@@ -34,7 +34,7 @@ npm run preflight
 npm run start
 ```
 
-`npm run preflight`は既定で本番ゲートです。Serial実機モード、Windows COMポート、`allowMockInProduction=false`、承認済みGoogle Forms URL形式、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。`npm run start`も本番モードで、Mock設定では安全のため起動を拒否します。
+`npm run preflight`は既定で本番ゲートです。Serial実機モード、Windows COMポート、`allowMockInProduction=false`、指定済みGoogle Forms URL形式、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。`npm run start`も本番モードで、Mock設定では安全のため起動を拒否します。
 
 会場へ配置する本番成果物は、ソースディレクトリをそのままコピーせず、次のコマンドで生成します。
 
@@ -83,7 +83,7 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 
 本番前に`/device-test`でPING、STATUS、上限以下の膨張、収縮、STOPを確認してください。詳細は[運用手順](docs/RUNBOOK.md)と[装置通信仕様](docs/DEVICE_PROTOCOL.md)を参照してください。
 
-新しい本番設定は`config/experiment.production.example.json`から作成します。例には意図的に無効な`COM0`と空のフォームURLが入っているため、実値へ置換するまで本番ゲートを通過しません。
+新しい本番設定は`config/experiment.production.example.json`から作成します。例には提供済みフォームURL`https://forms.gle/BeShY7cY5zMjunto9`が反映されています。意図的に無効な値は`COM0`だけであり、実機の確定COMポートへ置換するまで本番ゲートを通過しません。URLが設定済みでもフォーム内容の承認を意味しません。[Googleフォーム公開内容監査](docs/FORM_AUDIT.md)のNO-GO所見を解消し、二名照合を完了する必要があります。
 
 ## 本番前点検
 
@@ -137,6 +137,7 @@ E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認
 - [Windowsローカル本番デプロイ](docs/DEPLOYMENT.md)
 - [本番リリース二名照合票](docs/RELEASE_CHECKLIST.md)
 - [テスト報告](docs/TEST_REPORT.md)
+- [Googleフォーム公開内容監査](docs/FORM_AUDIT.md)
 - [プロトコル変更履歴](docs/PROTOCOL_CHANGELOG.md)
 - [合成サンプルログ](docs/examples/sample-session.jsonl)
 

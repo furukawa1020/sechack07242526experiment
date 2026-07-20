@@ -24,18 +24,15 @@ function Footer(): React.JSX.Element {
 }
 
 function CenteredMessage({
-  eyebrow,
   title,
   body,
 }: {
-  readonly eyebrow?: string;
   readonly title: string;
   readonly body: string;
 }): React.JSX.Element {
   return (
     <main className="participant-centered" aria-live="polite">
       <section className="participant-message-card">
-        {eyebrow === undefined ? null : <p className="message-eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>
         <p className="multiline-copy">{body}</p>
       </section>
@@ -47,7 +44,6 @@ function Intro(): React.JSX.Element {
   return (
     <main className="participant-intro">
       <section className="intro-card">
-        <p className="message-eyebrow">{UI_COPY.footer.scenario}</p>
         <h1>{UI_COPY.intro.title}</h1>
         <p className="intro-body multiline-copy">{UI_COPY.intro.body}</p>
         <aside className="scenario-note">
@@ -225,7 +221,6 @@ function Summary({ snapshot }: { readonly snapshot: ParticipantSnapshot }): Reac
   return (
     <main className="participant-summary">
       <section className="summary-heading">
-        <p className="message-eyebrow">{UI_COPY.footer.scenario}</p>
         <h1>{UI_COPY.summary.title}</h1>
         <p className="multiline-copy">{UI_COPY.summary.body}</p>
       </section>

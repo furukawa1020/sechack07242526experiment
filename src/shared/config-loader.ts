@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import {
@@ -51,7 +51,26 @@ export async function loadExperimentConfig(
   requestedPath = "config/experiment.json",
   options: LoadExperimentConfigOptions = {},
 ): Promise<LoadedExperimentConfig> {
-  const configPath = resolveSafeConfigPath(requestedPath, options);
+  const resolvedConfigPath = resolveSafeConfigPath(requestedPath, options);
+  const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
+  const allowedDirectory = resolve(options.allowedDirectory ?? resolve(rootDirectory, "config"));
+  const configStat = await lstat(resolvedConfigPath);
+  if (configStat.isSymbolicLink()) {
+    throw new Error("The experiment config must not be a symbolic link or junction.");
+  }
+  const [realAllowedDirectory, configPath] = await Promise.all([
+    realpath(allowedDirectory),
+    realpath(resolvedConfigPath),
+  ]);
+  const realRelativePath = relative(realAllowedDirectory, configPath);
+  if (
+    realRelativePath === ".."
+    || realRelativePath.startsWith("../")
+    || realRelativePath.startsWith("..\\")
+    || isAbsolute(realRelativePath)
+  ) {
+    throw new Error("The experiment config resolved outside the allowed config directory.");
+  }
   const source = await readFile(configPath, "utf8");
   let parsedJson: unknown;
   try {

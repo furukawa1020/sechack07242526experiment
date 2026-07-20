@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import QRCode from "qrcode";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { UI_COPY } from "../../../src/shared/copy.js";
 import { ParticipantView } from "../../../src/client/participant/ParticipantView.js";
 import {
@@ -11,7 +12,10 @@ import {
   type ProcessingLocation,
 } from "../../../src/client/shared/model.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function snapshot(
   processing: ProcessingLocation,
@@ -112,6 +116,25 @@ describe("participant presentation invariants", () => {
       `${UI_COPY.summary.cards[2]}${UI_COPY.summary.conditionLabels.cloud.puffer}`,
       `${UI_COPY.summary.cards[3]}${UI_COPY.summary.conditionLabels.local.label}`,
     ]);
+  });
+
+  it("uses the configured form URL verbatim only for the explicit link and local QR generation", async () => {
+    const formUrl = "https://forms.gle/BeShY7cY5zMjunto9";
+    const qrSpy = vi.spyOn(QRCode, "toDataURL");
+    const locationBeforeRender = window.location.href;
+
+    render(<ParticipantView snapshot={snapshot("local", "label", {
+      phase: "summary",
+      formUrl,
+    })} />);
+
+    const formLink = screen.getByRole("link", { name: UI_COPY.summary.formCta });
+    expect(formLink).toHaveAttribute("href", formUrl);
+    expect(formLink).toHaveAttribute("target", "_blank");
+    expect(formLink).toHaveAttribute("rel", "noreferrer");
+    await waitFor(() => expect(qrSpy).toHaveBeenCalledTimes(1));
+    expect(qrSpy.mock.calls[0]?.[0]).toBe(formUrl);
+    expect(window.location.href).toBe(locationBeforeRender);
   });
 });
 

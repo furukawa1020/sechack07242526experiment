@@ -1,16 +1,14 @@
 import { randomBytes } from "node:crypto";
+import { lstat, mkdir, realpath } from "node:fs/promises";
 import { createServer } from "node:http";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { loadExperimentConfig } from "../shared/config-loader.js";
 import { createApplication } from "./app.js";
-import {
-  MockPufferDevice,
-  SerialPufferDevice,
-  type PufferDevice,
-} from "./devices/index.js";
+import { MockPufferDevice, SerialPufferDevice, type PufferDevice } from "./devices/index.js";
 import { ExperimentLogger } from "./logging/index.js";
+import { acquireExperimentServerLock } from "./runtime-lock.js";
 import { SessionController } from "./sessions/session-controller.js";
 import { WebSocketHub } from "./websocket/websocket-hub.js";
 
@@ -33,7 +31,9 @@ export interface StartServerOptions {
 
 function isInside(parent: string, candidate: string): boolean {
   const pathFromParent = relative(parent, candidate);
-  return pathFromParent === "" || (!pathFromParent.startsWith(`..${sep}`) && pathFromParent !== "..");
+  return (
+    pathFromParent === "" || (!pathFromParent.startsWith(`..${sep}`) && pathFromParent !== "..")
+  );
 }
 
 function createDevice(
@@ -67,7 +67,9 @@ export function inferServerMode(
   return "development";
 }
 
-export async function startServer(options: StartServerOptions = {}): Promise<RunningExperimentServer> {
+export async function startServer(
+  options: StartServerOptions = {},
+): Promise<RunningExperimentServer> {
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
   const mode = options.mode ?? inferServerMode();
   if (options.serveBuiltAssets === true && mode !== "test") {
@@ -88,120 +90,179 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     process.env.DATA_DIRECTORY ?? config.logging.directory,
   );
   if (!isInside(dataDirectory, configuredLogDirectory)) {
-    throw new Error("The configured logging directory must remain inside the repository data directory.");
-  }
-
-  const operatorToken = config.network.allowLan ? randomBytes(32).toString("base64url") : null;
-  const device = createDevice(config, mode);
-  const logger = new ExperimentLogger({ directory: configuredLogDirectory });
-  const existingSummaries = await logger.listSessionSummaries();
-  const interruptedRuns = existingSummaries.filter((summary) =>
-    summary.result === null && summary.presentationsStarted > 0,
-  ).length;
-  if (interruptedRuns > 0) {
-    console.warn(
-      `${interruptedRuns} interrupted session(s) were found in local logs; `
-      + "they remain non-complete and count as used for order balancing.",
+    throw new Error(
+      "The configured logging directory must remain inside the repository data directory.",
     );
   }
-  const controller = new SessionController({
-    config,
-    configHash: loaded.configHash,
-    appVersion,
-    device,
-    logger,
-  });
-  const application = await createApplication({
-    controller,
-    config,
-    configHash: loaded.configHash,
-    appVersion,
-    mode: options.serveBuiltAssets === true ? "production" : mode,
-    rootDirectory,
-    ...(operatorToken === null ? {} : { operatorToken }),
-  });
-  const httpServer = createServer(application.app);
-  const webSocketHub = new WebSocketHub(httpServer, controller, {
-    ...(operatorToken === null ? {} : { operatorToken }),
-    allowLan: config.network.allowLan,
-  });
-
-  try {
-    await new Promise<void>((resolveListen, rejectListen) => {
-      const onError = (error: Error): void => rejectListen(error);
-      httpServer.once("error", onError);
-      httpServer.listen(config.port, config.bindHost, () => {
-        httpServer.off("error", onError);
-        resolveListen();
-      });
-    });
-  } catch (error) {
-    webSocketHub.close();
-    controller.dispose();
-    httpServer.closeAllConnections();
-    await Promise.race([
-      application.close(),
-      new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
-    ]);
-    throw error;
+  await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
+  await mkdir(configuredLogDirectory, { recursive: true, mode: 0o700 });
+  const [dataStat, logStat, realDataDirectory, realLogDirectory] = await Promise.all([
+    lstat(dataDirectory),
+    lstat(configuredLogDirectory),
+    realpath(dataDirectory),
+    realpath(configuredLogDirectory),
+  ]);
+  if (
+    dataStat.isSymbolicLink() ||
+    logStat.isSymbolicLink() ||
+    !isInside(realDataDirectory, realLogDirectory)
+  ) {
+    throw new Error(
+      "The logging directory must not use a symbolic link or junction outside data/.",
+    );
   }
 
-  let closePromise: Promise<void> | undefined;
-  const closeServer = async (): Promise<void> => {
-    const shutdownErrors: Error[] = [];
-    const httpClosed = new Promise<void>((resolveClose) => {
-      httpServer.close(() => resolveClose());
+  const runtimeLock = await acquireExperimentServerLock(dataDirectory, loaded.configHash);
+  try {
+    if (runtimeLock.recoveredStaleLock) {
+      console.warn(
+        "Recovered a stale experiment server lock. The previous process may have exited abnormally; " +
+          "review the device state and interrupted-session logs before continuing.",
+      );
+    }
+
+    const operatorToken = config.network.allowLan ? randomBytes(32).toString("base64url") : null;
+    const device = createDevice(config, mode);
+    const logger = new ExperimentLogger({ directory: configuredLogDirectory });
+    const existingSummaries = await logger.listSessionSummaries();
+    const interruptedRuns = existingSummaries.filter(
+      (summary) => summary.result === null && summary.presentationsStarted > 0,
+    ).length;
+    if (interruptedRuns > 0) {
+      console.warn(
+        `${interruptedRuns} interrupted session(s) were found in local logs; ` +
+          "they remain non-complete and count as used for order balancing.",
+      );
+    }
+    const controller = new SessionController({
+      config,
+      configHash: loaded.configHash,
+      appVersion,
+      device,
+      logger,
     });
-    webSocketHub.close();
-    httpServer.closeAllConnections();
+    const application = await createApplication({
+      controller,
+      config,
+      configHash: loaded.configHash,
+      appVersion,
+      mode: options.serveBuiltAssets === true ? "production" : mode,
+      rootDirectory,
+      ...(operatorToken === null ? {} : { operatorToken }),
+    });
+    const httpServer = createServer(application.app);
+    const webSocketHub = new WebSocketHub(httpServer, controller, {
+      ...(operatorToken === null ? {} : { operatorToken }),
+      allowLan: config.network.allowLan,
+    });
+
     try {
-      await controller.shutdown();
+      await new Promise<void>((resolveListen, rejectListen) => {
+        const onError = (error: Error): void => rejectListen(error);
+        httpServer.once("error", onError);
+        httpServer.listen(config.port, config.bindHost, () => {
+          httpServer.off("error", onError);
+          resolveListen();
+        });
+      });
     } catch (error) {
-      shutdownErrors.push(error instanceof Error ? error : new Error("Session shutdown failed."));
-    } finally {
+      webSocketHub.close();
       controller.dispose();
-    }
-    // Always perform the adapter's independent STOP/DEFLATE/port-close path,
-    // even if the session-level safety path failed.
-    try {
-      await device.disconnect();
-    } catch (error) {
-      shutdownErrors.push(error instanceof Error ? error : new Error("Device disconnect failed."));
-    }
-    try {
+      httpServer.closeAllConnections();
       await Promise.race([
         application.close(),
         new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
       ]);
-    } catch (error) {
-      shutdownErrors.push(error instanceof Error ? error : new Error("Application close failed."));
+      throw error;
     }
+
+    let closePromise: Promise<void> | undefined;
+    const closeServer = async (): Promise<void> => {
+      const shutdownErrors: Error[] = [];
+      const httpClosed = new Promise<void>((resolveClose) => {
+        httpServer.close(() => resolveClose());
+      });
+      webSocketHub.close();
+      httpServer.closeAllConnections();
+      try {
+        await controller.shutdown();
+      } catch (error) {
+        shutdownErrors.push(error instanceof Error ? error : new Error("Session shutdown failed."));
+      } finally {
+        controller.dispose();
+      }
+      // Always perform the adapter's independent STOP/DEFLATE/port-close path,
+      // even if the session-level safety path failed.
+      try {
+        await device.disconnect();
+      } catch (error) {
+        shutdownErrors.push(
+          error instanceof Error ? error : new Error("Device disconnect failed."),
+        );
+      }
+      try {
+        await Promise.race([
+          application.close(),
+          new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
+        ]);
+      } catch (error) {
+        shutdownErrors.push(
+          error instanceof Error ? error : new Error("Application close failed."),
+        );
+      }
+      try {
+        await Promise.race([
+          httpClosed,
+          new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
+        ]);
+      } catch (error) {
+        shutdownErrors.push(error instanceof Error ? error : new Error("HTTP close failed."));
+      }
+      try {
+        await runtimeLock.release();
+      } catch (error) {
+        shutdownErrors.push(
+          error instanceof Error ? error : new Error("Runtime lock release failed."),
+        );
+      }
+      if (shutdownErrors.length > 0) {
+        throw new AggregateError(
+          shutdownErrors,
+          "Experiment server shutdown did not complete cleanly.",
+        );
+      }
+    };
+    return {
+      host: config.bindHost,
+      port: config.port,
+      url: `http://${config.bindHost}:${config.port}`,
+      operatorToken,
+      shutdownDeadlineMs: Math.max(
+        20_000,
+        config.timingMs.deflateRamp * 2 + config.device.ackTimeout * 6 + 10_000,
+      ),
+      close(): Promise<void> {
+        closePromise ??= closeServer();
+        return closePromise;
+      },
+    };
+  } catch (startupError) {
     try {
-      await Promise.race([
-        httpClosed,
-        new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
-      ]);
-    } catch (error) {
-      shutdownErrors.push(error instanceof Error ? error : new Error("HTTP close failed."));
+      await runtimeLock.release();
+    } catch (releaseError) {
+      throw new AggregateError(
+        [
+          startupError instanceof Error
+            ? startupError
+            : new Error("Experiment server startup failed."),
+          releaseError instanceof Error ? releaseError : new Error("Runtime lock release failed."),
+        ],
+        "Experiment server startup failed and its runtime lock could not be released.",
+        { cause: releaseError },
+      );
     }
-    if (shutdownErrors.length > 0) {
-      throw new AggregateError(shutdownErrors, "Experiment server shutdown did not complete cleanly.");
-    }
-  };
-  return {
-    host: config.bindHost,
-    port: config.port,
-    url: `http://${config.bindHost}:${config.port}`,
-    operatorToken,
-    shutdownDeadlineMs: Math.max(
-      20_000,
-      config.timingMs.deflateRamp * 2 + config.device.ackTimeout * 6 + 10_000,
-    ),
-    close(): Promise<void> {
-      closePromise ??= closeServer();
-      return closePromise;
-    },
-  };
+    throw startupError;
+  }
 }
 
 const entryPath = process.argv[1];
@@ -251,12 +312,16 @@ if (entryPath !== undefined && pathToFileURL(resolve(entryPath)).href === import
         shutdown(1);
       });
       process.once("unhandledRejection", (reason: unknown) => {
-        console.error(`Unhandled server rejection: ${reason instanceof Error ? reason.message : "unknown error"}`);
+        console.error(
+          `Unhandled server rejection: ${reason instanceof Error ? reason.message : "unknown error"}`,
+        );
         shutdown(1);
       });
     })
     .catch((error: unknown) => {
-      console.error(error instanceof Error ? error.message : "Failed to start the experiment server.");
+      console.error(
+        error instanceof Error ? error.message : "Failed to start the experiment server.",
+      );
       process.exitCode = 1;
     });
 }

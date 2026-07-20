@@ -31,7 +31,7 @@
     "ackTimeout": 1000,
     "allowMockInProduction": false
   },
-  "formUrl": "",
+  "formUrl": "https://forms.gle/BeShY7cY5zMjunto9",
   "logging": {
     "directory": "./data/sessions",
     "includeAbortedInOrderBalancing": true

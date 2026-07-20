@@ -6,6 +6,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   writeFile,
@@ -98,10 +99,12 @@ export function parseCreateReleaseArguments(args: readonly string[]): CreateRele
 
 function isInside(parent: string, candidate: string): boolean {
   const pathFromParent = relative(parent, candidate);
-  return pathFromParent !== ""
-    && pathFromParent !== ".."
-    && !pathFromParent.startsWith(`..${sep}`)
-    && !isAbsolute(pathFromParent);
+  return (
+    pathFromParent !== "" &&
+    pathFromParent !== ".." &&
+    !pathFromParent.startsWith(`..${sep}`) &&
+    !isAbsolute(pathFromParent)
+  );
 }
 
 async function copyDirectoryWithoutMaps(source: string, destination: string): Promise<void> {
@@ -111,7 +114,8 @@ async function copyDirectoryWithoutMaps(source: string, destination: string): Pr
     if (entry.name.endsWith(".map")) continue;
     const sourcePath = resolve(source, entry.name);
     const destinationPath = resolve(destination, entry.name);
-    if (entry.isSymbolicLink()) throw new Error(`Build output contains a symbolic link: ${sourcePath}`);
+    if (entry.isSymbolicLink())
+      throw new Error(`Build output contains a symbolic link: ${sourcePath}`);
     if (entry.isDirectory()) {
       await copyDirectoryWithoutMaps(sourcePath, destinationPath);
       continue;
@@ -129,11 +133,16 @@ async function requireRegularFile(path: string): Promise<void> {
 }
 
 function compactTimestamp(date = new Date()): string {
-  return date.toISOString().replace(/[-:]/gu, "").replace(/\.\d{3}Z$/u, "Z");
+  return date
+    .toISOString()
+    .replace(/[-:]/gu, "")
+    .replace(/\.\d{3}Z$/u, "Z");
 }
 
 async function runtimePackageJson(rootDirectory: string): Promise<string> {
-  const parsed: unknown = JSON.parse(await readFile(resolve(rootDirectory, "package.json"), "utf8"));
+  const parsed: unknown = JSON.parse(
+    await readFile(resolve(rootDirectory, "package.json"), "utf8"),
+  );
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("package.json has an invalid structure.");
   }
@@ -155,12 +164,12 @@ const WINDOWS_LAUNCHERS = Object.freeze({
   "START_PRODUCTION.cmd": [
     "@echo off",
     "setlocal",
-    "cd /d \"%~dp0\"",
-    "set \"NODE_ENV=production\"",
-    "set \"NODE_OPTIONS=\"",
-    "set \"NODE_PATH=\"",
-    "set \"EXPERIMENT_CONFIG_PATH=config\\experiment.json\"",
-    "set \"DATA_DIRECTORY=data\\sessions\"",
+    'cd /d "%~dp0"',
+    'set "NODE_ENV=production"',
+    'set "NODE_OPTIONS="',
+    'set "NODE_PATH="',
+    'set "EXPERIMENT_CONFIG_PATH=config\\experiment.json"',
+    'set "DATA_DIRECTORY=data\\sessions"',
     "node dist-server\\verify-release.js",
     "if errorlevel 1 exit /b 1",
     "node dist-server\\preflight.js --config config\\experiment.json",
@@ -170,41 +179,57 @@ const WINDOWS_LAUNCHERS = Object.freeze({
   "CHECK_HEALTH.cmd": [
     "@echo off",
     "setlocal",
-    "cd /d \"%~dp0\"",
+    'cd /d "%~dp0"',
     "node dist-server\\healthcheck.js --config config\\experiment.json",
   ],
   "VERIFY_RELEASE.cmd": [
     "@echo off",
     "setlocal",
-    "cd /d \"%~dp0\"",
+    'cd /d "%~dp0"',
     "node dist-server\\verify-release.js",
   ],
 });
 
 async function installProductionDependencies(directory: string): Promise<void> {
-  const command = process.platform === "win32" ? "npm.cmd" : "npm";
   await new Promise<void>((resolveInstall, rejectInstall) => {
-    const child = spawn(command, ["ci", "--omit=dev", "--no-audit", "--no-fund"], {
-      cwd: directory,
-      env: {
-        ...process.env,
-        NODE_ENV: "production",
-        npm_config_audit: "false",
-        npm_config_fund: "false",
-        npm_config_update_notifier: "false",
-      },
-      shell: process.platform === "win32",
-      stdio: "inherit",
-    });
+    const npmArguments = ["ci", "--omit=dev", "--no-audit", "--no-fund"];
+    const child =
+      process.platform === "win32"
+        ? spawn("npm.cmd ci --omit=dev --no-audit --no-fund", [], {
+            cwd: directory,
+            env: {
+              ...process.env,
+              NODE_ENV: "production",
+              npm_config_audit: "false",
+              npm_config_fund: "false",
+              npm_config_update_notifier: "false",
+            },
+            shell: true,
+            stdio: "inherit",
+          })
+        : spawn("npm", npmArguments, {
+            cwd: directory,
+            env: {
+              ...process.env,
+              NODE_ENV: "production",
+              npm_config_audit: "false",
+              npm_config_fund: "false",
+              npm_config_update_notifier: "false",
+            },
+            shell: false,
+            stdio: "inherit",
+          });
     child.once("error", rejectInstall);
     child.once("exit", (code, signal) => {
       if (code === 0) {
         resolveInstall();
         return;
       }
-      rejectInstall(new Error(
-        `Production dependency installation failed (${signal === null ? `exit ${String(code)}` : `signal ${signal}`}).`,
-      ));
+      rejectInstall(
+        new Error(
+          `Production dependency installation failed (${signal === null ? `exit ${String(code)}` : `signal ${signal}`}).`,
+        ),
+      );
     });
   });
 }
@@ -221,20 +246,27 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   });
   const failures = report.checks.filter((check) => check.status === "fail");
   if (failures.length > 0) {
-    throw new Error(`Production preflight failed: ${failures.map((check) => check.name).join(", ")}`);
+    throw new Error(
+      `Production preflight failed: ${failures.map((check) => check.name).join(", ")}`,
+    );
   }
 
-  const packageSource = JSON.parse(await readFile(resolve(rootDirectory, "package.json"), "utf8")) as unknown;
+  const packageSource = JSON.parse(
+    await readFile(resolve(rootDirectory, "package.json"), "utf8"),
+  ) as unknown;
   if (
-    packageSource === null
-    || typeof packageSource !== "object"
-    || typeof (packageSource as Record<string, unknown>).version !== "string"
+    packageSource === null ||
+    typeof packageSource !== "object" ||
+    typeof (packageSource as Record<string, unknown>).version !== "string"
   ) {
     throw new Error("package.json must contain a version.");
   }
   const appVersion = (packageSource as Record<string, unknown>).version as string;
   const defaultName = `sechack-experiment-${appVersion}-${report.configHash.slice(0, 12)}-${compactTimestamp()}`;
-  const outputDirectory = resolve(rootDirectory, options.outputPath ?? resolve("release", defaultName));
+  const outputDirectory = resolve(
+    rootDirectory,
+    options.outputPath ?? resolve("release", defaultName),
+  );
   if (!isInside(releaseRoot, outputDirectory)) {
     throw new Error("Release output must be a child directory of release/.");
   }
@@ -249,13 +281,32 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   for (const path of requiredBuildFiles) await requireRegularFile(path);
 
   await mkdir(releaseRoot, { recursive: true });
+  const releaseRootStat = await lstat(releaseRoot);
+  const [realRootDirectory, realReleaseRoot] = await Promise.all([
+    realpath(rootDirectory),
+    realpath(releaseRoot),
+  ]);
+  if (releaseRootStat.isSymbolicLink() || !isInside(realRootDirectory, realReleaseRoot)) {
+    throw new Error("release/ must be a normal directory inside the repository root.");
+  }
   const stagingDirectory = resolve(releaseRoot, `.staging-${randomUUID()}`);
   await mkdir(stagingDirectory, { recursive: false });
   try {
-    await copyDirectoryWithoutMaps(resolve(rootDirectory, "dist"), resolve(stagingDirectory, "dist"));
+    await copyDirectoryWithoutMaps(
+      resolve(rootDirectory, "dist"),
+      resolve(stagingDirectory, "dist"),
+    );
     await mkdir(resolve(stagingDirectory, "dist-server"));
-    for (const name of ["index.js", "preflight.js", "healthcheck.js", "verify-release.js"] as const) {
-      await copyFile(resolve(rootDirectory, "dist-server", name), resolve(stagingDirectory, "dist-server", name));
+    for (const name of [
+      "index.js",
+      "preflight.js",
+      "healthcheck.js",
+      "verify-release.js",
+    ] as const) {
+      await copyFile(
+        resolve(rootDirectory, "dist-server", name),
+        resolve(stagingDirectory, "dist-server", name),
+      );
     }
     await mkdir(resolve(stagingDirectory, "config"));
     await copyFile(report.configPath, resolve(stagingDirectory, "config", "experiment.json"));
@@ -268,12 +319,23 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       "PROTOCOL_CHANGELOG.md",
       "TEST_REPORT.md",
       "RELEASE_CHECKLIST.md",
+      "FORM_AUDIT.md",
     ] as const) {
       await copyFile(resolve(rootDirectory, "docs", name), resolve(stagingDirectory, "docs", name));
     }
-    await copyFile(resolve(rootDirectory, "docs", "DEPLOYMENT.md"), resolve(stagingDirectory, "DEPLOYMENT.md"));
-    await writeFile(resolve(stagingDirectory, "package.json"), await runtimePackageJson(rootDirectory), "utf8");
-    await copyFile(resolve(rootDirectory, "package-lock.json"), resolve(stagingDirectory, "package-lock.json"));
+    await copyFile(
+      resolve(rootDirectory, "docs", "DEPLOYMENT.md"),
+      resolve(stagingDirectory, "DEPLOYMENT.md"),
+    );
+    await writeFile(
+      resolve(stagingDirectory, "package.json"),
+      await runtimePackageJson(rootDirectory),
+      "utf8",
+    );
+    await copyFile(
+      resolve(rootDirectory, "package-lock.json"),
+      resolve(stagingDirectory, "package-lock.json"),
+    );
     await writeFile(
       resolve(stagingDirectory, ".npmrc"),
       "audit=false\nfund=false\nupdate-notifier=false\n",
@@ -303,7 +365,10 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     }
     await rename(stagingDirectory, outputDirectory);
   } catch (error) {
-    if (isInside(releaseRoot, stagingDirectory) && relative(releaseRoot, stagingDirectory).startsWith(".staging-")) {
+    if (
+      isInside(releaseRoot, stagingDirectory) &&
+      relative(releaseRoot, stagingDirectory).startsWith(".staging-")
+    ) {
       await rm(stagingDirectory, { recursive: true, force: true });
     }
     throw error;
@@ -332,7 +397,9 @@ export async function runCreateRelease(
     });
     return 0;
   } catch (error) {
-    writeLine(`Release creation failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    writeLine(
+      `Release creation failed: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
     return 1;
   }
 }

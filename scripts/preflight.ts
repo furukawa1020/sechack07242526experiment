@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, statfs, unlink } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, realpath, statfs, unlink } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -284,6 +284,13 @@ export async function collectPreflightReport(
       const logDirectoryStat = await lstat(resolvedLog.path);
       if (dataRootStat.isSymbolicLink() || logDirectoryStat.isSymbolicLink()) {
         throw new Error("data/またはログ保存先がシンボリックリンク／junctionです。");
+      }
+      const [realDataRoot, realLogDirectory] = await Promise.all([
+        realpath(dataRoot),
+        realpath(resolvedLog.path),
+      ]);
+      if (!isInside(realDataRoot, realLogDirectory)) {
+        throw new Error("ログ保存先が実体パス上でdata/の外へ出ています。");
       }
       const handle = await open(probePath, "wx", 0o600);
       try {

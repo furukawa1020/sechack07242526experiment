@@ -152,6 +152,7 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
     "PROTOCOL_CHANGELOG",
     "TEST_REPORT",
     "RELEASE_CHECKLIST",
+    "FORM_AUDIT",
   ] as const) {
     await writeRelative(root, `docs/${name}.md`, `# ${name}\n`);
   }
@@ -366,6 +367,7 @@ describe("release creation", () => {
         "dist-server/verify-release.js",
         "docs/DEVICE_PROTOCOL.md",
         "docs/EXPERIMENT_SPEC.md",
+        "docs/FORM_AUDIT.md",
         "docs/PROTOCOL_CHANGELOG.md",
         "docs/RELEASE_CHECKLIST.md",
         "docs/RUNBOOK.md",

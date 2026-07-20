@@ -97,6 +97,10 @@ describe("experiment config schema", () => {
       ...validConfig(),
       formUrl: "https://docs.google.com/forms/d/e/example/viewform",
     }).formUrl).toContain("docs.google.com/forms/");
+    expect(parseExperimentConfig({
+      ...validConfig(),
+      formUrl: "https://forms.gle/BeShY7cY5zMjunto9",
+    }).formUrl).toBe("https://forms.gle/BeShY7cY5zMjunto9");
     expect(() => parseExperimentConfig({ ...validConfig(), researchIdPattern: "[" }))
       .toThrow(/regular expression/iu);
   });

@@ -3,7 +3,7 @@
   "protocolVersion": "R8-010-2x2-mock-v1",
   "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
   "bindHost": "127.0.0.1",
-  "port": 42817,
+  "port": 4173,
   "researchIdPattern": "^SH26-[0-9]{3}$",
   "orders": ["ABDC", "BCAD", "CDBA", "DACB"],
   "fixedState": {
@@ -21,12 +21,12 @@
   },
   "device": {
     "mode": "serial",
-    "serialPath": "COM999",
+    "serialPath": "COM0",
     "baudRate": 115200,
     "ackTimeout": 1000,
     "allowMockInProduction": false
   },
-  "formUrl": "https://docs.google.com/forms/d/e/DEPLOYMENT_SMOKE_ONLY/viewform",
+  "formUrl": "https://forms.gle/BeShY7cY5zMjunto9",
   "logging": {
     "directory": "./data/sessions",
     "includeAbortedInOrderBalancing": true
