@@ -110,6 +110,9 @@ test("4つの固定提示順をMockDeviceで完走し、参加者へ内部コー
 
     const summary = asRecord(await (await request.get(`/api/display/${encodeURIComponent(String(bodyTokenFromUrl(displayUrl)))}`)).json());
     const publicSnapshot = asRecord(summary.snapshot);
+    expect(publicSnapshot.fixedState).toBeNull();
+    expect(JSON.stringify(publicSnapshot)).not.toContain("pufferLevel");
+    expect(publicSnapshot.formUrl).toBe("https://docs.google.com/forms/d/e/TEST_FORM_ID/viewform");
     const presentations = publicSnapshot.summary as JsonRecord[];
     expect(presentations).toHaveLength(4);
     expect(
@@ -199,4 +202,22 @@ test("緊急停止はセッションを再開不能な中断状態へ移す", as
 
   const resume = await request.post(`/api/sessions/${encodeURIComponent(created.sessionId)}/resume`);
   expect(resume.status()).toBe(409);
+});
+
+test("スタッフ画面の緊急ショートカットは進行中でも直ちに停止する", async ({ browser, page, request }) => {
+  await ensureDeviceReady(request);
+  const created = await createSession(request, "SH26-894", "CDBA");
+  const displayContext = await browser.newContext();
+  const display = await displayContext.newPage();
+  await openReadyDisplay(display, created.displayUrl, request, created.sessionId);
+  await page.goto("/operator");
+  await expect(page.getByRole("button", { name: /緊急停止/u })).toBeVisible();
+  await action(request, created.sessionId, "prepare");
+  await action(request, created.sessionId, "start");
+
+  await page.keyboard.press("Control+Alt+Shift+S");
+  await expect.poll(async () => (await operatorSnapshot(request, created.sessionId)).phase).toBe("aborted");
+  expect((await operatorSnapshot(request, created.sessionId)).errorCode).toBe("EMERGENCY_STOP");
+  await expect(page.getByText("緊急停止を送信しました。装置の物理状態を確認してください。")).toBeVisible();
+  await displayContext.close();
 });

@@ -9,8 +9,13 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "artifacts/coverage",
-      include: ["src/shared/**/*.ts", "src/server/devices/**/*.ts", "src/server/logging/**/*.ts"],
-      exclude: ["**/*.d.ts", "src/server/devices/serial-puffer-device.ts"],
+      include: [
+        "src/shared/**/*.ts",
+        "src/server/devices/**/*.ts",
+        "src/server/logging/**/*.ts",
+        "src/server/sessions/**/*.ts",
+      ],
+      exclude: ["**/*.d.ts"],
       thresholds: {
         lines: 90,
         functions: 90,

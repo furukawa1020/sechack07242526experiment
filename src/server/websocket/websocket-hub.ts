@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
+import { performance } from "node:perf_hooks";
 import type { Duplex } from "node:stream";
 
 import WebSocket, { WebSocketServer } from "ws";
@@ -92,6 +93,7 @@ export class WebSocketHub {
   private readonly heartbeatTimer: ReturnType<typeof setInterval>;
   private readonly unsubscribeController: () => void;
   private readonly upgradeListener: (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
+  private closing = false;
 
   public constructor(
     private readonly httpServer: HttpServer,
@@ -108,7 +110,10 @@ export class WebSocketHub {
         rejectUpgrade(socket, 400);
         return;
       }
-      if (url.pathname !== "/ws") return;
+      if (url.pathname !== "/ws") {
+        rejectUpgrade(socket, 404);
+        return;
+      }
       if (!originMatchesHost(request) || !websocketHostAllowed(request, options.allowLan ?? false)) {
         rejectUpgrade(socket, 403);
         return;
@@ -125,6 +130,7 @@ export class WebSocketHub {
   }
 
   public close(): void {
+    this.closing = true;
     clearInterval(this.heartbeatTimer);
     this.unsubscribeController();
     this.httpServer.off("upgrade", this.upgradeListener);
@@ -155,7 +161,7 @@ export class WebSocketHub {
         displayToken,
         sessionId,
         ready: false,
-        lastHeartbeatAt: Date.now(),
+        lastHeartbeatAt: performance.now(),
       };
       safeSend(socket, { type: "session.snapshot", payload: this.controller.getPublicSnapshot(displayToken) });
     } else if (url.searchParams.get("role") === "operator") {
@@ -166,7 +172,7 @@ export class WebSocketHub {
         socket.close(1008, "Operator token is required");
         return;
       }
-      client = { id, role: "operator", socket, lastHeartbeatAt: Date.now() };
+      client = { id, role: "operator", socket, lastHeartbeatAt: performance.now() };
       const snapshot = this.controller.getActiveOperatorSnapshot();
       if (snapshot !== null) safeSend(socket, { type: "session.snapshot", payload: snapshot });
     } else {
@@ -206,31 +212,43 @@ export class WebSocketHub {
       return;
     }
 
-    client.lastHeartbeatAt = Date.now();
-    switch (parsed.data.type) {
-      case "display.ready":
-        client.ready = true;
-        this.controller.markDisplayReady(client.displayToken, client.id);
-        break;
-      case "display.heartbeat":
-        this.controller.noteDisplayHeartbeat(client.displayToken, client.id);
-        break;
-      case "display.fullscreenState":
-        // Fullscreen state is deliberately transient and is not participant research data.
-        this.controller.noteDisplayHeartbeat(client.displayToken, client.id);
-        break;
+    client.lastHeartbeatAt = performance.now();
+    try {
+      switch (parsed.data.type) {
+        case "display.ready":
+          this.controller.markDisplayReady(client.displayToken, client.id);
+          client.ready = true;
+          break;
+        case "display.heartbeat":
+          this.controller.noteDisplayHeartbeat(client.displayToken, client.id);
+          break;
+        case "display.fullscreenState":
+          // Fullscreen state is deliberately transient and is not participant research data.
+          this.controller.noteDisplayHeartbeat(client.displayToken, client.id);
+          this.controller.markDisplayFullscreen(client.displayToken, client.id, parsed.data.payload.fullscreen);
+          break;
+      }
+    } catch {
+      client.socket.close(1008, "Display session is unavailable");
     }
   }
 
   private removeClient(client: ConnectedClient): void {
     if (!this.clients.delete(client.id)) return;
+    if (
+      !this.closing
+      && client.role === "operator"
+      && ![...this.clients.values()].some((candidate) => candidate.role === "operator")
+    ) {
+      this.controller.markOperatorDisconnected();
+    }
     if (client.role === "display" && client.ready) {
       this.controller.markDisplayDisconnected(client.displayToken, client.id);
     }
   }
 
   private expireStaleDisplays(): void {
-    const deadline = Date.now() - this.heartbeatTimeoutMs;
+    const deadline = performance.now() - this.heartbeatTimeoutMs;
     for (const client of this.clients.values()) {
       if (client.role === "display" && client.ready && client.lastHeartbeatAt < deadline) {
         client.socket.terminate();
@@ -242,7 +260,7 @@ export class WebSocketHub {
   private broadcastControllerEvent(event: ServerEvent): void {
     for (const client of this.clients.values()) {
       if (event.type === "device.status") {
-        if (client.role === "operator" || event.sessionId === client.sessionId) {
+        if (client.role === "operator") {
           safeSend(client.socket, {
             type: event.type,
             payload:

@@ -15,7 +15,7 @@ import {
 import { useRealtime, useRemainingSeconds, type RealtimeStatus } from "../shared/realtime.js";
 
 const ORDER_OPTIONS: readonly OrderCode[] = ["ABDC", "BCAD", "CDBA", "DACB"];
-const RESEARCH_ID_PATTERN = /^SH26-[0-9]{3}$/u;
+const DEFAULT_RESEARCH_ID_PATTERN = "^SH26-[0-9]{3}$";
 const SESSION_STORAGE_KEY = "sechack.active-session-id";
 
 const PHASE_LABELS: Readonly<Record<ExperimentPhase, string>> = {
@@ -81,6 +81,7 @@ function SetupForm({
   consentConfirmed,
   automaticOrder,
   manualOrder,
+  researchIdPattern,
   busy,
   onResearchId,
   onConsent,
@@ -92,6 +93,7 @@ function SetupForm({
   readonly consentConfirmed: boolean;
   readonly automaticOrder: boolean;
   readonly manualOrder: OrderCode;
+  readonly researchIdPattern: string;
   readonly busy: boolean;
   readonly onResearchId: (value: string) => void;
   readonly onConsent: (value: boolean) => void;
@@ -99,7 +101,7 @@ function SetupForm({
   readonly onManualOrder: (value: OrderCode) => void;
   readonly onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
 }): React.JSX.Element {
-  const validId = RESEARCH_ID_PATTERN.test(researchId);
+  const validId = useMemo(() => new RegExp(researchIdPattern, "u").test(researchId), [researchId, researchIdPattern]);
   return (
     <form className="operator-card setup-form" onSubmit={onSubmit}>
       <div className="card-heading">
@@ -112,15 +114,15 @@ function SetupForm({
         name="researchId"
         value={researchId}
         onChange={(event) => onResearchId(event.target.value.toUpperCase())}
-        placeholder="SH26-001"
-        pattern="SH26-[0-9]{3}"
+        placeholder="研究用ID"
+        pattern={researchIdPattern}
         autoComplete="off"
         spellCheck={false}
         aria-describedby="research-id-hint"
         required
       />
       <p id="research-id-hint" className={researchId.length > 0 && !validId ? "field-hint is-error" : "field-hint"}>
-        形式: SH26-001（氏名やメールアドレスは入力しないでください）
+        設定形式: {researchIdPattern}（氏名やメールアドレスは入力しないでください）
       </p>
 
       <label className="check-row">
@@ -200,10 +202,18 @@ function SessionOverview({
         <StatusItem label="伝え方" value={session.condition === null ? "—" : PRESENTATION_LABELS[session.condition.presentation]} />
         <StatusItem label="残り時間" value={remainingSeconds === null ? "—" : `${remainingSeconds} 秒`} emphasis />
         <StatusItem label="固定スコア" value={`${session.fixedState.score} / 100`} />
+        <StatusItem label="固定ラベル" value={session.fixedState.label} />
+        <StatusItem label="フグ目標レベル" value={session.fixedState.pufferLevel.toFixed(2)} />
         <StatusItem label="参加者画面" value={session.displayConnected ? "接続済み" : "未接続"} />
+        <StatusItem
+          label="Fullscreen API"
+          value={session.displayFullscreen === null ? "未通知" : session.displayFullscreen ? "全画面" : "通常表示"}
+        />
         <StatusItem label="リアルタイム同期" value={connectionLabel(realtimeStatus)} />
         <StatusItem label="装置" value={deviceLabel(session.device)} />
         <StatusItem label="プロトコル" value={session.protocolVersion} />
+        <StatusItem label="設定SHA-256" value={session.configVersion} />
+        <StatusItem label="エラーコード" value={session.errorCode ?? "なし"} />
       </dl>
     </section>
   );
@@ -212,16 +222,22 @@ function SessionOverview({
 function ActionPanel({
   session,
   busy,
+  emergencyPending,
   formComplete,
+  fullscreenConfirmed,
   onFormComplete,
+  onFullscreenConfirmed,
   onAction,
   onEmergency,
   onReset,
 }: {
   readonly session: OperatorSnapshot;
   readonly busy: boolean;
+  readonly emergencyPending: boolean;
   readonly formComplete: boolean;
+  readonly fullscreenConfirmed: boolean;
   readonly onFormComplete: (checked: boolean) => void;
+  readonly onFullscreenConfirmed: (checked: boolean) => void;
   readonly onAction: (action: "prepare" | "start" | "resume" | "abort" | "confirm-form-complete") => void;
   readonly onEmergency: () => void;
   readonly onReset: () => void;
@@ -230,7 +246,8 @@ function ActionPanel({
   const readyForIntro = session.displayConnected
     && session.device.connected
     && session.device.state === "idle"
-    && (session.device.level ?? 0) === 0;
+    && (session.device.level ?? 0) === 0
+    && fullscreenConfirmed;
   return (
     <section className="operator-card action-panel" aria-labelledby="action-title">
       <div className="card-heading">
@@ -249,6 +266,13 @@ function ActionPanel({
       )}
 
       <div className="action-buttons">
+        {session.phase === "error" ? (
+          <div className="operator-banner is-failure" role="alert">
+            <strong>エラーコード: {session.errorCode ?? "UNKNOWN_ERROR"}</strong><br />
+            自動再開しません。装置の物理状態を確認し、異常があれば物理緊急停止を最優先にしてください。
+            安全な収縮を確認した後、「実験を中止」で中断を確定します。
+          </div>
+        ) : null}
         {session.phase === "setup" ? (
           <div className="prerequisite-block">
             <ul aria-label="開始条件">
@@ -257,6 +281,14 @@ function ActionPanel({
               <li data-ready={session.device.state === "idle"}>装置状態: {session.device.state}</li>
               <li data-ready={(session.device.level ?? 0) === 0}>収縮状態: {(session.device.level ?? 0) === 0 ? "確認済み" : "未完了"}</li>
             </ul>
+            <label className="check-row compact-check">
+              <input
+                type="checkbox"
+                checked={fullscreenConfirmed}
+                onChange={(event) => onFullscreenConfirmed(event.target.checked)}
+              />
+              参加者画面をF11またはkioskで全画面表示し、目視確認済み
+            </label>
             <button type="button" className="primary-button" onClick={() => onAction("prepare")} disabled={busy || !readyForIntro}>
               共通導入を表示
             </button>
@@ -299,8 +331,15 @@ function ActionPanel({
         <button type="button" className="abort-button" onClick={() => onAction("abort")} disabled={busy || !canAbort}>
           実験を中止
         </button>
-        <button type="button" className="emergency-button" onClick={onEmergency} disabled={busy || session.phase === "completed"}>
-          <span>緊急停止</span><small>装置を直ちにSTOP</small>
+        <button
+          type="button"
+          className="emergency-button"
+          onClick={onEmergency}
+          disabled={emergencyPending}
+          aria-keyshortcuts="Control+Alt+Shift+S"
+        >
+          <span>{emergencyPending ? "STOP送信中…" : "緊急停止"}</span>
+          <small>装置を直ちにSTOP · Ctrl+Alt+Shift+S</small>
         </button>
       </div>
     </section>
@@ -361,9 +400,22 @@ export function OperatorScreen(): React.JSX.Element {
   const [session, setSession] = useState<OperatorSnapshot | null>(null);
   const [device, setDevice] = useState<DeviceStatus>(EMPTY_DEVICE_STATUS);
   const [formComplete, setFormComplete] = useState(false);
+  const [fullscreenConfirmed, setFullscreenConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [emergencyPending, setEmergencyPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [researchIdPattern, setResearchIdPattern] = useState(DEFAULT_RESEARCH_ID_PATTERN);
+
+  useEffect(() => {
+    let current = true;
+    void experimentApi.getOperatorConfig().then((config) => {
+      if (current) setResearchIdPattern(config.researchIdPattern);
+    }).catch((error: unknown) => {
+      if (current) setFailure(errorMessage(error));
+    });
+    return () => { current = false; };
+  }, []);
 
   useEffect(() => {
     const activeSessionId = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -388,7 +440,10 @@ export function OperatorScreen(): React.JSX.Element {
   const onSocketMessage = useCallback((type: string, payload: unknown): void => {
     if (type === "device.status") {
       const parsed = parseDeviceStatus(payload);
-      if (parsed !== null) setDevice(parsed);
+      if (parsed !== null) {
+        setDevice(parsed);
+        setSession((current) => current === null ? null : { ...current, device: parsed });
+      }
       return;
     }
     if (type.startsWith("session.")) {
@@ -441,9 +496,9 @@ export function OperatorScreen(): React.JSX.Element {
     }
   };
 
-  const emergencyStop = async (): Promise<void> => {
+  const emergencyStop = useCallback(async (): Promise<void> => {
     if (session === null) return;
-    setBusy(true);
+    setEmergencyPending(true);
     setFailure(null);
     try {
       const next = await experimentApi.sessionAction(session.sessionId, "emergency-stop");
@@ -452,15 +507,33 @@ export function OperatorScreen(): React.JSX.Element {
     } catch (error) {
       setFailure(errorMessage(error));
     } finally {
-      setBusy(false);
+      setEmergencyPending(false);
     }
-  };
+  }, [session]);
+
+  useEffect(() => {
+    const onEmergencyShortcut = (event: KeyboardEvent): void => {
+      if (
+        event.ctrlKey
+        && event.altKey
+        && event.shiftKey
+        && event.code === "KeyS"
+        && session !== null
+        && !emergencyPending
+      ) {
+        event.preventDefault();
+        void emergencyStop();
+      }
+    };
+    window.addEventListener("keydown", onEmergencyShortcut);
+    return () => window.removeEventListener("keydown", onEmergencyShortcut);
+  }, [emergencyPending, emergencyStop, session]);
 
   const connectDevice = async (): Promise<void> => {
     setBusy(true);
     setFailure(null);
     try {
-      setDevice(await experimentApi.deviceAction("connect"));
+      setDevice((await experimentApi.deviceAction("connect")).status);
     } catch (error) {
       setFailure(errorMessage(error));
     } finally {
@@ -479,6 +552,7 @@ export function OperatorScreen(): React.JSX.Element {
       setResearchId("");
       setConsentConfirmed(false);
       setFormComplete(false);
+      setFullscreenConfirmed(false);
       setNotice("次の参加者を受け付けられます。");
     } catch (error) {
       setFailure(errorMessage(error));
@@ -509,7 +583,10 @@ export function OperatorScreen(): React.JSX.Element {
     ? session.device
     : device;
   const events = session?.recentEvents ?? [];
-  const operatorClass = useMemo(() => busy ? "operator-app is-busy" : "operator-app", [busy]);
+  const operatorClass = useMemo(
+    () => busy || emergencyPending ? "operator-app is-busy" : "operator-app",
+    [busy, emergencyPending],
+  );
 
   return (
     <div className={operatorClass} data-testid="operator-app" data-surface="operator" aria-busy={busy}>
@@ -537,6 +614,7 @@ export function OperatorScreen(): React.JSX.Element {
               consentConfirmed={consentConfirmed}
               automaticOrder={automaticOrder}
               manualOrder={manualOrder}
+              researchIdPattern={researchIdPattern}
               busy={busy}
               onResearchId={setResearchId}
               onConsent={setConsentConfirmed}
@@ -550,8 +628,11 @@ export function OperatorScreen(): React.JSX.Element {
               <ActionPanel
                 session={session}
                 busy={busy}
+                emergencyPending={emergencyPending}
                 formComplete={formComplete}
+                fullscreenConfirmed={fullscreenConfirmed}
                 onFormComplete={setFormComplete}
+                onFullscreenConfirmed={setFullscreenConfirmed}
                 onAction={(action) => { void sessionAction(action); }}
                 onEmergency={() => { void emergencyStop(); }}
                 onReset={() => { void resetForNext(); }}

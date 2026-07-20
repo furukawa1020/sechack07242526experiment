@@ -105,7 +105,7 @@ describe("MockPufferDevice", () => {
   it("issues STOP before disconnecting", async () => {
     const device = new MockPufferDevice({ timingMode: "fast", initialConnected: true });
     await device.disconnect();
-    expect(device.commandHistory.at(-1)?.command).toBe("stop");
+    expect(device.commandHistory.slice(-2).map((entry) => entry.command)).toEqual(["stop", "deflate"]);
     await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
     await expect(device.disconnect()).resolves.toBeUndefined();
   });

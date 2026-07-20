@@ -18,6 +18,7 @@ interface TestEvent {
   readonly timestamp: string;
   readonly action: DeviceAction | "initial-status";
   readonly result: string;
+  readonly requestId: string | null;
 }
 
 function nowLabel(): string {
@@ -27,6 +28,7 @@ function nowLabel(): string {
 export function DeviceTestScreen(): React.JSX.Element {
   const [device, setDevice] = useState<DeviceStatus>(EMPTY_DEVICE_STATUS);
   const [pending, setPending] = useState<DeviceAction | null>(null);
+  const [stopPending, setStopPending] = useState(false);
   const [events, setEvents] = useState<readonly TestEvent[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -35,7 +37,7 @@ export function DeviceTestScreen(): React.JSX.Element {
     void experimentApi.getDeviceStatus().then((status) => {
       if (!current) return;
       setDevice(status);
-      setEvents([{ timestamp: nowLabel(), action: "initial-status", result: status.state }]);
+      setEvents([{ timestamp: nowLabel(), action: "initial-status", result: status.state, requestId: null }]);
     }).catch((error: unknown) => {
       if (current) setFailure(errorMessage(error));
     });
@@ -46,16 +48,23 @@ export function DeviceTestScreen(): React.JSX.Element {
     setPending(action);
     setFailure(null);
     try {
-      const status = await experimentApi.deviceAction(action);
-      setDevice(status);
+      const result = await experimentApi.deviceAction(action);
+      setDevice(result.status);
       setEvents((current) => [
         ...current,
-        { timestamp: nowLabel(), action, result: status.fault ?? status.state },
+        {
+          timestamp: nowLabel(),
+          action,
+          result: result.ack === null
+            ? result.status.fault ?? result.status.state
+            : `${result.ack.ok ? "ACK" : "NACK"} / ${result.ack.state} / level ${result.ack.level.toFixed(2)}${result.ack.errorCode === null ? "" : ` / ${result.ack.errorCode}`}`,
+          requestId: result.ack?.requestId ?? null,
+        },
       ].slice(-30));
     } catch (error) {
       const message = errorMessage(error);
       setFailure(message);
-      setEvents((current) => [...current, { timestamp: nowLabel(), action, result: message }].slice(-30));
+      setEvents((current) => [...current, { timestamp: nowLabel(), action, result: message, requestId: null }].slice(-30));
     } finally {
       setPending(null);
     }
@@ -64,8 +73,42 @@ export function DeviceTestScreen(): React.JSX.Element {
   const normalActions: readonly DeviceAction[] = ["connect", "ping", "status", "inflate", "deflate", "disconnect"];
   const deviceIsBusy = pending !== null;
 
+  const performStop = async (): Promise<void> => {
+    setStopPending(true);
+    setFailure(null);
+    try {
+      const result = await experimentApi.deviceAction("stop");
+      setDevice(result.status);
+      setEvents((current) => [
+        ...current,
+        {
+          timestamp: nowLabel(),
+          action: "stop" as const,
+          result: result.ack === null
+            ? result.status.fault ?? result.status.state
+            : `${result.ack.ok ? "ACK" : "NACK"} / ${result.ack.state} / level ${result.ack.level.toFixed(2)}${result.ack.errorCode === null ? "" : ` / ${result.ack.errorCode}`}`,
+          requestId: result.ack?.requestId ?? null,
+        },
+      ].slice(-30));
+    } catch (error) {
+      const message = errorMessage(error);
+      setFailure(message);
+      setEvents((current) => [
+        ...current,
+        { timestamp: nowLabel(), action: "stop" as const, result: message, requestId: null },
+      ].slice(-30));
+    } finally {
+      setStopPending(false);
+    }
+  };
+
   return (
-    <div className="device-test-app" data-testid="device-test-app" data-surface="device-test" aria-busy={deviceIsBusy}>
+    <div
+      className="device-test-app"
+      data-testid="device-test-app"
+      data-surface="device-test"
+      aria-busy={deviceIsBusy || stopPending}
+    >
       <header className="device-test-header">
         <div>
           <p className="operator-kicker">PUFFER DEVICE · ISOLATED TEST</p>
@@ -113,10 +156,10 @@ export function DeviceTestScreen(): React.JSX.Element {
           <button
             type="button"
             className="emergency-button device-stop-button"
-            onClick={() => { void perform("stop"); }}
-            disabled={deviceIsBusy}
+            onClick={() => { void performStop(); }}
+            disabled={stopPending}
           >
-            <span>STOP</span><small>最優先で停止命令を送信</small>
+            <span>{stopPending ? "STOP送信中…" : "STOP"}</span><small>通常コマンドを待たず最優先で送信</small>
           </button>
         </section>
 
@@ -129,6 +172,7 @@ export function DeviceTestScreen(): React.JSX.Element {
                   <time>{event.timestamp}</time>
                   <strong>{event.action === "initial-status" ? "初期状態" : ACTION_LABELS[event.action]}</strong>
                   <span>{event.result}</span>
+                  {event.requestId === null ? null : <code title="requestId">{event.requestId}</code>}
                 </li>
               ))}
             </ol>

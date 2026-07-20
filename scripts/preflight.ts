@@ -1,0 +1,395 @@
+import { statfs } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { loadExperimentConfig } from "../src/shared/config-loader.js";
+import {
+  formatConfigError,
+  type ExperimentConfig,
+} from "../src/shared/schemas.js";
+
+const DEFAULT_CONFIG_PATH = "config/experiment.json";
+
+export interface PreflightArguments {
+  readonly allowMock: boolean;
+  readonly help: boolean;
+  readonly configPath?: string;
+}
+
+export interface PreflightEnvironment {
+  readonly EXPERIMENT_CONFIG_PATH?: string;
+  readonly DATA_DIRECTORY?: string;
+  readonly [name: string]: string | undefined;
+}
+
+export interface GateCheck {
+  readonly name: string;
+  readonly status: "pass" | "warning" | "fail";
+  readonly detail: string;
+}
+
+export interface PreflightReport {
+  readonly mode: "production" | "development-mock";
+  readonly configPath: string;
+  readonly configHash: string;
+  readonly protocolVersion: string;
+  readonly deviceMode: ExperimentConfig["device"]["mode"];
+  readonly serialPath: string;
+  readonly baudRate: number;
+  readonly ackTimeout: number;
+  readonly allowMockInProduction: boolean;
+  readonly fixedScore: number;
+  readonly fixedLabel: string;
+  readonly pufferLevel: number;
+  readonly formUrl: string;
+  readonly bindHost: string;
+  readonly port: number;
+  readonly allowLan: boolean;
+  readonly allowExternalRuntimeRequests: boolean;
+  readonly logPath: string;
+  readonly availableBytes: bigint;
+  readonly checks: readonly GateCheck[];
+}
+
+export interface CollectPreflightOptions {
+  readonly rootDirectory?: string;
+  readonly configPath?: string;
+  readonly dataDirectoryOverride?: string;
+  readonly allowMock?: boolean;
+}
+
+export interface RunPreflightOptions {
+  readonly args?: readonly string[];
+  readonly rootDirectory?: string;
+  readonly environment?: PreflightEnvironment;
+  readonly writeLine?: (line: string) => void;
+}
+
+function usage(): readonly string[] {
+  return Object.freeze([
+    "Usage: npm run preflight -- [--config <config path>] [--allow-mock]",
+    "",
+    "Options:",
+    "  --config <path>  config/ 内の設定ファイルを指定します。",
+    "  --allow-mock     開発用Mock確認として実行します（本番承認には使えません）。",
+    "  --help           このヘルプを表示します。",
+  ]);
+}
+
+export function parsePreflightArguments(args: readonly string[]): PreflightArguments {
+  let allowMock = false;
+  let help = false;
+  let configPath: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--allow-mock") {
+      allowMock = true;
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      help = true;
+      continue;
+    }
+    if (argument === "--config") {
+      if (configPath !== undefined) {
+        throw new Error("--config may only be specified once.");
+      }
+      const value = args[index + 1];
+      if (value === undefined || value.length === 0 || value.startsWith("--")) {
+        throw new Error("--config requires a path.");
+      }
+      configPath = value;
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--config=")) {
+      if (configPath !== undefined) {
+        throw new Error("--config may only be specified once.");
+      }
+      const value = argument.slice("--config=".length);
+      if (value.length === 0) {
+        throw new Error("--config requires a path.");
+      }
+      configPath = value;
+      continue;
+    }
+    throw new Error(`Unknown option: ${argument ?? "(missing)"}`);
+  }
+
+  return Object.freeze({
+    allowMock,
+    help,
+    ...(configPath === undefined ? {} : { configPath }),
+  });
+}
+
+export function isApprovedGoogleFormsUrl(value: string): boolean {
+  if (value.length === 0) return false;
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== "https:"
+      || parsed.username !== ""
+      || parsed.password !== ""
+    ) {
+      return false;
+    }
+    if (parsed.hostname === "forms.gle") {
+      return parsed.pathname !== "/" && parsed.pathname.length > 1;
+    }
+    return parsed.hostname === "docs.google.com"
+      && parsed.pathname.startsWith("/forms/")
+      && parsed.pathname.length > "/forms/".length;
+  } catch {
+    return false;
+  }
+}
+
+export function isWindowsComPath(value: string): boolean {
+  return /^(?:COM[1-9][0-9]*|\\\\\.\\COM[1-9][0-9]*)$/iu.test(value.trim());
+}
+
+export function evaluatePreflightGates(
+  config: ExperimentConfig,
+  allowMock: boolean,
+): readonly GateCheck[] {
+  const checks: GateCheck[] = [];
+  const production = !allowMock;
+
+  if (production) {
+    checks.push({
+      name: "device.mode",
+      status: config.device.mode === "serial" ? "pass" : "fail",
+      detail: config.device.mode === "serial"
+        ? "Serial実機モードです。"
+        : "本番ではSerial実機モードが必須です。",
+    });
+  } else {
+    checks.push({
+      name: "device.mode",
+      status: config.device.mode === "mock" ? "warning" : "pass",
+      detail: config.device.mode === "mock"
+        ? "開発用Mock確認です。本番承認には使用できません。"
+        : "Serial実機モードを開発ゲートで確認しています。",
+    });
+  }
+
+  if (config.device.mode === "serial" || production) {
+    checks.push({
+      name: "device.serialPath",
+      status: isWindowsComPath(config.device.serialPath) ? "pass" : "fail",
+      detail: isWindowsComPath(config.device.serialPath)
+        ? "Windows COMポート形式です。"
+        : "本番のserialPathにはCOM1以上（または \\\\.\\COM10 形式）が必要です。",
+    });
+  } else {
+    checks.push({
+      name: "device.serialPath",
+      status: "warning",
+      detail: "MockモードのためCOMポート確認を省略しました。",
+    });
+  }
+
+  checks.push({
+    name: "device.allowMockInProduction",
+    status: config.device.allowMockInProduction ? "fail" : "pass",
+    detail: config.device.allowMockInProduction
+      ? "allowMockInProductionはfalseでなければなりません。"
+      : "本番Mock許可は無効です。",
+  });
+
+  const approvedFormUrl = isApprovedGoogleFormsUrl(config.formUrl);
+  checks.push({
+    name: "formUrl",
+    status: approvedFormUrl ? "pass" : production ? "fail" : "warning",
+    detail: approvedFormUrl
+      ? "許可されたGoogle Forms HTTPS URL形式です（内容の二名照合は別途必要です）。"
+      : production
+        ? "本番では承認済みGoogle Forms URLが必須です。"
+        : "開発確認のためGoogle Forms URL未設定を許可しました。",
+  });
+
+  checks.push({
+    name: "network.allowExternalRuntimeRequests",
+    status: config.network.allowExternalRuntimeRequests ? "fail" : "pass",
+    detail: config.network.allowExternalRuntimeRequests
+      ? "外部ランタイム通信を許可してはなりません。"
+      : "外部ランタイム通信は禁止されています。",
+  });
+
+  return Object.freeze(checks);
+}
+
+function isInside(parent: string, candidate: string): boolean {
+  const pathFromParent = relative(parent, candidate);
+  return pathFromParent === ""
+    || (
+      pathFromParent !== ".."
+      && !pathFromParent.startsWith(`..${sep}`)
+      && !isAbsolute(pathFromParent)
+    );
+}
+
+export function resolveLogPath(
+  rootDirectory: string,
+  configuredDirectory: string,
+): { readonly path: string; readonly safe: boolean } {
+  const dataRoot = resolve(rootDirectory, "data");
+  const logPath = resolve(rootDirectory, configuredDirectory);
+  return Object.freeze({
+    path: logPath,
+    safe: isInside(dataRoot, logPath),
+  });
+}
+
+export async function collectPreflightReport(
+  options: CollectPreflightOptions = {},
+): Promise<PreflightReport> {
+  const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
+  const allowMock = options.allowMock ?? false;
+  const loaded = await loadExperimentConfig(
+    options.configPath ?? DEFAULT_CONFIG_PATH,
+    { rootDirectory, production: false },
+  );
+  const config = loaded.config;
+  const resolvedLog = resolveLogPath(
+    rootDirectory,
+    options.dataDirectoryOverride ?? config.logging.directory,
+  );
+  const dataRoot = resolve(rootDirectory, "data");
+  const fileSystem = await statfs(dataRoot, { bigint: true });
+  const availableBytes = fileSystem.bavail * fileSystem.bsize;
+  const checks = [
+    ...evaluatePreflightGates(config, allowMock),
+    {
+      name: "logging.directory",
+      status: resolvedLog.safe ? "pass" : "fail",
+      detail: resolvedLog.safe
+        ? "ログ保存先はリポジトリのdata/内です。"
+        : "ログ保存先はリポジトリのdata/内でなければなりません。",
+    } satisfies GateCheck,
+    {
+      name: "disk.freeSpace",
+      status: availableBytes > 0n ? "pass" : "fail",
+      detail: availableBytes > 0n
+        ? "ログ保存先ボリュームの空き容量を取得できました。"
+        : "ログ保存先ボリュームに空き容量がありません。",
+    } satisfies GateCheck,
+  ];
+
+  return Object.freeze({
+    mode: allowMock ? "development-mock" : "production",
+    configPath: loaded.path,
+    configHash: loaded.configHash,
+    protocolVersion: config.protocolVersion,
+    deviceMode: config.device.mode,
+    serialPath: config.device.serialPath,
+    baudRate: config.device.baudRate,
+    ackTimeout: config.device.ackTimeout,
+    allowMockInProduction: config.device.allowMockInProduction,
+    fixedScore: config.fixedState.score,
+    fixedLabel: config.fixedState.label,
+    pufferLevel: config.fixedState.pufferLevel,
+    formUrl: config.formUrl,
+    bindHost: config.bindHost,
+    port: config.port,
+    allowLan: config.network.allowLan,
+    allowExternalRuntimeRequests: config.network.allowExternalRuntimeRequests,
+    logPath: resolvedLog.path,
+    availableBytes,
+    checks: Object.freeze(checks),
+  });
+}
+
+export function formatByteCount(bytes: bigint): string {
+  const units = [
+    { label: "PiB", size: 1_125_899_906_842_624n },
+    { label: "TiB", size: 1_099_511_627_776n },
+    { label: "GiB", size: 1_073_741_824n },
+    { label: "MiB", size: 1_048_576n },
+    { label: "KiB", size: 1_024n },
+  ] as const;
+  const unit = units.find((candidate) => bytes >= candidate.size);
+  if (unit === undefined) return `${bytes.toString()} B`;
+  const whole = bytes / unit.size;
+  const fraction = ((bytes % unit.size) * 100n) / unit.size;
+  return `${whole.toString()}.${fraction.toString().padStart(2, "0")} ${unit.label}`;
+}
+
+export function renderPreflightReport(
+  report: PreflightReport,
+  writeLine: (line: string) => void,
+): void {
+  writeLine(`SecHack365 preflight: ${report.mode === "production" ? "本番ゲート" : "開発用Mock確認"}`);
+  writeLine("");
+  writeLine("設定情報");
+  writeLine(`  設定パス: ${report.configPath}`);
+  writeLine(`  SHA-256: ${report.configHash}`);
+  writeLine(`  protocolVersion: ${report.protocolVersion}`);
+  writeLine(`  device mode: ${report.deviceMode}`);
+  writeLine(`  serialPath: ${report.serialPath === "" ? "(未設定)" : report.serialPath}`);
+  writeLine(`  baudRate: ${report.baudRate}`);
+  writeLine(`  ACK timeout: ${report.ackTimeout} ms`);
+  writeLine(`  allowMockInProduction: ${String(report.allowMockInProduction)}`);
+  writeLine(`  固定状態: score=${report.fixedScore}, label=${report.fixedLabel}, pufferLevel=${report.pufferLevel}`);
+  writeLine(`  Google Forms URL: ${report.formUrl === "" ? "(未設定)" : report.formUrl}`);
+  writeLine(`  bind: ${report.bindHost}:${report.port}`);
+  writeLine(`  allowLan: ${String(report.allowLan)}`);
+  writeLine(`  allowExternalRuntimeRequests: ${String(report.allowExternalRuntimeRequests)}`);
+  writeLine(`  ログ保存先: ${report.logPath}`);
+  writeLine(`  空き容量: ${formatByteCount(report.availableBytes)} (${report.availableBytes.toString()} bytes)`);
+  writeLine("");
+  writeLine("ゲート判定");
+  for (const check of report.checks) {
+    const marker = check.status === "pass" ? "PASS" : check.status === "warning" ? "WARN" : "FAIL";
+    writeLine(`  [${marker}] ${check.name}: ${check.detail}`);
+  }
+  writeLine("");
+  const failureCount = report.checks.filter((check) => check.status === "fail").length;
+  writeLine(failureCount === 0
+    ? "結果: PASS"
+    : `結果: FAIL (${failureCount}件。本番を開始しないでください)`);
+}
+
+export async function runPreflight(options: RunPreflightOptions = {}): Promise<number> {
+  const writeLine = options.writeLine ?? console.info;
+  try {
+    const parsed = parsePreflightArguments(options.args ?? process.argv.slice(2));
+    if (parsed.help) {
+      for (const line of usage()) writeLine(line);
+      return 0;
+    }
+    const environment = options.environment ?? process.env;
+    const report = await collectPreflightReport({
+      ...(options.rootDirectory === undefined ? {} : { rootDirectory: options.rootDirectory }),
+      configPath: parsed.configPath
+        ?? environment.EXPERIMENT_CONFIG_PATH
+        ?? DEFAULT_CONFIG_PATH,
+      ...(environment.DATA_DIRECTORY === undefined
+        ? {}
+        : { dataDirectoryOverride: environment.DATA_DIRECTORY }),
+      allowMock: parsed.allowMock,
+    });
+    renderPreflightReport(report, writeLine);
+    return report.checks.some((check) => check.status === "fail") ? 1 : 0;
+  } catch (error) {
+    writeLine("結果: FAIL (点検を完了できませんでした。本番を開始しないでください)");
+    for (const message of formatConfigError(error)) {
+      writeLine(`  [FAIL] ${message}`);
+    }
+    return 1;
+  }
+}
+
+async function main(): Promise<void> {
+  process.exitCode = await runPreflight();
+}
+
+const entryPath = process.argv[1];
+if (
+  entryPath !== undefined
+  && pathToFileURL(resolve(entryPath)).href === import.meta.url
+) {
+  void main();
+}

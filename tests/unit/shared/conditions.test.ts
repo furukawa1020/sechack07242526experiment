@@ -73,8 +73,8 @@ describe("order allocation", () => {
     { orderCode: "DACB", result: null, presentationsStarted: 1 },
   ];
 
-  it("counts completed sessions and only eligible aborted sessions", () => {
-    expect(countOrderUsage(records, true)).toEqual({ ABDC: 2, BCAD: 0, CDBA: 0, DACB: 0 });
+  it("counts completed, eligible aborted, and interrupted in-progress sessions", () => {
+    expect(countOrderUsage(records, true)).toEqual({ ABDC: 2, BCAD: 0, CDBA: 0, DACB: 1 });
     expect(countOrderUsage(records, false)).toEqual({ ABDC: 1, BCAD: 0, CDBA: 0, DACB: 0 });
   });
 
@@ -86,7 +86,7 @@ describe("order allocation", () => {
     expect(allocateOrder(records, {
       includeAbortedInOrderBalancing: true,
       random: () => 0.999,
-    })).toBe("DACB");
+    })).toBe("CDBA");
     expect(orderImbalanceAfterSelection([], "ABDC", true)).toBe(1);
   });
 

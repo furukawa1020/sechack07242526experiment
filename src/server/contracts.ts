@@ -32,6 +32,7 @@ export interface OperatorSessionSnapshot extends RuntimeSession {
   readonly summary: readonly PublicCondition[];
   readonly formUrl: string | null;
   readonly recentEvents: readonly OperatorRecentEvent[];
+  readonly displayFullscreen: boolean | null;
 }
 
 export interface OperatorRecentEvent {

@@ -42,6 +42,17 @@ export function createApiRouter(
     ...status,
     mode: config.device.mode,
   });
+  const deviceResponse = <Status extends object>(status: Status, ack: unknown = null) => ({
+    status: withDeviceMode(status),
+    ack,
+  });
+
+  router.get("/operator/config", (_request, response) => {
+    response.json({
+      researchIdPattern: config.researchIdPattern,
+      protocolVersion: config.protocolVersion,
+    });
+  });
 
   router.post(
     "/sessions",
@@ -116,59 +127,58 @@ export function createApiRouter(
     "/device/connect",
     asyncHandler(async (request, response) => {
       assertEmptyBody(request);
-      response.json({ status: withDeviceMode(await controller.connectDevice()) });
+      response.json(deviceResponse(await controller.connectDevice()));
     }),
   );
   router.post(
     "/device/disconnect",
     asyncHandler(async (request, response) => {
       assertEmptyBody(request);
-      response.json({ status: withDeviceMode(await controller.disconnectDevice()) });
+      response.json(deviceResponse(await controller.disconnectDevice()));
     }),
   );
   router.post(
     "/device/ping",
     asyncHandler(async (request, response) => {
       assertEmptyBody(request);
-      response.json({ status: withDeviceMode(await controller.pingDevice()) });
+      response.json(deviceResponse(await controller.pingDevice()));
     }),
   );
   router.post(
     "/device/status",
     asyncHandler(async (request, response) => {
       assertEmptyBody(request);
-      response.json({ status: withDeviceMode(await controller.getDeviceStatus()) });
+      response.json(deviceResponse(await controller.getDeviceStatus()));
     }),
   );
   router.get(
     "/device/status",
     asyncHandler(async (_request, response) => {
-      response.json({ status: withDeviceMode(await controller.getDeviceStatus()) });
+      response.json(deviceResponse(await controller.getDeviceStatus()));
     }),
   );
   router.post(
     "/device/inflate",
     asyncHandler(async (request, response) => {
       const input = InflateSchema.parse(request.body ?? {});
-      response.json({
-        status: withDeviceMode(
-          await controller.testInflate(input.level ?? config.fixedState.pufferLevel),
-        ),
-      });
+      const result = await controller.testInflate(input.level ?? config.fixedState.pufferLevel);
+      response.json(deviceResponse(result.status, result.ack));
     }),
   );
   router.post(
     "/device/deflate",
     asyncHandler(async (request, response) => {
       assertEmptyBody(request);
-      response.json({ status: withDeviceMode(await controller.testDeflate()) });
+      const result = await controller.testDeflate();
+      response.json(deviceResponse(result.status, result.ack));
     }),
   );
   router.post(
     "/device/stop",
     asyncHandler(async (request, response) => {
       assertEmptyBody(request);
-      response.json({ status: withDeviceMode(await controller.stopDevice()) });
+      const result = await controller.stopDevice();
+      response.json(deviceResponse(result.status, result.ack));
     }),
   );
 

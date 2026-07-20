@@ -127,6 +127,7 @@ export class MockPufferDevice implements PufferDevice {
     }
     try {
       await this.stop({ requestId: randomUUID() });
+      await this.deflate({ requestId: randomUUID(), rampMs: 0 });
     } finally {
       this.cancelMotion();
       this.cancelPending("stop");
@@ -167,6 +168,7 @@ export class MockPufferDevice implements PufferDevice {
     assertRequestId(input.requestId);
     assertRampMs(input.rampMs);
     this.record("deflate", input.requestId, null, input.rampMs);
+    this.cancelPending("deflate");
     await this.beforeAck("deflate");
     this.cancelMotion();
     this.state = "deflating";

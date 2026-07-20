@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { UI_COPY, formatPresentationPosition } from "../../shared/copy.js";
 import type {
-  FixedState,
+  ParticipantFixedState,
   ParticipantSnapshot,
   PresentationMode,
   ProcessingLocation,
@@ -124,12 +124,12 @@ export function ResultPanel({
   fixedState,
 }: {
   readonly presentation: PresentationMode;
-  readonly fixedState: FixedState;
+  readonly fixedState: ParticipantFixedState | null;
 }): React.JSX.Element {
   return (
     <section className="condition-panel result-panel" data-testid="result-panel" aria-labelledby="result-title">
       <h2 id="result-title">{UI_COPY.result.title}</h2>
-      {presentation === "label" ? (
+      {presentation === "label" && fixedState !== null ? (
         <div className="label-result">
           <p className="metric-label">{UI_COPY.result.metric}</p>
           <p className="metric-value" aria-label={`${UI_COPY.result.metric} ${fixedState.score} / 100`}>
@@ -137,7 +137,7 @@ export function ResultPanel({
           </p>
           <p className="state-label">{fixedState.label}</p>
         </div>
-      ) : (
+      ) : presentation === "puffer" ? (
         <div className="puffer-result">
           <div className="puffer-symbol" aria-hidden="true">
             <span className="puffer-body" />
@@ -145,7 +145,7 @@ export function ResultPanel({
           </div>
           <p className="multiline-copy">{UI_COPY.result.puffer}</p>
         </div>
-      )}
+      ) : <p className="multiline-copy">{UI_COPY.intro.waiting}</p>}
     </section>
   );
 }

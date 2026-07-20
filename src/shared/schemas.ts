@@ -85,6 +85,14 @@ const formUrlSchema = z.string().max(2_048).superRefine((value, context) => {
         message: "formUrl must use HTTPS.",
       });
     }
+    const googleFormHost = parsed.hostname === "forms.gle"
+      || (parsed.hostname === "docs.google.com" && parsed.pathname.startsWith("/forms/"));
+    if (!googleFormHost || parsed.username !== "" || parsed.password !== "") {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "formUrl must be an approved Google Forms HTTPS URL.",
+      });
+    }
   } catch {
     context.addIssue({
       code: z.ZodIssueCode.custom,

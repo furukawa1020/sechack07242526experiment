@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseCreatedSession,
+  parseDeviceAck,
   parseDeviceStatus,
   parseOperatorSnapshot,
   payloadFromSocketMessage,
@@ -60,6 +61,25 @@ describe("client boundary parsers", () => {
       connected: false,
     });
     expect(parseDeviceStatus(null)).toBeNull();
+  });
+
+  it("accepts a complete device ACK and rejects contradictory shapes", () => {
+    expect(parseDeviceAck({
+      requestId: "request-1",
+      ok: true,
+      state: "inflating",
+      level: 0.6,
+      errorCode: null,
+    })).toEqual({
+      requestId: "request-1",
+      ok: true,
+      state: "inflating",
+      level: 0.6,
+      errorCode: null,
+    });
+    expect(parseDeviceAck({ requestId: "request-2", ok: true, state: "overdrive", level: 0.6 }))
+      .toBeNull();
+    expect(parseDeviceAck({ requestId: "request-3", ok: true, state: "idle" })).toBeNull();
   });
 
   it("accepts only structured WebSocket messages", () => {

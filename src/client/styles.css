@@ -108,7 +108,7 @@ select:focus-visible {
 
 .intro-card,
 .participant-message-card {
-  width: min(100%, 1100px);
+  width: min(100%, 1260px);
   padding: 44px 56px;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -121,9 +121,13 @@ select:focus-visible {
 .summary-heading h1 {
   margin: 0;
   color: var(--heading);
-  font-size: clamp(38px, 3.3vw, 52px);
+  font-size: clamp(40px, 3vw, 48px);
   line-height: 1.25;
   letter-spacing: -0.02em;
+}
+
+.intro-card h1 {
+  white-space: nowrap;
 }
 
 .intro-body {
@@ -407,19 +411,21 @@ select:focus-visible {
 }
 
 .puffer-result {
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 50px;
-  justify-content: center;
+  grid-template-rows: auto auto;
+  gap: 18px;
+  justify-content: stretch;
+  justify-items: center;
 }
 
 .puffer-result > p {
   align-self: center;
-  max-width: 470px;
+  max-width: none;
   color: var(--ink);
-  font-size: clamp(38px, 3.5vw, 52px);
+  font-size: clamp(48px, 3.2vw, 52px);
   font-weight: 800;
   line-height: 1.45;
-  text-align: left;
+  text-align: center;
+  white-space: pre;
 }
 
 .puffer-symbol {
@@ -1061,9 +1067,10 @@ button:disabled {
 .device-stop-button { width: 100%; margin-top: 18px; min-height: 74px; }
 .device-event-card { grid-column: 1 / -1; }
 .device-event-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 22px; }
-.device-event-list li { display: grid; grid-template-columns: 82px 130px 1fr; gap: 8px; padding: 10px 5px; border-top: 1px solid #e0e5ed; font-size: 13px; }
+.device-event-list li { display: grid; grid-template-columns: 82px 110px minmax(130px, 0.8fr) minmax(220px, 1.2fr); gap: 8px; padding: 10px 5px; border-top: 1px solid #e0e5ed; font-size: 13px; }
 .device-event-list time { color: #748095; }
 .device-event-list span { overflow-wrap: anywhere; color: #526078; }
+.device-event-list code { min-width: 0; color: #24344f; font-size: 10px; white-space: nowrap; }
 
 .not-found { display: grid; min-height: 100vh; place-content: center; text-align: center; }
 .not-found p { margin: 0; color: var(--heading); font-size: 72px; font-weight: 900; }
@@ -1089,4 +1096,450 @@ button:disabled {
   .device-event-list { grid-template-columns: 1fr; }
   .display-url-block { grid-template-columns: 1fr; }
   .display-url-block label { grid-column: auto; }
+}
+
+/* Active sessions carry more audit fields than setup. At the approved
+   1920x1080 viewport, arrange those fields horizontally so the fixed safety
+   controls remain in the same viewport. */
+@media (min-width: 1001px) and (min-height: 821px) and (max-height: 1100px) {
+  .operator-app:has(.session-overview) {
+    display: flex;
+    height: 100vh;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 20px clamp(24px, 3vw, 48px);
+  }
+
+  .operator-app:has(.session-overview) .operator-header {
+    width: 100%;
+    flex: 0 0 auto;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+  }
+
+  .operator-app:has(.session-overview) .operator-layout {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 16px;
+  }
+
+  .operator-app:has(.session-overview) .operator-main-column,
+  .operator-app:has(.session-overview) .operator-side-column {
+    min-height: 0;
+    gap: 16px;
+  }
+
+  .operator-app:has(.session-overview) .operator-side-column {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .operator-app:has(.session-overview) .operator-card {
+    padding: 18px;
+  }
+
+  .operator-app:has(.session-overview) .card-heading {
+    margin-bottom: 16px;
+  }
+
+  .operator-app:has(.session-overview) .operator-status-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .operator-app:has(.session-overview) .operator-status-item {
+    min-height: 68px;
+    padding: 10px 11px;
+  }
+
+  .operator-app:has(.session-overview) .operator-status-item dt {
+    font-size: 11px;
+  }
+
+  .operator-app:has(.session-overview) .operator-status-item dd,
+  .operator-app:has(.session-overview) .operator-status-item.is-emphasis dd {
+    margin-top: 5px;
+    font-size: 14px;
+    line-height: 1.25;
+  }
+
+  .operator-app:has(.session-overview) .display-url-block {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 10px;
+    margin-bottom: 12px;
+    padding: 10px;
+  }
+
+  .operator-app:has(.session-overview) .display-url-block label {
+    grid-column: auto;
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .operator-app:has(.session-overview) .prerequisite-block {
+    padding: 10px;
+  }
+
+  .operator-app:has(.session-overview) .compact-check {
+    margin: 0;
+    padding: 9px 11px;
+  }
+
+  .operator-app:has(.session-overview) .safety-actions {
+    margin-top: 16px;
+    padding-top: 14px;
+  }
+
+  .operator-app:has(.session-overview) .event-card {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .operator-app:has(.session-overview) .event-list {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+}
+
+/* The approved 1366x768 venue viewport needs every safety control visible
+   without relying on document scrolling. Keep the more spacious desktop
+   layout at taller viewports and compact only short landscape displays. */
+@media (min-width: 1001px) and (max-height: 820px) {
+  .operator-app,
+  .device-test-app {
+    display: flex;
+    height: 100vh;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 14px clamp(18px, 2vw, 28px);
+  }
+
+  .operator-header,
+  .device-test-header {
+    width: 100%;
+    flex: 0 0 auto;
+    gap: 18px;
+    margin-bottom: 12px;
+    padding: 0 0 10px;
+  }
+
+  .operator-kicker {
+    margin-bottom: 4px;
+    font-size: 10px;
+  }
+
+  .operator-header h1,
+  .device-test-header h1 {
+    font-size: 32px;
+  }
+
+  .device-test-header > div > p:last-child {
+    margin-top: 4px;
+    font-size: 13px;
+  }
+
+  .operator-header-actions .secondary-button,
+  .device-test-header .secondary-button {
+    min-height: 38px;
+    padding: 8px 13px;
+    font-size: 13px;
+  }
+
+  .operator-layout,
+  .device-test-layout {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 12px;
+  }
+
+  .operator-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
+  }
+
+  .operator-main-column,
+  .operator-side-column {
+    min-height: 0;
+    gap: 12px;
+  }
+
+  .operator-side-column {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .operator-card,
+  .device-command-card,
+  .device-event-card {
+    padding: 14px;
+    border-radius: 11px;
+  }
+
+  .card-heading {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .card-heading p {
+    font-size: 9px;
+  }
+
+  .card-heading h2 {
+    font-size: 19px;
+  }
+
+  .step-number {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+
+  .setup-form {
+    max-width: none;
+  }
+
+  .field-label,
+  .display-url-block label {
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+
+  .setup-form > input,
+  .display-url-block input,
+  .order-fieldset select {
+    min-height: 38px;
+    padding: 7px 10px;
+  }
+
+  .setup-form > input {
+    font-size: 16px;
+  }
+
+  .field-hint {
+    margin: 4px 0 10px;
+    font-size: 11px;
+  }
+
+  .check-row {
+    gap: 9px;
+    margin: 10px 0;
+    padding: 10px;
+    font-size: 13px;
+  }
+
+  .check-row input {
+    width: 17px;
+    height: 17px;
+  }
+
+  .order-fieldset {
+    gap: 8px 14px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .order-fieldset legend {
+    font-size: 12px;
+  }
+
+  .primary-button,
+  .secondary-button,
+  .abort-button,
+  .emergency-button {
+    min-height: 38px;
+    padding: 8px 13px;
+    font-size: 13px;
+  }
+
+  .operator-status-grid {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .operator-status-item {
+    min-height: 56px;
+    padding: 8px 9px;
+  }
+
+  .operator-status-item dt {
+    font-size: 10px;
+  }
+
+  .operator-status-item dd,
+  .operator-status-item.is-emphasis dd {
+    margin-top: 4px;
+    font-size: 13px;
+    line-height: 1.25;
+  }
+
+  .display-url-block {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 8px;
+    margin-bottom: 10px;
+    padding: 9px;
+  }
+
+  .display-url-block label {
+    grid-column: auto;
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .display-url-block input {
+    font-size: 11px;
+  }
+
+  .action-buttons {
+    gap: 8px;
+  }
+
+  .prerequisite-block {
+    gap: 10px;
+    padding: 9px;
+  }
+
+  .prerequisite-block ul {
+    gap: 5px 10px;
+    font-size: 11px;
+  }
+
+  .compact-check {
+    margin: 0;
+    padding: 8px 10px;
+  }
+
+  .safety-actions {
+    gap: 9px;
+    margin-top: 12px;
+    padding-top: 10px;
+  }
+
+  .emergency-button {
+    min-height: 52px;
+  }
+
+  .emergency-button span {
+    font-size: 16px;
+  }
+
+  .emergency-button small {
+    font-size: 9px;
+  }
+
+  .compact-card {
+    padding: 14px;
+  }
+
+  .compact-heading {
+    margin-bottom: 10px;
+  }
+
+  .device-mode-badge {
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+
+  .device-details {
+    margin: 10px 0;
+  }
+
+  .device-details .operator-status-item {
+    min-height: 48px;
+  }
+
+  .text-link {
+    margin-top: 9px;
+    font-size: 11px;
+  }
+
+  .event-card {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .event-list {
+    min-height: 0;
+    flex: 1 1 auto;
+    max-height: none;
+  }
+
+  .event-list li {
+    padding: 6px 3px;
+    font-size: 10px;
+  }
+
+  .operator-banner {
+    width: 100%;
+    flex: 0 0 auto;
+    margin: -4px auto 8px;
+    padding: 8px 11px;
+    font-size: 12px;
+  }
+
+  .device-test-layout {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .device-status-hero {
+    min-height: 0;
+    gap: 18px;
+    padding: 20px;
+  }
+
+  .device-status-hero h2 {
+    margin: 10px 0 16px;
+    font-size: 34px;
+  }
+
+  .device-illustration {
+    min-height: 170px;
+  }
+
+  .device-puffer {
+    width: 130px;
+    height: 130px;
+  }
+
+  .device-puffer::before {
+    margin: 38px 0 0 82px;
+  }
+
+  .command-note {
+    margin: -2px 0 12px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .device-command-grid {
+    gap: 7px;
+  }
+
+  .device-stop-button {
+    min-height: 58px;
+    margin-top: 10px;
+  }
+
+  .device-event-card {
+    min-height: 0;
+    max-height: 122px;
+    overflow: hidden;
+  }
+
+  .device-event-list {
+    max-height: 62px;
+    overflow-y: auto;
+  }
+
+  .device-event-list li {
+    grid-template-columns: 68px 90px minmax(128px, 0.8fr) minmax(220px, 1.2fr);
+    padding: 6px 3px;
+    font-size: 11px;
+  }
 }

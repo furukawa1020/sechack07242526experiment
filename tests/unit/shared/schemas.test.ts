@@ -91,6 +91,12 @@ describe("experiment config schema", () => {
       .toThrow(/HTTPS/iu);
     expect(() => parseExperimentConfig({ ...validConfig(), formUrl: "not a url" }))
       .toThrow(/valid HTTPS URL/iu);
+    expect(() => parseExperimentConfig({ ...validConfig(), formUrl: "https://example.test/form" }))
+      .toThrow(/Google Forms/iu);
+    expect(parseExperimentConfig({
+      ...validConfig(),
+      formUrl: "https://docs.google.com/forms/d/e/example/viewform",
+    }).formUrl).toContain("docs.google.com/forms/");
     expect(() => parseExperimentConfig({ ...validConfig(), researchIdPattern: "[" }))
       .toThrow(/regular expression/iu);
   });

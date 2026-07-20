@@ -22,7 +22,7 @@ function snapshot(
     phase: "result",
     sequenceIndex: 0,
     condition: { processing, presentation },
-    fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
+    fixedState: { score: 72, label: "高ストレス" },
     phaseEndsAt: "2026-07-19T12:00:15.000Z",
     serverNow: "2026-07-19T12:00:00.000Z",
     summary: [],
@@ -136,6 +136,8 @@ describe("participant snapshot boundary", () => {
     });
     expect(parsed).not.toHaveProperty("conditionCode");
     expect(parsed).not.toHaveProperty("researchId");
+    expect(parsed?.fixedState).toEqual({ score: 72, label: "高ストレス" });
+    expect(parsed?.fixedState).not.toHaveProperty("pufferLevel");
   });
 
   it("shows the neutral recovery state when the server requires confirmation", () => {

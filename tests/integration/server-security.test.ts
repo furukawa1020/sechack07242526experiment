@@ -130,5 +130,35 @@ describe("server HTTP security", () => {
       headers: { "X-Operator-Token": "test-operator-token" },
     });
     expect(allowed.status).toBe(200);
+    const configDenied = await fetch(`${running.url}/api/operator/config`);
+    expect(configDenied.status).toBe(401);
+  });
+
+  it("serves the authoritative research-ID pattern and exact device ACK without caching", async () => {
+    const running = await listen();
+    servers.push(running.server);
+    controllers.push(running.controller);
+
+    const operatorConfig = await fetch(`${running.url}/api/operator/config`);
+    expect(operatorConfig.status).toBe(200);
+    expect(operatorConfig.headers.get("cache-control")).toBe("no-store");
+    await expect(operatorConfig.json()).resolves.toEqual({
+      researchIdPattern: "^SH26-[0-9]{3}$",
+      protocolVersion: "test-v1",
+    });
+
+    const inflate = await fetch(`${running.url}/api/device/inflate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(inflate.status).toBe(200);
+    const payload = await inflate.json() as {
+      readonly status: { readonly mode: string };
+      readonly ack: { readonly requestId: string; readonly ok: boolean; readonly state: string };
+    };
+    expect(payload.status.mode).toBe("mock");
+    expect(payload.ack).toMatchObject({ ok: true, state: "inflating" });
+    expect(payload.ack.requestId).toMatch(/^[0-9a-f-]{36}$/u);
   });
 });

@@ -25,11 +25,16 @@ export interface PublicCondition {
   readonly presentation: PresentationMode;
 }
 
+export interface ParticipantFixedState {
+  readonly score: number;
+  readonly label: string;
+}
+
 export interface ParticipantSnapshot {
   readonly phase: ExperimentPhase;
   readonly sequenceIndex: 0 | 1 | 2 | 3 | null;
   readonly condition: PublicCondition | null;
-  readonly fixedState: FixedState;
+  readonly fixedState: ParticipantFixedState | null;
   readonly phaseEndsAt: string | null;
   readonly serverNow: string | null;
   readonly summary: readonly PublicCondition[];
@@ -53,13 +58,26 @@ export interface DeviceStatus {
   readonly connected: boolean;
 }
 
+export interface DeviceAck {
+  readonly requestId: string;
+  readonly ok: boolean;
+  readonly state: Exclude<DeviceStatus["state"], "unknown">;
+  readonly level: number;
+  readonly errorCode: string | null;
+}
+
+export interface DeviceActionResult {
+  readonly status: DeviceStatus;
+  readonly ack: DeviceAck | null;
+}
+
 export interface OperatorEvent {
   readonly at: string;
   readonly type: string;
   readonly detail: string;
 }
 
-export interface OperatorSnapshot extends ParticipantSnapshot {
+export interface OperatorSnapshot extends Omit<ParticipantSnapshot, "fixedState"> {
   readonly sessionId: string;
   readonly researchId: string;
   readonly displayToken: string | null;
@@ -71,6 +89,9 @@ export interface OperatorSnapshot extends ParticipantSnapshot {
   readonly protocolVersion: string;
   readonly configVersion: string;
   readonly recentEvents: readonly OperatorEvent[];
+  readonly fixedState: FixedState;
+  readonly errorCode: string | null;
+  readonly displayFullscreen: boolean | null;
 }
 
 export interface CreatedSession {
@@ -97,7 +118,7 @@ export const EMPTY_PARTICIPANT_SNAPSHOT: ParticipantSnapshot = {
   phase: "recovery",
   sequenceIndex: null,
   condition: null,
-  fixedState: DEFAULT_FIXED_STATE,
+  fixedState: null,
   phaseEndsAt: null,
   serverNow: null,
   summary: [],
@@ -187,6 +208,14 @@ function parseFixedState(record: JsonRecord): FixedState {
   };
 }
 
+function parseParticipantFixedState(record: JsonRecord): ParticipantFixedState | null {
+  const fixed = nestedRecord(record, "fixedState");
+  if (fixed === null) return null;
+  const score = numberValue(fixed, "score", "fixedScore");
+  const label = stringValue(fixed, "label", "fixedLabel");
+  return score === null || label === null ? null : { score, label };
+}
+
 function parseCondition(value: unknown, fallback: JsonRecord): PublicCondition | null {
   const condition = isRecord(value) ? value : fallback;
   const processing = processingValue(condition["processing"]);
@@ -226,7 +255,7 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot | 
     phase,
     sequenceIndex,
     condition: parseCondition(current, value),
-    fixedState: parseFixedState(value),
+    fixedState: parseParticipantFixedState(value),
     phaseEndsAt: stringValue(value, "phaseEndsAt", "phaseEndAt", "deadlineIso"),
     serverNow: stringValue(value, "serverNow", "serverNowIso"),
     summary: parseSummary(value["summary"] ?? value["presentations"]),
@@ -262,6 +291,32 @@ export function parseDeviceStatus(value: unknown): DeviceStatus | null {
   };
 }
 
+export function parseDeviceAck(value: unknown): DeviceAck | null {
+  if (!isRecord(value)) return null;
+  const requestId = stringValue(value, "requestId");
+  const ok = booleanValue(value, "ok");
+  const state = stringValue(value, "state");
+  const level = numberValue(value, "level");
+  const errorCode = value["errorCode"] === null ? null : stringValue(value, "errorCode");
+  const allowedStates: readonly DeviceAck["state"][] = [
+    "disconnected", "connecting", "idle", "inflating", "holding", "deflating", "stopped", "fault",
+  ];
+  if (
+    requestId === null
+    || requestId.length === 0
+    || requestId.length > 128
+    || /[\r\n\0]/u.test(requestId)
+    || ok === null
+    || level === null
+    || typeof state !== "string"
+    || !(allowedStates as readonly string[]).includes(state)
+    || (value["errorCode"] !== null && value["errorCode"] !== undefined && errorCode === null)
+    || (ok && (state === "fault" || errorCode !== null))
+    || (!ok && (state !== "fault" || errorCode === null))
+  ) return null;
+  return { requestId, ok, state: state as DeviceAck["state"], level, errorCode };
+}
+
 function parseEvents(value: unknown): readonly OperatorEvent[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -295,6 +350,7 @@ export function parseOperatorSnapshot(value: unknown): OperatorSnapshot | null {
       };
   return {
     ...publicSnapshot,
+    fixedState: parseFixedState(value),
     condition: derivedCondition,
     sessionId,
     researchId,
@@ -307,6 +363,8 @@ export function parseOperatorSnapshot(value: unknown): OperatorSnapshot | null {
     protocolVersion: stringValue(value, "protocolVersion") ?? "—",
     configVersion: stringValue(value, "configVersion", "configHash") ?? "—",
     recentEvents: parseEvents(value["recentEvents"] ?? value["events"]),
+    errorCode: stringValue(value, "errorCode"),
+    displayFullscreen: booleanValue(value, "displayFullscreen"),
   };
 }
 

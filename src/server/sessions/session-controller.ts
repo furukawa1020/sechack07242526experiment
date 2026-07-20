@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 import {
+  ALLOWED_TRANSITIONS,
   allocateOrder,
   CONDITIONS,
   type ConditionCode,
@@ -10,6 +11,7 @@ import {
 } from "../../shared/index.js";
 import { badRequest, conflict, notFound } from "../api/http-error.js";
 import type {
+  DeviceAck,
   DeviceStatus,
   OperatorSessionSnapshot,
   PublicCondition,
@@ -25,20 +27,6 @@ import { createLogEvent } from "../logging/index.js";
 const TERMINAL_PHASES = new Set<ExperimentPhase>(["completed", "aborted"]);
 const TIMED_PHASES = new Set<ExperimentPhase>(["handling", "processing", "result", "reset"]);
 
-const ALLOWED_TRANSITIONS: Readonly<Record<ExperimentPhase, readonly ExperimentPhase[]>> = {
-  idle: ["setup", "aborted"],
-  setup: ["intro", "aborted"],
-  intro: ["handling", "aborted", "error"],
-  handling: ["processing", "aborted", "error"],
-  processing: ["result", "aborted", "error"],
-  result: ["reset", "aborted", "error"],
-  reset: ["handling", "summary", "aborted", "error"],
-  summary: ["completed", "aborted", "error"],
-  completed: [],
-  aborted: [],
-  error: ["aborted"],
-};
-
 export interface CreateSessionInput {
   readonly researchId: string;
   readonly consentConfirmed: true;
@@ -49,6 +37,11 @@ export interface CreatedSession {
   readonly snapshot: OperatorSessionSnapshot;
   readonly displayToken: string;
   readonly displayUrl: string;
+}
+
+export interface DeviceTestResult {
+  readonly status: DeviceStatus;
+  readonly ack: DeviceAck | null;
 }
 
 export interface SessionControllerOptions {
@@ -79,7 +72,7 @@ function isPufferPhase(session: RuntimeSession): boolean {
 
 function isSafeDeflatedStatus(status: DeviceStatus): boolean {
   if (!status.connected) return false;
-  if (status.state !== "idle" && status.state !== "stopped") return false;
+  if (status.state !== "idle") return false;
   return status.level === undefined || status.level <= 0;
 }
 
@@ -96,6 +89,7 @@ export class SessionController {
   private readonly displayTokens = new Map<string, string>();
   private readonly sessionTokens = new Map<string, string>();
   private readonly readyDisplayConnections = new Map<string, Set<string>>();
+  private readonly displayFullscreenStates = new Map<string, boolean | null>();
   private readonly pausedRemainingMs = new Map<string, number>();
   private readonly recentEvents = new Map<string, Array<{
     wallClockIso: string;
@@ -105,11 +99,15 @@ export class SessionController {
   }>>();
   private readonly listeners = new Set<Listener>();
   private activeSessionId: string | null = null;
+  private creationPending = false;
+  private deviceOperationTail: Promise<void> = Promise.resolve();
   private phaseTimer: ReturnType<typeof setTimeout> | null = null;
   private timerGeneration = 0;
   private handlingFailure = false;
   private emergencyLocked = false;
   private lastDeviceStatus: DeviceStatus | null = null;
+  private lastSafetyFailure: Error | null = null;
+  private auditStorageHealthy = true;
   private readonly unsubscribeDevice: () => void;
 
   public constructor(options: SessionControllerOptions) {
@@ -122,7 +120,9 @@ export class SessionController {
     this.now = options.now ?? (() => new Date());
     this.monotonicNow = options.monotonicNow ?? (() => performance.now());
     this.unsubscribeDevice = this.device.onStatus((status) => {
-      void this.handleDeviceStatus(status);
+      void this.handleDeviceStatus(status).catch((error: unknown) => {
+        this.handleBackgroundFailure(error, "DEVICE_STATUS_HANDLER_FAILED");
+      });
     });
   }
 
@@ -137,14 +137,17 @@ export class SessionController {
     const active = this.activeSessionId === null ? null : this.sessions.get(this.activeSessionId) ?? null;
     if (active === null) {
       await this.safeStopAndDeflate();
+      this.throwIfSafetyUnconfirmed();
       return;
     }
     if (active.phase === "completed" || active.phase === "aborted") {
       await this.safeStopAndDeflate();
+      this.throwIfSafetyUnconfirmed();
       this.activeSessionId = null;
       return;
     }
     await this.abort(active.id);
+    this.throwIfSafetyUnconfirmed();
   }
 
   public subscribe(listener: Listener): () => void {
@@ -153,6 +156,19 @@ export class SessionController {
   }
 
   public async create(input: CreateSessionInput): Promise<CreatedSession> {
+    this.requireAuditStorageHealthy();
+    if (this.activeSessionId !== null || this.creationPending) {
+      throw conflict("進行中または確認待ちのセッションがあります。", "ACTIVE_SESSION_EXISTS");
+    }
+    this.creationPending = true;
+    try {
+      return await this.createReserved(input);
+    } finally {
+      this.creationPending = false;
+    }
+  }
+
+  private async createReserved(input: CreateSessionInput): Promise<CreatedSession> {
     if (this.activeSessionId !== null) {
       throw conflict("進行中または確認待ちのセッションがあります。", "ACTIVE_SESSION_EXISTS");
     }
@@ -225,9 +241,20 @@ export class SessionController {
     this.displayTokens.set(displayToken, id);
     this.sessionTokens.set(id, displayToken);
     this.readyDisplayConnections.set(id, new Set());
+    this.displayFullscreenStates.set(id, null);
     this.activeSessionId = id;
+    try {
+      await this.audit(session, "session.created");
+    } catch (error) {
+      this.sessions.delete(id);
+      this.displayTokens.delete(displayToken);
+      this.sessionTokens.delete(id);
+      this.readyDisplayConnections.delete(id);
+      this.displayFullscreenStates.delete(id);
+      this.activeSessionId = null;
+      throw error;
+    }
     this.emergencyLocked = false;
-    await this.audit(session, "session.created");
     this.emit({ type: "session.snapshot", sessionId: id });
 
     const displayUrl = this.displayUrl(displayToken);
@@ -261,12 +288,17 @@ export class SessionController {
   }
 
   public async prepare(sessionId: string): Promise<OperatorSessionSnapshot> {
+    const initial = this.requireActive(sessionId);
+    this.requirePhase(initial, "setup");
+    if (!initial.displayConnected) {
+      throw conflict("参加者画面の接続を確認してください。", "DISPLAY_NOT_READY");
+    }
+    const status = await this.runDeviceOperation(() => this.device.getStatus());
     const session = this.requireActive(sessionId);
     this.requirePhase(session, "setup");
     if (!session.displayConnected) {
       throw conflict("参加者画面の接続を確認してください。", "DISPLAY_NOT_READY");
     }
-    const status = await this.device.getStatus();
     if (!isSafeDeflatedStatus(status)) {
       throw conflict("装置を接続し、idleかつ収縮済みの状態にしてください。", "DEVICE_NOT_READY");
     }
@@ -318,9 +350,21 @@ export class SessionController {
       updated = this.patchSession(session, { recoveryRequired: false });
       this.sessions.set(updated.id, updated);
     }
-    await this.audit(updated, "session.resumed");
     this.emit({ type: "session.phaseChanged", sessionId: updated.id });
-    return this.operatorSnapshot(updated);
+    try {
+      await this.audit(updated, "session.resumed");
+    } catch {
+      const current = this.sessions.get(updated.id);
+      if (
+        current !== undefined
+        && this.activeSessionId === current.id
+        && current.phase !== "error"
+        && !TERMINAL_PHASES.has(current.phase)
+      ) {
+        await this.failSession(current, "AUDIT_STORAGE_FAILED");
+      }
+    }
+    return this.operatorSnapshot(this.get(updated.id));
   }
 
   public async abort(sessionId: string): Promise<OperatorSessionSnapshot> {
@@ -329,38 +373,52 @@ export class SessionController {
       throw conflict("終了済みセッションは中止できません。", "SESSION_ALREADY_TERMINAL");
     }
     this.cancelTimer();
-    await this.safeStopAndDeflate();
-    const updated = await this.enterTerminalPhase(session, "aborted", "aborted", null, "session.aborted");
-    this.activeSessionId = null;
-    return this.operatorSnapshot(updated);
+    const terminal = this.enterTerminalPhase(session, "aborted", "aborted", null, "session.aborted");
+    const safety = this.safeStopAndDeflate();
+    await Promise.all([terminal, safety]);
+    this.requireSafetyConfirmed();
+    this.requireAuditStorageHealthy();
+    if (this.activeSessionId === sessionId) this.activeSessionId = null;
+    return this.operatorSnapshot(this.get(sessionId));
   }
 
   public async emergencyStop(sessionId: string): Promise<OperatorSessionSnapshot> {
-    const session = this.requireActive(sessionId);
     this.cancelTimer();
     this.emergencyLocked = true;
-    await this.safeStopAndDeflate();
-    const updated = await this.enterTerminalPhase(
-      session,
-      "aborted",
-      "aborted",
-      "EMERGENCY_STOP",
-      "session.emergencyStop",
-    );
-    this.activeSessionId = null;
-    return this.operatorSnapshot(updated);
+    // Start STOP before consulting session state so stale Operator views can
+    // always repeat the global physical safety command.
+    const safety = this.safeStopAndDeflate();
+    const session = this.get(sessionId);
+    let terminal: Promise<RuntimeSession> | null = null;
+    if (this.activeSessionId === sessionId && !TERMINAL_PHASES.has(session.phase)) {
+      terminal = this.enterTerminalPhase(
+        session,
+        "aborted",
+        "aborted",
+        "EMERGENCY_STOP",
+        "session.emergencyStop",
+      );
+    }
+    await Promise.all([safety, ...(terminal === null ? [] : [terminal])]);
+    this.requireSafetyConfirmed();
+    this.requireAuditStorageHealthy();
+    if (this.activeSessionId === sessionId && TERMINAL_PHASES.has(this.get(sessionId).phase)) {
+      this.activeSessionId = null;
+    }
+    return this.operatorSnapshot(this.get(sessionId));
   }
 
   public async confirmFormComplete(sessionId: string): Promise<OperatorSessionSnapshot> {
     const session = this.requireActive(sessionId);
     this.requirePhase(session, "summary");
     const updated = await this.enterTerminalPhase(session, "completed", "ok", null, "session.completed");
-    this.activeSessionId = null;
-    return this.operatorSnapshot(updated);
+    this.requireAuditStorageHealthy();
+    if (this.activeSessionId === sessionId) this.activeSessionId = null;
+    return this.operatorSnapshot(this.get(updated.id));
   }
 
   public async delete(sessionId: string): Promise<void> {
-    const session = this.get(sessionId);
+    let session = this.get(sessionId);
     if (this.activeSessionId === sessionId && session.phase !== "setup") {
       throw conflict("進行中または確認待ちのセッションは削除できません。", "SESSION_DELETE_UNSAFE");
     }
@@ -368,28 +426,40 @@ export class SessionController {
       throw conflict("error状態は中止確認後にのみ削除できます。", "SESSION_DELETE_UNSAFE");
     }
     if (this.activeSessionId === sessionId) {
-      this.activeSessionId = null;
       this.cancelTimer();
+      await this.safeStopAndDeflate();
+      this.requireSafetyConfirmed();
+      session = this.get(sessionId);
+      if (session.phase === "error") {
+        throw conflict("安全停止の監査に失敗しました。中止確認後にのみ削除できます。", "SESSION_DELETE_UNSAFE");
+      }
+      this.activeSessionId = null;
     }
+    await this.audit(session, "session.deleted");
     const token = this.sessionTokens.get(sessionId);
     if (token !== undefined) this.displayTokens.delete(token);
     this.sessionTokens.delete(sessionId);
     this.readyDisplayConnections.delete(sessionId);
+    this.displayFullscreenStates.delete(sessionId);
     this.pausedRemainingMs.delete(sessionId);
     this.sessions.delete(sessionId);
-    await this.audit(session, "session.deleted");
     this.recentEvents.delete(sessionId);
   }
 
   public markDisplayReady(displayToken: string, connectionId: string): void {
     const session = this.sessionForToken(displayToken);
     const connections = this.readyDisplayConnections.get(session.id) ?? new Set<string>();
+    if (connections.size > 0 && !connections.has(connectionId)) {
+      throw conflict("参加者画面は同時に1接続だけ使用できます。", "DISPLAY_ALREADY_CONNECTED");
+    }
     connections.add(connectionId);
     this.readyDisplayConnections.set(session.id, connections);
     if (!session.displayConnected) {
       const updated = this.patchSession(session, { displayConnected: true });
       this.sessions.set(updated.id, updated);
-      void this.audit(updated, "display.ready");
+      void this.audit(updated, "display.ready").catch((error: unknown) => {
+        this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
+      });
       this.emit({ type: "session.snapshot", sessionId: updated.id });
     }
   }
@@ -406,12 +476,17 @@ export class SessionController {
     if (connections !== undefined && connections.size > 0) return;
     if (!session.displayConnected) return;
 
+    this.displayFullscreenStates.set(session.id, null);
     let updated = this.patchSession(session, { displayConnected: false });
     this.sessions.set(updated.id, updated);
-    void this.audit(updated, "display.disconnected");
+    void this.audit(updated, "display.disconnected").catch((error: unknown) => {
+      this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
+    });
 
     if (this.activeSessionId === updated.id && isPufferPhase(updated)) {
-      void this.failSession(updated, "DISPLAY_LOST_DURING_PUFFER");
+      void this.failSession(updated, "DISPLAY_LOST_DURING_PUFFER").catch((error: unknown) => {
+        this.handleBackgroundFailure(error, "DISPLAY_FAILURE_HANDLER_FAILED");
+      });
       return;
     }
 
@@ -431,7 +506,9 @@ export class SessionController {
         remainingMs: this.pausedRemainingMs.get(updated.id) ?? null,
       });
       this.sessions.set(updated.id, updated);
-      void this.audit(updated, "session.recoveryRequired");
+      void this.audit(updated, "session.recoveryRequired").catch((error: unknown) => {
+        this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
+      });
     }
     this.emit({ type: "session.snapshot", sessionId: updated.id });
   }
@@ -444,54 +521,124 @@ export class SessionController {
     }
   }
 
+  public markDisplayFullscreen(displayToken: string, connectionId: string, fullscreen: boolean): void {
+    const session = this.sessionForToken(displayToken);
+    const connections = this.readyDisplayConnections.get(session.id);
+    if (connections?.has(connectionId) !== true) {
+      throw conflict("参加者画面のready確認が必要です。", "DISPLAY_NOT_READY");
+    }
+    if (this.displayFullscreenStates.get(session.id) === fullscreen) return;
+    this.displayFullscreenStates.set(session.id, fullscreen);
+    this.emit({ type: "session.snapshot", sessionId: session.id });
+  }
+
+  /** A run must never continue unattended after the final Operator connection is lost. */
+  public markOperatorDisconnected(): void {
+    const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
+    if (
+      active === undefined
+      || active.phase === "setup"
+      || active.phase === "error"
+      || TERMINAL_PHASES.has(active.phase)
+    ) return;
+    void this.failSession(active, "OPERATOR_CONNECTION_LOST").catch((error: unknown) => {
+      this.handleBackgroundFailure(error, "OPERATOR_DISCONNECT_HANDLER_FAILED");
+    });
+  }
+
   public async connectDevice(): Promise<DeviceStatus> {
     this.requireDeviceTestAllowed("connect");
-    await this.device.connect();
-    return this.device.getStatus();
+    return this.runDeviceOperation(async () => {
+      this.requireDeviceTestAllowed("connect");
+      void this.auditActiveDeviceEvent("device.connect.issued");
+      await this.device.connect();
+      const status = await this.device.getStatus();
+      void this.auditActiveDeviceEvent("device.connect.ack");
+      return status;
+    });
   }
 
   public async disconnectDevice(): Promise<DeviceStatus> {
     this.requireDeviceTestAllowed("disconnect");
-    await this.device.disconnect();
-    if (this.lastDeviceStatus !== null) return this.lastDeviceStatus;
-    return this.device.getStatus();
+    return this.runDeviceOperation(async () => {
+      this.requireDeviceTestAllowed("disconnect");
+      void this.auditActiveDeviceEvent("device.disconnect.issued");
+      await this.device.disconnect();
+      void this.auditActiveDeviceEvent("device.disconnect.ack");
+      if (this.lastDeviceStatus !== null) return this.lastDeviceStatus;
+      return this.device.getStatus();
+    });
   }
 
   public async pingDevice(): Promise<DeviceStatus> {
-    return this.device.ping();
+    this.requireDeviceTestAllowed("ping");
+    return this.runDeviceOperation(() => {
+      this.requireDeviceTestAllowed("ping");
+      void this.auditActiveDeviceEvent("device.ping.issued");
+      return this.device.ping().then((status) => {
+        void this.auditActiveDeviceEvent("device.ping.ack");
+        return status;
+      });
+    });
   }
 
   public async getDeviceStatus(): Promise<DeviceStatus> {
     try {
-      return await this.device.getStatus();
+      return await this.runDeviceOperation(() => this.device.getStatus());
     } catch (error) {
       if (this.lastDeviceStatus?.state === "disconnected") return this.lastDeviceStatus;
       throw error;
     }
   }
 
-  public async testInflate(level: number): Promise<DeviceStatus> {
+  public async testInflate(level: number): Promise<DeviceTestResult> {
     this.requireDeviceTestAllowed("inflate");
     if (level < 0 || level > this.config.fixedState.pufferLevel) {
       throw conflict("テスト膨張量は設定済み上限以下で指定してください。", "DEVICE_LEVEL_OUT_OF_RANGE");
     }
-    await this.device.inflate({
-      level,
-      rampMs: this.config.timingMs.inflateRamp,
-      requestId: randomUUID(),
+    return this.runDeviceOperation(async () => {
+      this.requireDeviceTestAllowed("inflate");
+      const before = await this.device.getStatus();
+      if (!isSafeDeflatedStatus(before)) {
+        throw conflict("膨張テスト前に装置をidleかつ収縮済みにしてください。", "DEVICE_NOT_READY");
+      }
+      void this.auditActiveDeviceEvent("device.inflate.issued");
+      const ack = await this.device.inflate({
+        level,
+        rampMs: this.config.timingMs.inflateRamp,
+        requestId: randomUUID(),
+      });
+      const status = await this.device.getStatus();
+      void this.auditActiveDeviceEvent("device.inflate.ack");
+      return { status, ack };
     });
-    return this.device.getStatus();
   }
 
-  public async testDeflate(): Promise<DeviceStatus> {
+  public async testDeflate(): Promise<DeviceTestResult> {
     this.requireDeviceTestAllowed("deflate");
-    await this.device.deflate({ rampMs: this.config.timingMs.deflateRamp, requestId: randomUUID() });
-    return this.device.getStatus();
+    return this.runDeviceOperation(async () => {
+      this.requireDeviceTestAllowed("deflate");
+      void this.auditActiveDeviceEvent("device.deflate.issued");
+      const ack = await this.device.deflate({
+        rampMs: this.config.timingMs.deflateRamp,
+        requestId: randomUUID(),
+      });
+      const status = await this.device.getStatus();
+      void this.auditActiveDeviceEvent("device.deflate.ack");
+      return { status, ack };
+    });
   }
 
-  public async stopDevice(): Promise<DeviceStatus> {
-    await this.device.stop({ requestId: randomUUID() });
-    return this.device.getStatus();
+  public async stopDevice(): Promise<DeviceTestResult> {
+    const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
+    if (active !== undefined && active.phase !== "setup" && !TERMINAL_PHASES.has(active.phase)) {
+      await this.emergencyStop(active.id);
+      return { status: await this.getDeviceStatus(), ack: null };
+    }
+    void this.auditActiveDeviceEvent("device.stop.issued");
+    const ack = await this.device.stop({ requestId: randomUUID() });
+    void this.auditActiveDeviceEvent("device.stop.ack");
+    return { status: await this.device.getStatus(), ack };
   }
 
   public exportCsv(): Promise<string> {
@@ -499,7 +646,7 @@ export class SessionController {
   }
 
   private requireDeviceTestAllowed(action: string): void {
-    if (this.emergencyLocked && action !== "connect") {
+    if (this.emergencyLocked && action !== "connect" && action !== "deflate") {
       throw conflict("緊急停止後は新しいセッションを作成するまで装置操作できません。", "DEVICE_EMERGENCY_LOCKED");
     }
     if (this.activeSessionId === null) return;
@@ -507,6 +654,12 @@ export class SessionController {
     if (active.phase !== "setup") {
       throw conflict("本番セッション中はデバイステスト操作を実行できません。", "DEVICE_TEST_LOCKED");
     }
+  }
+
+  private runDeviceOperation<Value>(operation: () => Promise<Value>): Promise<Value> {
+    const result = this.deviceOperationTail.then(operation, operation);
+    this.deviceOperationTail = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   private async allocateOrder(): Promise<OrderCode> {
@@ -539,10 +692,26 @@ export class SessionController {
     });
     this.sessions.set(updated.id, updated);
     this.schedulePhaseAdvance(updated, duration);
-    await this.audit(updated, `phase.${phase}`);
     this.emit({ type: "session.phaseChanged", sessionId: updated.id });
+    const generation = this.timerGeneration;
+    const auditResult = this.audit(updated, `phase.${phase}`).then(
+      () => null,
+      (error: unknown) => error,
+    );
 
     const condition = CONDITIONS[currentCondition];
+    const issuedAuditResult = (
+      phase === "result" && condition.presentation === "puffer"
+        ? this.audit(updated, "device.inflate.issued")
+        : phase === "reset" && condition.presentation === "puffer"
+          ? this.audit(updated, "device.deflate.issued")
+          : Promise.resolve()
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    let commandError: unknown = null;
+    let deviceAuditError: unknown = null;
     try {
       if (phase === "result" && condition.presentation === "puffer") {
         await this.device.inflate({
@@ -550,16 +719,53 @@ export class SessionController {
           rampMs: this.config.timingMs.inflateRamp,
           requestId: randomUUID(),
         });
-        updated = this.refreshDeviceStatus(updated, await this.device.getStatus());
+        const status = await this.device.getStatus();
+        if (this.isCurrentTimedPhase(updated.id, phase, sequenceIndex, generation)) {
+          updated = this.refreshDeviceStatus(updated.id, status);
+        }
+        const currentAfterAck = this.sessions.get(updated.id);
+        if (currentAfterAck !== undefined) {
+          try {
+            await this.audit(currentAfterAck, "device.inflate.ack");
+          } catch (error) {
+            deviceAuditError = error;
+          }
+        }
       } else if (phase === "reset" && condition.presentation === "puffer") {
         await this.device.deflate({
           rampMs: this.config.timingMs.deflateRamp,
           requestId: randomUUID(),
         });
-        updated = this.refreshDeviceStatus(updated, await this.device.getStatus());
+        const status = await this.device.getStatus();
+        if (this.isCurrentTimedPhase(updated.id, phase, sequenceIndex, generation)) {
+          updated = this.refreshDeviceStatus(updated.id, status);
+        }
+        const currentAfterAck = this.sessions.get(updated.id);
+        if (currentAfterAck !== undefined) {
+          try {
+            await this.audit(currentAfterAck, "device.deflate.ack");
+          } catch (error) {
+            deviceAuditError = error;
+          }
+        }
       }
     } catch (error) {
-      await this.failSession(updated, errorCode(error, "DEVICE_COMMAND_FAILED"));
+      commandError = error;
+    }
+
+    const [auditError, issuedAuditError] = await Promise.all([auditResult, issuedAuditResult]);
+    const current = this.sessions.get(updated.id);
+    if (
+      current !== undefined
+      && this.activeSessionId === current.id
+      && current.phase !== "error"
+      && !TERMINAL_PHASES.has(current.phase)
+    ) {
+      if (commandError !== null) {
+        await this.failSession(current, errorCode(commandError, "DEVICE_COMMAND_FAILED"));
+      } else if (auditError !== null || issuedAuditError !== null || deviceAuditError !== null) {
+        await this.failSession(current, "AUDIT_STORAGE_FAILED");
+      }
     }
     return this.get(updated.id);
   }
@@ -581,9 +787,21 @@ export class SessionController {
       recoveryRequired: false,
     });
     this.sessions.set(updated.id, updated);
-    await this.audit(updated, `phase.${phase}`);
     this.emit({ type: "session.phaseChanged", sessionId: updated.id });
-    return updated;
+    try {
+      await this.audit(updated, `phase.${phase}`);
+    } catch {
+      const current = this.sessions.get(updated.id);
+      if (
+        current !== undefined
+        && this.activeSessionId === current.id
+        && current.phase !== "error"
+        && !TERMINAL_PHASES.has(current.phase)
+      ) {
+        await this.failSession(current, "AUDIT_STORAGE_FAILED");
+      }
+    }
+    return this.get(updated.id);
   }
 
   private async enterTerminalPhase(
@@ -606,12 +824,16 @@ export class SessionController {
       remainingMs: null,
     });
     this.sessions.set(updated.id, updated);
-    await this.audit(updated, eventType);
     this.emit({
       type: phase === "completed" ? "session.completed" : "session.aborted",
       sessionId: updated.id,
     });
-    return updated;
+    try {
+      await this.audit(this.get(updated.id), eventType);
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Terminal session audit failed.");
+    }
+    return this.get(updated.id);
   }
 
   private phaseTimingPatch(durationMs: number, extra: Partial<RuntimeSession> = {}): Partial<RuntimeSession> {
@@ -632,11 +854,8 @@ export class SessionController {
     const generation = this.timerGeneration;
     this.phaseTimer = setTimeout(() => {
       if (generation !== this.timerGeneration) return;
-      void this.advancePhase(session.id, session.phase).catch(async (error: unknown) => {
-        const current = this.sessions.get(session.id);
-        if (current !== undefined && !TERMINAL_PHASES.has(current.phase) && current.phase !== "error") {
-          await this.failSession(current, errorCode(error, "PHASE_ADVANCE_FAILED"));
-        }
+      void this.advancePhase(session.id, session.phase).catch((error: unknown) => {
+        this.handleBackgroundFailure(error, errorCode(error, "PHASE_ADVANCE_FAILED"));
       });
     }, durationMs);
     this.phaseTimer.unref?.();
@@ -660,16 +879,32 @@ export class SessionController {
         const condition = CONDITIONS[session.currentCondition as ConditionCode];
         if (condition.presentation === "puffer") {
           const status = await this.device.getStatus();
+          const latest = this.sessions.get(session.id);
+          if (
+            latest === undefined
+            || this.activeSessionId !== session.id
+            || latest.phase !== "reset"
+            || latest.sequenceIndex !== index
+            || latest.recoveryRequired
+          ) return;
           if (!isSafeDeflatedStatus(status)) {
-            await this.failSession(session, "DEFLATE_NOT_CONFIRMED");
+            await this.failSession(latest, "DEFLATE_NOT_CONFIRMED");
             return;
           }
         }
+        const current = this.sessions.get(session.id);
+        if (
+          current === undefined
+          || this.activeSessionId !== session.id
+          || current.phase !== "reset"
+          || current.sequenceIndex !== index
+          || current.recoveryRequired
+        ) return;
         if (index === 3) {
-          await this.enterUntimedPhase(session, "summary", { currentCondition: null });
+          await this.enterUntimedPhase(current, "summary", { currentCondition: null });
         } else {
           const nextIndex = (index + 1) as 0 | 1 | 2 | 3;
-          await this.enterTimedPhase(session, "handling", nextIndex);
+          await this.enterTimedPhase(current, "handling", nextIndex);
         }
         return;
       }
@@ -684,12 +919,16 @@ export class SessionController {
   }
 
   private async failSession(session: RuntimeSession, failureCode: string): Promise<void> {
-    if (this.handlingFailure || session.phase === "error" || TERMINAL_PHASES.has(session.phase)) return;
+    const current = this.sessions.get(session.id);
+    if (
+      this.handlingFailure
+      || current === undefined
+      || current.phase === "error"
+      || TERMINAL_PHASES.has(current.phase)
+    ) return;
     this.handlingFailure = true;
     try {
       this.cancelTimer();
-      await this.safeStopAndDeflate();
-      const current = this.get(session.id);
       const monotonic = this.monotonicNow();
       const timestamp = this.now().toISOString();
       const updated = this.transition(current, "error", {
@@ -703,8 +942,14 @@ export class SessionController {
         remainingMs: null,
       });
       this.sessions.set(updated.id, updated);
-      await this.audit(updated, "session.error");
+      const safety = this.safeStopAndDeflate();
       this.emit({ type: "session.error", sessionId: updated.id });
+      await safety;
+      try {
+        await this.audit(this.get(updated.id), "session.error");
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : "Error-state audit failed.");
+      }
     } finally {
       this.handlingFailure = false;
     }
@@ -712,20 +957,74 @@ export class SessionController {
 
   private async safeStopAndDeflate(): Promise<void> {
     let firstError: unknown;
+    void this.auditActiveDeviceEvent("device.stop.issued");
     try {
       await this.device.stop({ requestId: randomUUID() });
+      void this.auditActiveDeviceEvent("device.stop.ack");
     } catch (error) {
       firstError = error;
     }
+    void this.auditActiveDeviceEvent("device.deflate.issued");
     try {
       await this.device.deflate({ rampMs: this.config.timingMs.deflateRamp, requestId: randomUUID() });
+      void this.auditActiveDeviceEvent("device.deflate.ack");
     } catch (error) {
       firstError ??= error;
     }
     if (firstError !== undefined) {
+      console.error(`Device safety command failed: ${errorCode(firstError, "DEVICE_SAFETY_FAILED")}`);
       // Both operations were attempted. The session transition still has to be recorded.
       const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
-      if (active !== undefined) await this.audit(active, "device.safetyCommandFailed", errorCode(firstError, "DEVICE_SAFETY_FAILED"));
+      if (active !== undefined) {
+        try {
+          await this.audit(active, "device.safetyCommandFailed", errorCode(firstError, "DEVICE_SAFETY_FAILED"));
+        } catch (error) {
+          console.error(error instanceof Error ? error.message : "Device safety failure audit failed.");
+        }
+      }
+    }
+    const lastStatus = this.lastDeviceStatus;
+    const alreadySafelyDisconnected = lastStatus?.state === "disconnected"
+      && lastStatus.level <= 0
+      && lastStatus.fault === null;
+    this.lastSafetyFailure = firstError === undefined || alreadySafelyDisconnected
+      ? null
+      : firstError instanceof Error
+        ? firstError
+        : new Error("Unknown device safety failure.");
+  }
+
+  private throwIfSafetyUnconfirmed(): void {
+    if (this.lastSafetyFailure !== null) {
+      throw new AggregateError([this.lastSafetyFailure], "Device STOP/DEFLATE could not be confirmed during shutdown.");
+    }
+  }
+
+  private requireSafetyConfirmed(): void {
+    if (this.lastSafetyFailure !== null) {
+      throw conflict(
+        "STOPまたはDEFLATEを確認できません。物理安全を確認し、緊急停止を再送してください。",
+        "DEVICE_SAFETY_UNCONFIRMED",
+      );
+    }
+  }
+
+  private requireAuditStorageHealthy(): void {
+    if (!this.auditStorageHealthy) {
+      throw conflict(
+        "監査ログを保存できません。新しい進行を開始せず、保存先を確認してサーバーを再起動してください。",
+        "AUDIT_STORAGE_UNAVAILABLE",
+      );
+    }
+  }
+
+  private async auditActiveDeviceEvent(eventType: string): Promise<void> {
+    const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
+    if (active === undefined) return;
+    try {
+      await this.audit(active, eventType);
+    } catch (error) {
+      this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
     }
   }
 
@@ -733,8 +1032,11 @@ export class SessionController {
     this.lastDeviceStatus = status;
     const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
     if (active !== undefined) {
-      const updated = this.refreshDeviceStatus(active, status);
+      const updated = this.refreshDeviceStatus(active.id, status);
       this.emit({ type: "device.status", sessionId: updated.id, deviceStatus: status });
+      void this.audit(updated, "device.status").catch((error: unknown) => {
+        this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
+      });
       if (
         updated.phase !== "setup" &&
         updated.phase !== "error" &&
@@ -748,10 +1050,26 @@ export class SessionController {
     }
   }
 
-  private refreshDeviceStatus(session: RuntimeSession, status: DeviceStatus): RuntimeSession {
-    const updated = this.patchSession(session, { deviceStatus: status.state, deviceLevel: status.level });
+  private refreshDeviceStatus(sessionId: string, status: DeviceStatus): RuntimeSession {
+    const current = this.get(sessionId);
+    const updated = this.patchSession(current, { deviceStatus: status.state, deviceLevel: status.level });
     this.sessions.set(updated.id, updated);
     return updated;
+  }
+
+  private isCurrentTimedPhase(
+    sessionId: string,
+    phase: "handling" | "processing" | "result" | "reset",
+    sequenceIndex: 0 | 1 | 2 | 3,
+    generation: number,
+  ): boolean {
+    const current = this.sessions.get(sessionId);
+    return current !== undefined
+      && this.activeSessionId === sessionId
+      && this.timerGeneration === generation
+      && current.phase === phase
+      && current.sequenceIndex === sequenceIndex
+      && !current.recoveryRequired;
   }
 
   private transition(session: RuntimeSession, phase: ExperimentPhase, patch: Partial<RuntimeSession>): RuntimeSession {
@@ -798,6 +1116,7 @@ export class SessionController {
       summary: publicView.summary,
       formUrl: publicView.formUrl,
       recentEvents: [...(this.recentEvents.get(session.id) ?? [])],
+      displayFullscreen: this.displayFullscreenStates.get(session.id) ?? null,
     };
   }
 
@@ -807,6 +1126,9 @@ export class SessionController {
       ? this.publicCondition(session.currentCondition as ConditionCode, this.requireSequenceIndex(session))
       : null;
     const showSummary = session.phase === "summary" || session.phase === "completed";
+    const showLabelState = session.phase === "result"
+      && session.currentCondition !== null
+      && CONDITIONS[session.currentCondition].presentation === "label";
     const summary = showSummary
       ? [...session.orderCode].map((conditionCode, index) =>
           this.publicCondition(conditionCode as ConditionCode, index as 0 | 1 | 2 | 3),
@@ -816,7 +1138,9 @@ export class SessionController {
       phase: session.phase,
       sequenceIndex: session.sequenceIndex,
       current,
-      fixedState: { ...session.fixedState },
+      fixedState: showLabelState
+        ? { score: session.fixedState.score, label: session.fixedState.label }
+        : null,
       phaseStartedAt: session.phaseStartedAt,
       phaseEndsAt: session.phaseEndsAt,
       remainingMs:
@@ -855,6 +1179,15 @@ export class SessionController {
     for (const listener of this.listeners) listener(event);
   }
 
+  private handleBackgroundFailure(error: unknown, failureCode: string): void {
+    console.error(error instanceof Error ? error.message : failureCode);
+    const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
+    if (active === undefined || active.phase === "error" || TERMINAL_PHASES.has(active.phase)) return;
+    void this.failSession(active, failureCode).catch((nestedError: unknown) => {
+      console.error(nestedError instanceof Error ? nestedError.message : "Session safety handling failed.");
+    });
+  }
+
   private async audit(session: RuntimeSession, eventType: string, explicitErrorCode?: string): Promise<void> {
     const event = createLogEvent({
       session,
@@ -865,7 +1198,12 @@ export class SessionController {
       deviceStatus: session.deviceStatus,
       ...(explicitErrorCode === undefined ? {} : { errorCode: explicitErrorCode }),
     });
-    await this.logger.append(event);
+    try {
+      await this.logger.append(event);
+    } catch (error) {
+      this.auditStorageHealthy = false;
+      throw error;
+    }
     const recent = this.recentEvents.get(session.id) ?? [];
     recent.push({
       wallClockIso: event.wallClockIso,

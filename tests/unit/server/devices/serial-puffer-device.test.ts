@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SerialPufferDevice } from "../../../../src/server/devices/serial-puffer-device.js";
 import {
   DeviceCommandSupersededError,
+  DeviceFaultError,
   DeviceNotConnectedError,
   DeviceProtocolError,
   DeviceTimeoutError,
@@ -24,16 +25,25 @@ class FakeSerialPort {
   public isOpen = false;
   public readonly writes: string[] = [];
   public autoAck = true;
+  public deferOpen = false;
+  public closeCalls = 0;
+  public synchronousWriteFailures = 0;
+  private deferredOpenCallback: ((error?: Error | null) => void) | null = null;
   private readonly dataListeners = new Set<DataListener>();
   private readonly errorListeners = new Set<ErrorListener>();
   private readonly closeListeners = new Set<CloseListener>();
 
   public open(callback: (error?: Error | null) => void): void {
+    if (this.deferOpen) {
+      this.deferredOpenCallback = callback;
+      return;
+    }
     this.isOpen = true;
     callback();
   }
 
   public close(callback: (error?: Error | null) => void): void {
+    this.closeCalls += 1;
     this.isOpen = false;
     callback();
     for (const listener of this.closeListeners) listener();
@@ -41,11 +51,24 @@ class FakeSerialPort {
 
   public write(data: string, callback?: (error?: Error | null) => void): boolean {
     this.writes.push(data);
+    const command = JSON.parse(data.trim()) as WrittenCommand;
+    if (this.synchronousWriteFailures > 0) {
+      this.synchronousWriteFailures -= 1;
+      throw new Error("injected synchronous write failure");
+    }
     callback?.();
     if (this.autoAck) {
-      queueMicrotask(() => this.ack(this.commands().at(-1)));
+      queueMicrotask(() => this.ack(command));
     }
     return true;
+  }
+
+  public completeOpen(error?: Error): void {
+    const callback = this.deferredOpenCallback;
+    if (callback === null) throw new Error("No deferred open is pending.");
+    this.deferredOpenCallback = null;
+    if (error === undefined) this.isOpen = true;
+    callback(error);
   }
 
   public on(event: "data", listener: DataListener): this;
@@ -191,6 +214,95 @@ describe("SerialPufferDevice", () => {
     const request = invalid.port.commands()[0];
     invalid.port.send({ v: 2, requestId: request?.requestId, ok: true, state: "idle" });
     await invalidRejection;
+  });
+
+  it("rejects a successful ACK whose state contradicts the pending command", async () => {
+    const { device, port } = setup();
+    port.autoAck = false;
+    await device.connect();
+    const inflate = device.inflate({ requestId: "contradictory-inflate", level: 0.6, rampMs: 6_000 });
+    const rejection = expect(inflate).rejects.toBeInstanceOf(DeviceProtocolError);
+
+    port.send({
+      v: 1,
+      requestId: "contradictory-inflate",
+      ok: true,
+      state: "idle",
+      level: 0,
+      fault: null,
+    });
+
+    await rejection;
+    expect(port.commands().map((command) => command.cmd).slice(-2)).toEqual(["inflate", "stop"]);
+  });
+
+  it("fails closed on an explicit negative ACK and exposes immutable command history", async () => {
+    const { device, port } = setup();
+    port.autoAck = false;
+    const statuses: string[] = [];
+    const unsubscribe = device.onStatus((status) => statuses.push(status.state));
+    await device.connect();
+    const inflate = device.inflate({ requestId: "rejected-inflate", level: 0.6, rampMs: 6_000 });
+    const rejection = expect(inflate).rejects.toBeInstanceOf(DeviceFaultError);
+
+    port.send({
+      v: 1,
+      requestId: "rejected-inflate",
+      ok: false,
+      state: "fault",
+      level: 0,
+      errorCode: "OVERPRESSURE",
+    });
+
+    await rejection;
+    unsubscribe();
+    expect(statuses).toContain("fault");
+    expect(Object.isFrozen(device.commandHistory)).toBe(true);
+    expect(device.commandHistory.map((entry) => entry.command).slice(-2)).toEqual(["inflate", "stop"]);
+  });
+
+  it("turns a synchronous serial write exception into a safe rejection and STOP attempt", async () => {
+    const { device, port } = setup();
+    await device.connect();
+    port.synchronousWriteFailures = 1;
+
+    await expect(device.ping()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+
+    expect(port.commands().map((command) => command.cmd)).toEqual(["ping", "stop"]);
+  });
+
+  it("times out a serial open and closes a port that opens after the timeout", async () => {
+    vi.useFakeTimers();
+    const { device, port } = setup({ ackTimeoutMs: 100 });
+    port.deferOpen = true;
+    const connecting = device.connect();
+    const rejection = expect(connecting).rejects.toBeInstanceOf(DeviceNotConnectedError);
+
+    await vi.advanceTimersByTimeAsync(100);
+    await rejection;
+    await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+
+    port.completeOpen();
+    await vi.runAllTicks();
+    expect(port.closeCalls).toBe(1);
+    expect(port.isOpen).toBe(false);
+    await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+  });
+
+  it("allows STOP to be repeated while an earlier STOP acknowledgement is pending", async () => {
+    const { device, port } = setup();
+    port.autoAck = false;
+    await device.connect();
+
+    const firstStop = device.stop({ requestId: "repeat-stop-1" });
+    const secondStop = device.stop({ requestId: "repeat-stop-2" });
+    const commands = port.commands();
+    port.ack(commands.find((command) => command.requestId === "repeat-stop-1"));
+    port.ack(commands.find((command) => command.requestId === "repeat-stop-2"));
+
+    await expect(firstStop).resolves.toMatchObject({ requestId: "repeat-stop-1", state: "stopped" });
+    await expect(secondStop).resolves.toMatchObject({ requestId: "repeat-stop-2", state: "stopped" });
+    expect(commands.map((command) => command.cmd)).toEqual(["stop", "stop"]);
   });
 
   it("handles ready/fault events and unexpected connection loss", async () => {

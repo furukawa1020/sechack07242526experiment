@@ -166,7 +166,7 @@ export function countOrderUsage(
     const countsAsUsed = record.result === "ok"
       || (
         includeAbortedInOrderBalancing
-        && record.result === "aborted"
+        && (record.result === "aborted" || record.result === null)
         && record.presentationsStarted > 0
       );
     if (countsAsUsed) {

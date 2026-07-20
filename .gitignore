@@ -1,8 +1,8 @@
 node_modules/
 dist/
 dist-server/
-data/sessions/
-data/e2e-sessions/
+data/**
+!data/.gitkeep
 artifacts/coverage/
 artifacts/playwright-report/
 artifacts/test-results/

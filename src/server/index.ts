@@ -51,20 +51,27 @@ function createDevice(
   });
 }
 
-function inferMode(): "development" | "production" | "test" {
-  if (process.env.NODE_ENV === "test") return "test";
-  if (process.env.NODE_ENV === "production") return "production";
-  return fileURLToPath(import.meta.url).includes(`${sep}dist-server${sep}`) ? "production" : "development";
+export function inferServerMode(
+  modulePath = fileURLToPath(import.meta.url),
+  nodeEnvironment = process.env.NODE_ENV,
+): "development" | "production" | "test" {
+  // A compiled CLI entry is always production, even if a inherited shell
+  // variable says NODE_ENV=test. Tests select test mode explicitly through
+  // startServer({ mode: "test" }).
+  if (modulePath.includes(`${sep}dist-server${sep}`)) return "production";
+  if (nodeEnvironment === "test") return "test";
+  if (nodeEnvironment === "production") return "production";
+  return "development";
 }
 
 export async function startServer(options: StartServerOptions = {}): Promise<RunningExperimentServer> {
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
-  const mode = options.mode ?? inferMode();
+  const mode = options.mode ?? inferServerMode();
   const loaded = await loadExperimentConfig(
     options.configPath ?? process.env.EXPERIMENT_CONFIG_PATH ?? "config/experiment.json",
     {
       rootDirectory,
-      production: process.env.NODE_ENV === "production",
+      production: mode === "production",
     },
   );
   const { config } = loaded;
@@ -80,6 +87,16 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   const operatorToken = config.network.allowLan ? randomBytes(32).toString("base64url") : null;
   const device = createDevice(config, mode);
   const logger = new ExperimentLogger({ directory: configuredLogDirectory });
+  const existingSummaries = await logger.listSessionSummaries();
+  const interruptedRuns = existingSummaries.filter((summary) =>
+    summary.result === null && summary.presentationsStarted > 0,
+  ).length;
+  if (interruptedRuns > 0) {
+    console.warn(
+      `${interruptedRuns} interrupted session(s) were found in local logs; `
+      + "they remain non-complete and count as used for order balancing.",
+    );
+  }
   const controller = new SessionController({
     config,
     configHash: loaded.configHash,
@@ -136,11 +153,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       httpServer.closeAllConnections();
       await controller.shutdown();
       controller.dispose();
-      try {
-        await device.disconnect();
-      } catch {
-        // The device is already safe-stopped or physically disconnected.
-      }
+      // A Serial adapter reports an AggregateError when STOP, DEFLATE, or port
+      // close could not be confirmed. Propagate it so the CLI exits non-zero
+      // instead of claiming a safe shutdown.
+      await device.disconnect();
       await Promise.race([
         application.close(),
         new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),

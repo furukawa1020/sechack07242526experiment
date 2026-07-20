@@ -22,7 +22,7 @@
     "ackTimeout": 100,
     "allowMockInProduction": true
   },
-  "formUrl": "",
+  "formUrl": "https://docs.google.com/forms/d/e/TEST_FORM_ID/viewform",
   "logging": { "directory": "./data/e2e-sessions", "includeAbortedInOrderBalancing": true },
   "network": { "allowLan": false, "allowExternalRuntimeRequests": false }
 }

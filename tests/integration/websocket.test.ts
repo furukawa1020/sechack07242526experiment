@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseExperimentConfig } from "../../src/shared/index.js";
 import { createApiApp } from "../../src/server/app.js";
@@ -28,10 +28,10 @@ function testConfig() {
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
     timingMs: {
-      handling: 10,
-      processing: 10,
-      result: 10,
-      reset: 10,
+      handling: 100,
+      processing: 100,
+      result: 100,
+      reset: 100,
       inflateRamp: 1,
       deflateRamp: 1,
     },
@@ -126,6 +126,10 @@ describe("WebSocket synchronization", () => {
     socket.send(JSON.stringify({ type: "display.ready" }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(true);
+    socket.send(JSON.stringify({ type: "display.fullscreenState", payload: { fullscreen: true } }));
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayFullscreen).toBe(true);
+    });
 
     const closed = waitForClose(socket);
     socket.send(JSON.stringify({ type: "session.start" }));
@@ -143,5 +147,58 @@ describe("WebSocket synchronization", () => {
     await expect(waitForOpen(allowed)).resolves.toBeUndefined();
     allowed.close();
   });
-});
 
+  it("fails an active run safely when the final Operator connection is lost", async () => {
+    const running = await start();
+    runningServers.push(running);
+    const operator = new WebSocket(`${running.wsUrl}?role=operator`);
+    await waitForOpen(operator);
+    const created = await running.controller.create({
+      researchId: "SH26-002",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    const display = new WebSocket(`${running.wsUrl}?displayToken=${encodeURIComponent(created.displayToken)}`);
+    await waitForOpen(display);
+    display.send(JSON.stringify({ type: "display.ready" }));
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(true);
+    });
+    await running.controller.prepare(created.snapshot.id);
+    await running.controller.start(created.snapshot.id);
+
+    operator.terminate();
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+        phase: "error",
+        errorCode: "OPERATOR_CONNECTION_LOST",
+      });
+    });
+  });
+
+  it("closes a deleted display lease on its next heartbeat and keeps serving new sessions", async () => {
+    const running = await start();
+    runningServers.push(running);
+    const created = await running.controller.create({
+      researchId: "SH26-003",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    const display = new WebSocket(`${running.wsUrl}?displayToken=${encodeURIComponent(created.displayToken)}`);
+    await waitForOpen(display);
+    display.send(JSON.stringify({ type: "display.ready" }));
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(true);
+    });
+    await running.controller.delete(created.snapshot.id);
+
+    const closed = waitForClose(display);
+    display.send(JSON.stringify({ type: "display.heartbeat" }));
+    await expect(closed).resolves.toBe(1008);
+    await expect(running.controller.create({
+      researchId: "SH26-004",
+      consentConfirmed: true,
+      orderCode: "BCAD",
+    })).resolves.toBeDefined();
+  });
+});

@@ -1,9 +1,11 @@
 import {
   parseCreatedSession,
+  parseDeviceAck,
   parseDeviceStatus,
   parseOperatorSnapshot,
   parseParticipantSnapshot,
   type CreatedSession,
+  type DeviceActionResult,
   type DeviceStatus,
   type OperatorSnapshot,
   type OrderCode,
@@ -51,7 +53,8 @@ export function getOperatorToken(): string | null {
 function needsOperatorAuthorization(path: string): boolean {
   return path.startsWith("/api/sessions")
     || path.startsWith("/api/device")
-    || path.startsWith("/api/exports");
+    || path.startsWith("/api/exports")
+    || path.startsWith("/api/operator");
 }
 
 async function responseMessage(response: Response): Promise<string> {
@@ -113,6 +116,21 @@ export interface CreateSessionInput {
 }
 
 export const experimentApi = {
+  async getOperatorConfig(): Promise<{ readonly researchIdPattern: string; readonly protocolVersion: string }> {
+    const raw = await requestJson("/api/operator/config");
+    if (typeof raw !== "object" || raw === null) throw invalidResponse();
+    const record = raw as Readonly<Record<string, unknown>>;
+    const researchIdPattern = record["researchIdPattern"];
+    const protocolVersion = record["protocolVersion"];
+    if (typeof researchIdPattern !== "string" || typeof protocolVersion !== "string") throw invalidResponse();
+    try {
+      void new RegExp(researchIdPattern, "u");
+    } catch {
+      throw invalidResponse();
+    }
+    return { researchIdPattern, protocolVersion };
+  },
+
   async createSession(input: CreateSessionInput): Promise<CreatedSession> {
     const raw = await requestJson("/api/sessions", { method: "POST", body: JSON.stringify(input) });
     const parsed = parseCreatedSession(raw);
@@ -152,12 +170,15 @@ export const experimentApi = {
 
   async deviceAction(
     action: "connect" | "disconnect" | "ping" | "status" | "inflate" | "deflate" | "stop",
-  ): Promise<DeviceStatus> {
+  ): Promise<DeviceActionResult> {
     const raw = await requestJson(`/api/device/${action}`, { method: "POST" });
     const record = typeof raw === "object" && raw !== null ? raw as Readonly<Record<string, unknown>> : null;
     const parsed = parseDeviceStatus(record?.["status"] ?? record?.["device"] ?? raw);
     if (parsed === null) throw invalidResponse();
-    return parsed;
+    const ackValue = record?.["ack"];
+    const ack = ackValue === null || ackValue === undefined ? null : parseDeviceAck(ackValue);
+    if (ackValue !== null && ackValue !== undefined && ack === null) throw invalidResponse();
+    return { status: parsed, ack };
   },
 
   async getDeviceStatus(): Promise<DeviceStatus> {

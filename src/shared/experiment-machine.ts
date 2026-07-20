@@ -112,11 +112,16 @@ export interface PublicCurrentPresentation {
 
 export type PublicPresentationSummary = PublicCurrentPresentation;
 
+export interface PublicFixedState {
+  readonly score: number;
+  readonly label: string;
+}
+
 /** Participant-safe state: it deliberately has no research ID, order code or A/B/C/D code. */
 export interface PublicSnapshot {
   readonly phase: ExperimentPhase;
   readonly current: PublicCurrentPresentation | null;
-  readonly fixedState: FixedState;
+  readonly fixedState: PublicFixedState | null;
   readonly recoveryRequired: boolean;
   readonly phaseStartedAt: string | null;
   readonly phaseEndsAt: string | null;
@@ -131,13 +136,13 @@ const phases = (...values: ExperimentPhase[]): readonly ExperimentPhase[] => Obj
 export const ALLOWED_TRANSITIONS: Readonly<Record<ExperimentPhase, readonly ExperimentPhase[]>> =
   Object.freeze({
     idle: phases("setup", "aborted"),
-    setup: phases("intro", "aborted"),
-    intro: phases("handling", "aborted"),
+    setup: phases("intro", "aborted", "error"),
+    intro: phases("handling", "aborted", "error"),
     handling: phases("processing", "aborted", "error"),
     processing: phases("result", "aborted", "error"),
     result: phases("reset", "aborted", "error"),
     reset: phases("handling", "summary", "aborted", "error"),
-    summary: phases("completed", "aborted"),
+    summary: phases("completed", "aborted", "error"),
     completed: phases(),
     aborted: phases(),
     error: phases("aborted"),
@@ -397,6 +402,9 @@ export function toPublicSnapshot(
       ...CONDITIONS[session.currentCondition],
     });
   const showSummary = session.phase === "summary" || session.phase === "completed";
+  const showLabelState = session.phase === "result"
+    && session.currentCondition !== null
+    && CONDITIONS[session.currentCondition].presentation === "label";
   const summary: readonly PublicPresentationSummary[] = showSummary
     ? Object.freeze(conditionsForOrder(session.orderCode).map((code, index) => Object.freeze({
       position: (index + 1) as 1 | 2 | 3 | 4,
@@ -407,7 +415,9 @@ export function toPublicSnapshot(
   return Object.freeze({
     phase: session.phase,
     current,
-    fixedState: session.fixedState,
+    fixedState: showLabelState
+      ? Object.freeze({ score: session.fixedState.score, label: session.fixedState.label })
+      : null,
     recoveryRequired: session.recoveryRequired,
     phaseStartedAt: session.phaseStartedAt,
     phaseEndsAt: session.phaseEndsAt,

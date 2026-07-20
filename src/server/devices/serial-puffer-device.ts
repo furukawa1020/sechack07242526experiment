@@ -75,6 +75,10 @@ function isPufferDeviceState(value: unknown): value is PufferDeviceState {
   return typeof value === "string" && PUFFER_DEVICE_STATES.some((state) => state === value);
 }
 
+function isSafeErrorCode(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/u.test(value);
+}
+
 export class SerialPufferDevice implements PufferDevice {
   private readonly options: Required<Pick<
     SerialPufferDeviceOptions,
@@ -142,7 +146,24 @@ export class SerialPufferDevice implements PufferDevice {
 
     try {
       await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          settled = true;
+          reject(new DeviceTimeoutError("status"));
+        }, this.options.ackTimeoutMs);
         port.open((error) => {
+          if (settled) {
+            if ((error === undefined || error === null) && port.isOpen) {
+              try {
+                port.close(() => undefined);
+              } catch {
+                // The timed-out port is already considered unavailable.
+              }
+            }
+            return;
+          }
+          settled = true;
+          clearTimeout(timer);
           if (error !== undefined && error !== null) {
             reject(error);
             return;
@@ -195,7 +216,15 @@ export class SerialPufferDevice implements PufferDevice {
     if (port.isOpen) {
       try {
         await new Promise<void>((resolve, reject) => {
+          let settled = false;
+          const timer = setTimeout(() => {
+            settled = true;
+            reject(new DeviceTimeoutError("stop"));
+          }, this.options.ackTimeoutMs);
           port.close((error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
             if (error !== undefined && error !== null) {
               reject(error);
               return;
@@ -278,7 +307,7 @@ export class SerialPufferDevice implements PufferDevice {
     return new Promise<DeviceAck>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(command.requestId);
-        this.ignoredRequestIds.add(command.requestId);
+        this.rememberIgnoredRequestId(command.requestId);
         const error = new DeviceTimeoutError(command.cmd);
         reject(error);
         if (command.cmd !== "stop") {
@@ -288,15 +317,25 @@ export class SerialPufferDevice implements PufferDevice {
       this.pending.set(command.requestId, { command: command.cmd, resolve, reject, timer });
 
       const serialized = `${JSON.stringify(command)}\n`;
-      this.port?.write(serialized, (error) => {
-        if (error !== undefined && error !== null) {
-          const pending = this.takePending(command.requestId);
-          pending?.reject(new DeviceNotConnectedError(`Serial write failed: ${error.message}`));
-          if (command.cmd !== "stop") {
-            this.handleCommunicationFault("SERIAL_WRITE_FAILED");
+      try {
+        this.port?.write(serialized, (error) => {
+          if (error !== undefined && error !== null) {
+            const pending = this.takePending(command.requestId);
+            pending?.reject(new DeviceNotConnectedError(`Serial write failed: ${error.message}`));
+            if (command.cmd !== "stop") {
+              this.handleCommunicationFault("SERIAL_WRITE_FAILED");
+            }
           }
+        });
+      } catch (error) {
+        const pending = this.takePending(command.requestId);
+        pending?.reject(new DeviceNotConnectedError(
+          `Serial write failed: ${error instanceof Error ? error.message : "unknown error"}`,
+        ));
+        if (command.cmd !== "stop") {
+          this.handleCommunicationFault("SERIAL_WRITE_FAILED");
         }
-      });
+      }
     });
   }
 
@@ -350,7 +389,7 @@ export class SerialPufferDevice implements PufferDevice {
       this.emitStatus();
       return;
     }
-    if (message.event === "fault" && message.state === "fault" && typeof message.errorCode === "string") {
+    if (message.event === "fault" && message.state === "fault" && isSafeErrorCode(message.errorCode)) {
       this.state = "fault";
       this.fault = message.errorCode;
       this.emitStatus();
@@ -367,8 +406,8 @@ export class SerialPufferDevice implements PufferDevice {
       || typeof message.ok !== "boolean"
       || !isPufferDeviceState(message.state)
       || (message.level !== undefined && (typeof message.level !== "number" || message.level < 0 || message.level > 1))
-      || (message.errorCode !== undefined && typeof message.errorCode !== "string")
-      || (message.fault !== undefined && message.fault !== null && typeof message.fault !== "string")
+      || (message.errorCode !== undefined && !isSafeErrorCode(message.errorCode))
+      || (message.fault !== undefined && message.fault !== null && !isSafeErrorCode(message.fault))
     ) {
       this.handleInvalidResponse(new DeviceProtocolError("Device returned an invalid acknowledgement."));
       return;
@@ -383,19 +422,43 @@ export class SerialPufferDevice implements PufferDevice {
       return;
     }
 
+    const successContradiction = message.ok && (
+      message.state === "fault"
+      || message.errorCode !== undefined
+      || (message.fault !== undefined && message.fault !== null)
+    );
+    const failureContradiction = !message.ok && (
+      message.state !== "fault" || !isSafeErrorCode(message.errorCode)
+    );
+    const commandStateMismatch = message.ok && (
+      (pending.command === "inflate" && message.state !== "inflating" && message.state !== "holding")
+      || (pending.command === "deflate" && message.state !== "deflating" && message.state !== "idle")
+      || (pending.command === "stop" && message.state !== "stopped" && message.state !== "idle")
+      || (pending.command === "status" && (
+        typeof message.level !== "number"
+        || !("fault" in message)
+      ))
+    );
+    if (successContradiction || failureContradiction || commandStateMismatch) {
+      const error = new DeviceProtocolError("Device acknowledgement contradicts the pending command.");
+      pending.reject(error);
+      this.handleInvalidResponse(error);
+      return;
+    }
+
     this.state = message.state;
     this.level = typeof message.level === "number" ? message.level : this.level;
     this.fault = typeof message.fault === "string"
       ? message.fault
       : message.ok
         ? null
-        : typeof message.errorCode === "string"
+        : isSafeErrorCode(message.errorCode)
           ? message.errorCode
           : "DEVICE_FAULT";
     this.emitStatus();
 
     if (!message.ok) {
-      const errorCode = typeof message.errorCode === "string" ? message.errorCode : "DEVICE_FAULT";
+      const errorCode = isSafeErrorCode(message.errorCode) ? message.errorCode : "DEVICE_FAULT";
       pending.reject(new DeviceFaultError(errorCode));
       this.writeEmergencyStop();
       return;
@@ -428,10 +491,22 @@ export class SerialPufferDevice implements PufferDevice {
       return;
     }
     const requestId = randomUUID();
-    this.ignoredRequestIds.add(requestId);
+    this.rememberIgnoredRequestId(requestId);
     const command: ProtocolCommand = { v: 1, requestId, cmd: "stop" };
     this.record(command);
-    port.write(`${JSON.stringify(command)}\n`);
+    try {
+      port.write(`${JSON.stringify(command)}\n`, (error) => {
+        if (error !== undefined && error !== null) this.recordEmergencyWriteFailure();
+      });
+    } catch {
+      this.recordEmergencyWriteFailure();
+    }
+  }
+
+  private recordEmergencyWriteFailure(): void {
+    this.state = "fault";
+    this.fault = "EMERGENCY_STOP_WRITE_FAILED";
+    this.emitStatus();
   }
 
   private cancelPendingForStop(): void {
@@ -439,7 +514,7 @@ export class SerialPufferDevice implements PufferDevice {
       if (pending.command !== "stop") {
         clearTimeout(pending.timer);
         this.pending.delete(requestId);
-        this.ignoredRequestIds.add(requestId);
+        this.rememberIgnoredRequestId(requestId);
         pending.reject(new DeviceCommandSupersededError(pending.command));
       }
     }
@@ -454,11 +529,20 @@ export class SerialPufferDevice implements PufferDevice {
     return pending;
   }
 
+  private rememberIgnoredRequestId(requestId: string): void {
+    this.ignoredRequestIds.add(requestId);
+    while (this.ignoredRequestIds.size > 1_024) {
+      const oldest = this.ignoredRequestIds.values().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.ignoredRequestIds.delete(oldest);
+    }
+  }
+
   private rejectAllPending(error: Error): void {
     for (const [requestId, pending] of this.pending) {
       clearTimeout(pending.timer);
       this.pending.delete(requestId);
-      this.ignoredRequestIds.add(requestId);
+      this.rememberIgnoredRequestId(requestId);
       pending.reject(error);
     }
   }

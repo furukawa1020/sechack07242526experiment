@@ -18,8 +18,23 @@
 ```bash
 npm ci
 npm run build
+```
+
+MockDeviceで開発・デモする場合は、次で起動します。
+
+```bash
+npm run preflight -- --allow-mock
+npm run dev
+```
+
+USBシリアル実機を設定した本番運用では、ビルド後に次で起動します。
+
+```bash
+npm run preflight
 npm run start
 ```
+
+`npm run preflight`は既定で本番ゲートです。Serial実機モード、Windows COMポート、`allowMockInProduction=false`、承認済みGoogle Forms URL形式、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。`npm run start`も本番モードで、Mock設定では安全のため起動を拒否します。
 
 起動後に開く画面：
 
@@ -28,24 +43,19 @@ npm run start
 - ヘルスチェック: `http://127.0.0.1:4173/healthz`
 - 参加者画面: セッション作成後にスタッフ画面へ表示される`/display/:token`
 
-開発時は次で起動できます。
-
-```bash
-npm run dev
-```
-
 ## MockDeviceでのデモ
 
-1. `config/experiment.json`の`device.mode`が`mock`であることを確認します。
+1. `config/experiment.json`の`device.mode`が`mock`であることを確認し、`npm run dev`で起動します。
 2. スタッフ画面を開き、装置表示がMockであることを確認して「装置を接続」を押します。
 3. 研究用ID（例: `SH26-001`）を入力し、同意確認済みにチェックします。
 4. 自動割付または提示順を選び、セッションを作成します。
-5. 表示された参加者画面URLを別ウィンドウで開きます。
-6. 接続済みになったら共通導入を表示し、4提示を開始します。
+5. 表示された参加者画面URLを別ウィンドウで開き、F11またはkioskで全画面表示します。
+6. 接続と全画面を目視確認してスタッフ画面の確認欄へチェックし、共通導入を表示して4提示を開始します。
 7. サマリー後、Googleフォームでの回答完了を確認してセッションを完了します。
 8. 必要ならCSVを出力します。
 
 参加者画面には内部コードA/B/C/Dを表示しません。スタッフ画面では監査と進行確認のためだけに表示します。
+デバイステスト画面ではINFLATE・DEFLATE・STOPの実ACKと`requestId`を表示します。最後のスタッフ画面接続が実行中に失われた場合は、無人進行を防ぐためSTOP/DEFLATEとerror遷移を行います。
 
 ## 実機接続
 
@@ -64,6 +74,22 @@ npm run dev
 ```
 
 本番前に`/device-test`でPING、STATUS、上限以下の膨張、収縮、STOPを確認してください。詳細は[運用手順](docs/RUNBOOK.md)と[装置通信仕様](docs/DEVICE_PROTOCOL.md)を参照してください。
+
+## 本番前点検
+
+本番用設定を確定した後、起動と同じユーザー・同じ環境変数で実行します。
+
+```bash
+npm run preflight
+npm run build
+npm run start
+```
+
+点検結果には、解決済み設定パスとSHA-256、`protocolVersion`、装置モード・COM・baud・ACK timeout、固定状態、Google Forms URL、bind/LAN設定、ログ保存先と空き容量が表示されます。機密の操作トークンや環境変数全体は表示しません。別設定は`npm run preflight -- --config config/会場用設定.json`で指定できます。
+
+`--allow-mock`は開発用Mock確認だけを通す例外で、本番承認の代わりにはなりません。終了コードが1、または`FAIL`が1件でもあれば本番を開始しないでください。
+
+実験PCと表示端末は、インターネットへ出られない隔離LANまたは単一PC構成で運用します。Googleフォームは別端末・別経路で開き、実験アプリから自動送受信しません。LAN運用時の操作トークンは画面・ログ・手順書・チャット・スクリーンショットへ転記しないでください。
 
 ## 設定
 

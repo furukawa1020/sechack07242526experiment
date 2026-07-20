@@ -71,6 +71,9 @@ export function securityMiddleware(options: SecurityOptions) {
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("X-Frame-Options", "DENY");
+    if (request.path.startsWith("/api/") || request.path === "/healthz") {
+      response.setHeader("Cache-Control", "no-store");
+    }
 
     if (!isAllowedHost(request.get("host"), options)) {
       response.status(403).json({ error: "許可されていないHostです。", code: "HOST_NOT_ALLOWED" });
