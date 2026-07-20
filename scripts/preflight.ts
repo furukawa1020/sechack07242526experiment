@@ -1,4 +1,5 @@
-import { statfs } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { lstat, mkdir, open, readFile, statfs, unlink } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -7,8 +8,10 @@ import {
   formatConfigError,
   type ExperimentConfig,
 } from "../src/shared/schemas.js";
+import { ExperimentLogger } from "../src/server/logging/experiment-log.js";
 
 const DEFAULT_CONFIG_PATH = "config/experiment.json";
+const MINIMUM_FREE_BYTES = 1_073_741_824n;
 
 export interface PreflightArguments {
   readonly allowMock: boolean;
@@ -32,6 +35,7 @@ export interface PreflightReport {
   readonly mode: "production" | "development-mock";
   readonly configPath: string;
   readonly configHash: string;
+  readonly configFileHash: string;
   readonly protocolVersion: string;
   readonly deviceMode: ExperimentConfig["device"]["mode"];
   readonly serialPath: string;
@@ -47,6 +51,7 @@ export interface PreflightReport {
   readonly allowLan: boolean;
   readonly allowExternalRuntimeRequests: boolean;
   readonly logPath: string;
+  readonly logSessionCount: number;
   readonly availableBytes: bigint;
   readonly checks: readonly GateCheck[];
 }
@@ -260,21 +265,100 @@ export async function collectPreflightReport(
   const dataRoot = resolve(rootDirectory, "data");
   const fileSystem = await statfs(dataRoot, { bigint: true });
   const availableBytes = fileSystem.bavail * fileSystem.bsize;
+  const configFileHash = createHash("sha256")
+    .update(await readFile(loaded.path))
+    .digest("hex");
+  let logDirectoryCheck: GateCheck;
+  let logSessionCount = 0;
+  if (!resolvedLog.safe) {
+    logDirectoryCheck = {
+      name: "logging.directory",
+      status: "fail",
+      detail: "ログ保存先はリポジトリのdata/内でなければなりません。",
+    };
+  } else {
+    const probePath = resolve(resolvedLog.path, `.preflight-${randomUUID()}`);
+    try {
+      await mkdir(resolvedLog.path, { recursive: true, mode: 0o700 });
+      const dataRootStat = await lstat(dataRoot);
+      const logDirectoryStat = await lstat(resolvedLog.path);
+      if (dataRootStat.isSymbolicLink() || logDirectoryStat.isSymbolicLink()) {
+        throw new Error("data/またはログ保存先がシンボリックリンク／junctionです。");
+      }
+      const handle = await open(probePath, "wx", 0o600);
+      try {
+        await handle.writeFile("preflight\n", "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      logDirectoryCheck = {
+        name: "logging.directory",
+        status: "pass",
+        detail: "ログ保存先はdata/内の通常ディレクトリで、書込みと同期を確認しました。",
+      };
+    } catch (error) {
+      logDirectoryCheck = {
+        name: "logging.directory",
+        status: "fail",
+        detail: `ログ保存先の安全な書込みを確認できません: ${error instanceof Error ? error.message : "unknown error"}`,
+      };
+    } finally {
+      try {
+        await unlink(probePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          logDirectoryCheck = {
+            name: "logging.directory",
+            status: "fail",
+            detail: "ログ保存先の検査用ファイルを削除できませんでした。",
+          };
+        }
+      }
+    }
+  }
+  const cloudSyncPath = /(?:^|[\\/])(?:OneDrive|Dropbox|Google Drive)(?:[\\/]|$)/iu.test(rootDirectory);
+  let logIntegrityCheck: GateCheck;
+  if (logDirectoryCheck.status === "pass") {
+    try {
+      const summaries = await new ExperimentLogger({ directory: resolvedLog.path }).listSessionSummaries();
+      logSessionCount = summaries.length;
+      logIntegrityCheck = {
+        name: "logging.integrity",
+        status: "pass",
+        detail: `${String(logSessionCount)}件のセッションログを検証しました。`,
+      };
+    } catch (error) {
+      logIntegrityCheck = {
+        name: "logging.integrity",
+        status: "fail",
+        detail: `既存ログを安全に読み取れません: ${error instanceof Error ? error.message : "unknown error"}`,
+      };
+    }
+  } else {
+    logIntegrityCheck = {
+      name: "logging.integrity",
+      status: "fail",
+      detail: "ログ保存先を検証できないため、既存ログの整合性を確認できません。",
+    };
+  }
   const checks = [
     ...evaluatePreflightGates(config, allowMock),
+    logDirectoryCheck,
+    logIntegrityCheck,
     {
-      name: "logging.directory",
-      status: resolvedLog.safe ? "pass" : "fail",
-      detail: resolvedLog.safe
-        ? "ログ保存先はリポジトリのdata/内です。"
-        : "ログ保存先はリポジトリのdata/内でなければなりません。",
+      name: "logging.cloudSyncPath",
+      status: cloudSyncPath ? "fail" : "pass",
+      detail: cloudSyncPath
+        ? "リリース先が既知のクラウド同期ディレクトリ内です。"
+        : "リリース先は既知のクラウド同期パスではありません。",
     } satisfies GateCheck,
     {
       name: "disk.freeSpace",
-      status: availableBytes > 0n ? "pass" : "fail",
-      detail: availableBytes > 0n
-        ? "ログ保存先ボリュームの空き容量を取得できました。"
-        : "ログ保存先ボリュームに空き容量がありません。",
+      status: availableBytes >= MINIMUM_FREE_BYTES ? "pass" : "fail",
+      detail: availableBytes >= MINIMUM_FREE_BYTES
+        ? "ログ保存先ボリュームに1 GiB以上の空き容量があります。"
+        : "ログ保存先ボリュームの空き容量が1 GiB未満です。",
     } satisfies GateCheck,
   ];
 
@@ -282,6 +366,7 @@ export async function collectPreflightReport(
     mode: allowMock ? "development-mock" : "production",
     configPath: loaded.path,
     configHash: loaded.configHash,
+    configFileHash,
     protocolVersion: config.protocolVersion,
     deviceMode: config.device.mode,
     serialPath: config.device.serialPath,
@@ -297,6 +382,7 @@ export async function collectPreflightReport(
     allowLan: config.network.allowLan,
     allowExternalRuntimeRequests: config.network.allowExternalRuntimeRequests,
     logPath: resolvedLog.path,
+    logSessionCount,
     availableBytes,
     checks: Object.freeze(checks),
   });
@@ -325,7 +411,8 @@ export function renderPreflightReport(
   writeLine("");
   writeLine("設定情報");
   writeLine(`  設定パス: ${report.configPath}`);
-  writeLine(`  SHA-256: ${report.configHash}`);
+  writeLine(`  設定ファイルSHA-256: ${report.configFileHash}`);
+  writeLine(`  設定内容SHA-256: ${report.configHash}`);
   writeLine(`  protocolVersion: ${report.protocolVersion}`);
   writeLine(`  device mode: ${report.deviceMode}`);
   writeLine(`  serialPath: ${report.serialPath === "" ? "(未設定)" : report.serialPath}`);
@@ -338,6 +425,7 @@ export function renderPreflightReport(
   writeLine(`  allowLan: ${String(report.allowLan)}`);
   writeLine(`  allowExternalRuntimeRequests: ${String(report.allowExternalRuntimeRequests)}`);
   writeLine(`  ログ保存先: ${report.logPath}`);
+  writeLine(`  検証済みセッションログ: ${String(report.logSessionCount)}件`);
   writeLine(`  空き容量: ${formatByteCount(report.availableBytes)} (${report.availableBytes.toString()} bytes)`);
   writeLine("");
   writeLine("ゲート判定");

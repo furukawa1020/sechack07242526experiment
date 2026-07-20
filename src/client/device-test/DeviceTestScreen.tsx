@@ -111,7 +111,6 @@ export function DeviceTestScreen(): React.JSX.Element {
     >
       <header className="device-test-header">
         <div>
-          <p className="operator-kicker">PUFFER DEVICE · ISOLATED TEST</p>
           <h1>デバイステスト</h1>
           <p>本番セッションとは分離された接続・安全動作確認画面です。</p>
         </div>
@@ -127,7 +126,7 @@ export function DeviceTestScreen(): React.JSX.Element {
             <i /><i /><i />
           </div>
           <div>
-            <p className="device-mode-badge">{device.mode === "mock" ? "MOCK DEVICE" : device.mode.toUpperCase()}</p>
+            <p className="device-mode-badge">装置モード: {device.mode === "mock" ? "Mock" : "Serial"}</p>
             <h2 id="device-state-title">{device.state}</h2>
             <dl className="device-hero-details">
               <div><dt>接続</dt><dd>{device.connected ? "接続済み" : "未接続"}</dd></div>
@@ -138,7 +137,7 @@ export function DeviceTestScreen(): React.JSX.Element {
         </section>
 
         <section className="device-command-card" aria-labelledby="command-title">
-          <div className="card-heading compact-heading"><div><p>COMMANDS</p><h2 id="command-title">動作確認</h2></div></div>
+          <div className="card-heading compact-heading"><div><h2 id="command-title">動作確認</h2></div></div>
           <p className="command-note">膨張テストはサーバー設定の正規化レベルと安全上限を使用します。物理圧力は指定できません。</p>
           <div className="device-command-grid">
             {normalActions.map((action) => (
@@ -164,7 +163,7 @@ export function DeviceTestScreen(): React.JSX.Element {
         </section>
 
         <section className="device-event-card" aria-labelledby="device-events-title">
-          <div className="card-heading compact-heading"><div><p>ACK / STATUS</p><h2 id="device-events-title">コマンド履歴</h2></div></div>
+          <div className="card-heading compact-heading"><div><h2 id="device-events-title">コマンド履歴</h2></div></div>
           {events.length === 0 ? <p className="empty-events">まだコマンドはありません</p> : (
             <ol className="device-event-list">
               {[...events].reverse().map((event, index) => (

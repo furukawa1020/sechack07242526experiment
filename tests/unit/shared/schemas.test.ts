@@ -123,7 +123,7 @@ describe("config file loading", () => {
   it("blocks path traversal and production MockDevice misuse", async () => {
     await expect(loadExperimentConfig("../outside.json")).rejects.toThrow(/allowed config directory/iu);
     await expect(loadExperimentConfig("config/experiment.json", { production: true }))
-      .rejects.toThrow(/Mock device mode is disabled/iu);
+      .rejects.toThrow(/Mock device mode is unconditionally disabled/iu);
   });
 
   it("reports malformed JSON from an allowed temporary config directory", async () => {

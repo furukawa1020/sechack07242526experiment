@@ -64,8 +64,8 @@ export async function loadExperimentConfig(
   }
 
   const config = parseExperimentConfig(parsedJson);
-  if (options.production === true && config.device.mode === "mock" && !config.device.allowMockInProduction) {
-    throw new Error("Mock device mode is disabled in production by this configuration.");
+  if (options.production === true && config.device.mode === "mock") {
+    throw new Error("Mock device mode is unconditionally disabled in production.");
   }
 
   return Object.freeze({

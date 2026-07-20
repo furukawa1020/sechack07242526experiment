@@ -106,7 +106,7 @@ function SetupForm({
     <form className="operator-card setup-form" onSubmit={onSubmit}>
       <div className="card-heading">
         <span className="step-number">1</span>
-        <div><p>SETUP</p><h2>参加者セッション</h2></div>
+        <div><h2>参加者セッション</h2></div>
       </div>
       <label className="field-label" htmlFor="research-id">研究用ID</label>
       <input
@@ -186,7 +186,7 @@ function SessionOverview({
     <section className="operator-card session-overview" aria-labelledby="session-overview-title">
       <div className="card-heading">
         <span className="step-number">2</span>
-        <div><p>SESSION</p><h2 id="session-overview-title">進行状況</h2></div>
+        <div><h2 id="session-overview-title">進行状況</h2></div>
       </div>
       <dl className="operator-status-grid">
         <StatusItem label="研究用ID" value={session.researchId} />
@@ -252,7 +252,7 @@ function ActionPanel({
     <section className="operator-card action-panel" aria-labelledby="action-title">
       <div className="card-heading">
         <span className="step-number">3</span>
-        <div><p>CONTROL</p><h2 id="action-title">進行操作</h2></div>
+        <div><h2 id="action-title">進行操作</h2></div>
       </div>
 
       {session.displayUrl === null ? null : (
@@ -360,8 +360,8 @@ function DeviceAndEvents({
   return (
     <aside className="operator-side-column">
       <section className="operator-card compact-card" aria-labelledby="device-status-title">
-        <div className="card-heading compact-heading"><div><p>DEVICE</p><h2 id="device-status-title">装置状態</h2></div></div>
-        <p className="device-mode-badge">{device.mode === "mock" ? "MOCK DEVICE" : device.mode.toUpperCase()}</p>
+        <div className="card-heading compact-heading"><div><h2 id="device-status-title">装置状態</h2></div></div>
+        <p className="device-mode-badge">装置モード: {device.mode === "mock" ? "Mock" : "Serial"}</p>
         <dl className="device-details">
           <StatusItem label="接続" value={device.connected ? "接続済み" : "未接続"} />
           <StatusItem label="状態" value={device.state} />
@@ -375,7 +375,7 @@ function DeviceAndEvents({
       </section>
 
       <section className="operator-card compact-card event-card" aria-labelledby="event-title">
-        <div className="card-heading compact-heading"><div><p>EVENTS</p><h2 id="event-title">直近イベント</h2></div></div>
+        <div className="card-heading compact-heading"><div><h2 id="event-title">直近イベント</h2></div></div>
         {events.length === 0 ? <p className="empty-events">イベントはまだありません</p> : (
           <ol className="event-list">
             {[...events].reverse().map((event, index) => (
@@ -592,7 +592,6 @@ export function OperatorScreen(): React.JSX.Element {
     <div className={operatorClass} data-testid="operator-app" data-surface="operator" aria-busy={busy}>
       <header className="operator-header">
         <div>
-          <p className="operator-kicker">SECHACK365 · LOCAL EXPERIMENT CONSOLE</p>
           <h1>実験進行コンソール</h1>
         </div>
         <div className="operator-header-actions">

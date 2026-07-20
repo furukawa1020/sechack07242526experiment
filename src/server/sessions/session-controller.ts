@@ -10,6 +10,7 @@ import {
   type OrderCode,
 } from "../../shared/index.js";
 import { badRequest, conflict, notFound } from "../api/http-error.js";
+import { waitForConfirmedDeflatedStatus } from "../devices/index.js";
 import type {
   DeviceAck,
   DeviceStatus,
@@ -108,6 +109,7 @@ export class SessionController {
   private lastDeviceStatus: DeviceStatus | null = null;
   private lastSafetyFailure: Error | null = null;
   private auditStorageHealthy = true;
+  private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly unsubscribeDevice: () => void;
 
   public constructor(options: SessionControllerOptions) {
@@ -120,9 +122,9 @@ export class SessionController {
     this.now = options.now ?? (() => new Date());
     this.monotonicNow = options.monotonicNow ?? (() => performance.now());
     this.unsubscribeDevice = this.device.onStatus((status) => {
-      void this.handleDeviceStatus(status).catch((error: unknown) => {
+      this.trackBackgroundTask(this.handleDeviceStatus(status).catch((error: unknown) => {
         this.handleBackgroundFailure(error, "DEVICE_STATUS_HANDLER_FAILED");
-      });
+      }));
     });
   }
 
@@ -134,20 +136,24 @@ export class SessionController {
 
   /** Safely terminates any active run and always attempts STOP then DEFLATE. */
   public async shutdown(): Promise<void> {
-    const active = this.activeSessionId === null ? null : this.sessions.get(this.activeSessionId) ?? null;
-    if (active === null) {
-      await this.safeStopAndDeflate();
+    try {
+      const active = this.activeSessionId === null ? null : this.sessions.get(this.activeSessionId) ?? null;
+      if (active === null) {
+        await this.safeStopAndDeflate();
+        this.throwIfSafetyUnconfirmed();
+        return;
+      }
+      if (active.phase === "completed" || active.phase === "aborted") {
+        await this.safeStopAndDeflate();
+        this.throwIfSafetyUnconfirmed();
+        this.activeSessionId = null;
+        return;
+      }
+      await this.abort(active.id);
       this.throwIfSafetyUnconfirmed();
-      return;
+    } finally {
+      await this.flushBackgroundTasks();
     }
-    if (active.phase === "completed" || active.phase === "aborted") {
-      await this.safeStopAndDeflate();
-      this.throwIfSafetyUnconfirmed();
-      this.activeSessionId = null;
-      return;
-    }
-    await this.abort(active.id);
-    this.throwIfSafetyUnconfirmed();
   }
 
   public subscribe(listener: Listener): () => void {
@@ -457,9 +463,9 @@ export class SessionController {
     if (!session.displayConnected) {
       const updated = this.patchSession(session, { displayConnected: true });
       this.sessions.set(updated.id, updated);
-      void this.audit(updated, "display.ready").catch((error: unknown) => {
+      this.trackBackgroundTask(this.audit(updated, "display.ready").catch((error: unknown) => {
         this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
-      });
+      }));
       this.emit({ type: "session.snapshot", sessionId: updated.id });
     }
   }
@@ -479,9 +485,9 @@ export class SessionController {
     this.displayFullscreenStates.set(session.id, null);
     let updated = this.patchSession(session, { displayConnected: false });
     this.sessions.set(updated.id, updated);
-    void this.audit(updated, "display.disconnected").catch((error: unknown) => {
+    this.trackBackgroundTask(this.audit(updated, "display.disconnected").catch((error: unknown) => {
       this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
-    });
+    }));
 
     if (this.activeSessionId === updated.id && isPufferPhase(updated)) {
       void this.failSession(updated, "DISPLAY_LOST_DURING_PUFFER").catch((error: unknown) => {
@@ -506,9 +512,9 @@ export class SessionController {
         remainingMs: this.pausedRemainingMs.get(updated.id) ?? null,
       });
       this.sessions.set(updated.id, updated);
-      void this.audit(updated, "session.recoveryRequired").catch((error: unknown) => {
+      this.trackBackgroundTask(this.audit(updated, "session.recoveryRequired").catch((error: unknown) => {
         this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
-      });
+      }));
     }
     this.emit({ type: "session.snapshot", sessionId: updated.id });
   }
@@ -550,10 +556,10 @@ export class SessionController {
     this.requireDeviceTestAllowed("connect");
     return this.runDeviceOperation(async () => {
       this.requireDeviceTestAllowed("connect");
-      void this.auditActiveDeviceEvent("device.connect.issued");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.connect.issued"));
       await this.device.connect();
       const status = await this.device.getStatus();
-      void this.auditActiveDeviceEvent("device.connect.ack");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.connect.ack"));
       return status;
     });
   }
@@ -562,9 +568,9 @@ export class SessionController {
     this.requireDeviceTestAllowed("disconnect");
     return this.runDeviceOperation(async () => {
       this.requireDeviceTestAllowed("disconnect");
-      void this.auditActiveDeviceEvent("device.disconnect.issued");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.disconnect.issued"));
       await this.device.disconnect();
-      void this.auditActiveDeviceEvent("device.disconnect.ack");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.disconnect.ack"));
       if (this.lastDeviceStatus !== null) return this.lastDeviceStatus;
       return this.device.getStatus();
     });
@@ -574,9 +580,9 @@ export class SessionController {
     this.requireDeviceTestAllowed("ping");
     return this.runDeviceOperation(() => {
       this.requireDeviceTestAllowed("ping");
-      void this.auditActiveDeviceEvent("device.ping.issued");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.ping.issued"));
       return this.device.ping().then((status) => {
-        void this.auditActiveDeviceEvent("device.ping.ack");
+        this.trackBackgroundTask(this.auditActiveDeviceEvent("device.ping.ack"));
         return status;
       });
     });
@@ -602,14 +608,14 @@ export class SessionController {
       if (!isSafeDeflatedStatus(before)) {
         throw conflict("膨張テスト前に装置をidleかつ収縮済みにしてください。", "DEVICE_NOT_READY");
       }
-      void this.auditActiveDeviceEvent("device.inflate.issued");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.inflate.issued"));
       const ack = await this.device.inflate({
         level,
         rampMs: this.config.timingMs.inflateRamp,
         requestId: randomUUID(),
       });
       const status = await this.device.getStatus();
-      void this.auditActiveDeviceEvent("device.inflate.ack");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.inflate.ack"));
       return { status, ack };
     });
   }
@@ -618,13 +624,16 @@ export class SessionController {
     this.requireDeviceTestAllowed("deflate");
     return this.runDeviceOperation(async () => {
       this.requireDeviceTestAllowed("deflate");
-      void this.auditActiveDeviceEvent("device.deflate.issued");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.deflate.issued"));
       const ack = await this.device.deflate({
         rampMs: this.config.timingMs.deflateRamp,
         requestId: randomUUID(),
       });
-      const status = await this.device.getStatus();
-      void this.auditActiveDeviceEvent("device.deflate.ack");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.deflate.ack"));
+      const status = await waitForConfirmedDeflatedStatus(this.device, {
+        timeoutMs: this.config.timingMs.deflateRamp + this.config.device.ackTimeout + 1_000,
+      });
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.deflate.complete"));
       return { status, ack };
     });
   }
@@ -635,9 +644,9 @@ export class SessionController {
       await this.emergencyStop(active.id);
       return { status: await this.getDeviceStatus(), ack: null };
     }
-    void this.auditActiveDeviceEvent("device.stop.issued");
+    this.trackBackgroundTask(this.auditActiveDeviceEvent("device.stop.issued"));
     const ack = await this.device.stop({ requestId: randomUUID() });
-    void this.auditActiveDeviceEvent("device.stop.ack");
+    this.trackBackgroundTask(this.auditActiveDeviceEvent("device.stop.ack"));
     return { status: await this.device.getStatus(), ack };
   }
 
@@ -957,17 +966,22 @@ export class SessionController {
 
   private async safeStopAndDeflate(): Promise<void> {
     let firstError: unknown;
-    void this.auditActiveDeviceEvent("device.stop.issued");
+    this.trackBackgroundTask(this.auditActiveDeviceEvent("device.stop.issued"));
     try {
       await this.device.stop({ requestId: randomUUID() });
-      void this.auditActiveDeviceEvent("device.stop.ack");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.stop.ack"));
     } catch (error) {
       firstError = error;
     }
-    void this.auditActiveDeviceEvent("device.deflate.issued");
+    this.trackBackgroundTask(this.auditActiveDeviceEvent("device.deflate.issued"));
     try {
       await this.device.deflate({ rampMs: this.config.timingMs.deflateRamp, requestId: randomUUID() });
-      void this.auditActiveDeviceEvent("device.deflate.ack");
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.deflate.ack"));
+      const confirmedStatus = await waitForConfirmedDeflatedStatus(this.device, {
+        timeoutMs: this.config.timingMs.deflateRamp + this.config.device.ackTimeout + 1_000,
+      });
+      this.lastDeviceStatus = confirmedStatus;
+      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.deflate.complete"));
     } catch (error) {
       firstError ??= error;
     }
@@ -1028,15 +1042,28 @@ export class SessionController {
     }
   }
 
+  private trackBackgroundTask(task: Promise<void>): void {
+    this.backgroundTasks.add(task);
+    void task.finally(() => {
+      this.backgroundTasks.delete(task);
+    }).catch(() => undefined);
+  }
+
+  private async flushBackgroundTasks(): Promise<void> {
+    while (this.backgroundTasks.size > 0) {
+      await Promise.allSettled([...this.backgroundTasks]);
+    }
+  }
+
   private async handleDeviceStatus(status: DeviceStatus): Promise<void> {
     this.lastDeviceStatus = status;
     const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
     if (active !== undefined) {
       const updated = this.refreshDeviceStatus(active.id, status);
       this.emit({ type: "device.status", sessionId: updated.id, deviceStatus: status });
-      void this.audit(updated, "device.status").catch((error: unknown) => {
+      this.trackBackgroundTask(this.audit(updated, "device.status").catch((error: unknown) => {
         this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
-      });
+      }));
       if (
         updated.phase !== "setup" &&
         updated.phase !== "error" &&

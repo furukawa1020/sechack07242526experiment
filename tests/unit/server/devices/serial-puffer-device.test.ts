@@ -321,7 +321,7 @@ describe("SerialPufferDevice", () => {
     const { device, port } = setup();
     await device.connect();
     await device.disconnect();
-    expect(port.commands().slice(-2).map((command) => command.cmd)).toEqual(["stop", "deflate"]);
+    expect(port.commands().slice(-3).map((command) => command.cmd)).toEqual(["stop", "deflate", "status"]);
     await expect(device.disconnect()).resolves.toBeUndefined();
   });
 

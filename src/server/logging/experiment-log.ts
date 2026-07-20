@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdir, open, readFile, readdir } from "node:fs/promises";
 import { dirname, isAbsolute, parse, relative, resolve } from "node:path";
 
 import { z } from "zod";
@@ -160,8 +160,14 @@ export class ExperimentLogger {
     this.assertInsideLogDirectory(path);
     const previousWrite = this.writes.get(path) ?? Promise.resolve();
     const currentWrite = previousWrite.then(async () => {
-      await mkdir(dirname(path), { recursive: true });
-      await appendFile(path, `${JSON.stringify(validated)}\n`, { encoding: "utf8", flag: "a" });
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      const handle = await open(path, "a", 0o600);
+      try {
+        await handle.writeFile(`${JSON.stringify(validated)}\n`, { encoding: "utf8" });
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
     });
     this.writes.set(path, currentWrite);
     try {

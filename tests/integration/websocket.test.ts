@@ -64,7 +64,12 @@ async function start(operatorToken?: string): Promise<RunningWebSocketTestServer
     device: new MockPufferDevice({ timingMode: "fast", initialConnected: true }),
     logger: new EmptyLogger(),
   });
-  const app = createApiApp({ config, controller });
+  const app = createApiApp({
+    config,
+    controller,
+    configHash: "a".repeat(64),
+    appVersion: "1.0.0",
+  });
   const server = createServer(app);
   const hub = new WebSocketHub(server, controller, {
     ...(operatorToken === undefined ? {} : { operatorToken }),

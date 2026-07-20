@@ -100,6 +100,13 @@ export class DeviceCommandSupersededError extends PufferDeviceError {
   }
 }
 
+export class DeviceSafeStateUnconfirmedError extends PufferDeviceError {
+  public constructor(message = "The puffer device did not confirm idle at level 0.", options?: ErrorOptions) {
+    super(message, "DEVICE_SAFE_STATE_UNCONFIRMED", options);
+    this.name = "DeviceSafeStateUnconfirmedError";
+  }
+}
+
 export function assertNormalizedLevel(level: number): void {
   if (!Number.isFinite(level) || level < 0 || level > 1) {
     throw new RangeError("Puffer level must be a finite normalized value in [0, 1].");
@@ -116,6 +123,52 @@ export function assertRequestId(requestId: string): void {
   if (requestId.length === 0 || requestId.length > 128 || /[\r\n\0]/u.test(requestId)) {
     throw new TypeError("requestId must be a non-empty single-line value of at most 128 characters.");
   }
+}
+
+export function isConfirmedDeflatedStatus(status: DeviceStatus): boolean {
+  return status.connected
+    && status.state === "idle"
+    && status.level <= 0
+    && status.fault === null;
+}
+
+export async function waitForConfirmedDeflatedStatus(
+  device: Pick<PufferDevice, "getStatus">,
+  options: {
+    readonly timeoutMs: number;
+    readonly pollIntervalMs?: number;
+    readonly monotonicNow?: () => number;
+    readonly delay?: (milliseconds: number) => Promise<void>;
+  },
+): Promise<DeviceStatus> {
+  if (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0) {
+    throw new RangeError("timeoutMs must be a positive integer.");
+  }
+  const pollIntervalMs = options.pollIntervalMs ?? 100;
+  if (!Number.isInteger(pollIntervalMs) || pollIntervalMs <= 0) {
+    throw new RangeError("pollIntervalMs must be a positive integer.");
+  }
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
+  const delay = options.delay ?? ((milliseconds: number) => new Promise<void>((resolveDelay) => {
+    setTimeout(resolveDelay, milliseconds);
+  }));
+  const deadline = monotonicNow() + options.timeoutMs;
+  let lastStatus: DeviceStatus | null = null;
+  while (monotonicNow() <= deadline) {
+    lastStatus = await device.getStatus();
+    if (isConfirmedDeflatedStatus(lastStatus)) return lastStatus;
+    if (lastStatus.fault !== null || lastStatus.state === "fault") {
+      throw new DeviceFaultError(lastStatus.fault ?? "DEVICE_FAULT");
+    }
+    const remaining = deadline - monotonicNow();
+    if (remaining <= 0) break;
+    await delay(Math.min(pollIntervalMs, remaining));
+  }
+  throw new DeviceSafeStateUnconfirmedError(
+    lastStatus === null
+      ? "The puffer device did not return a status while confirming deflation."
+      : `The puffer device remained ${lastStatus.state} at level ${String(lastStatus.level)}.`,
+  );
 }
 
 export interface SafeStopResult {

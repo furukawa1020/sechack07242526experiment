@@ -8,8 +8,10 @@ import {
   DeviceCommandSupersededError,
   DeviceFaultError,
   DeviceNotConnectedError,
+  DeviceSafeStateUnconfirmedError,
   DeviceTimeoutError,
   stopAndDeflateSafely,
+  waitForConfirmedDeflatedStatus,
   type PufferDevice,
 } from "../../../../src/server/devices/types.js";
 
@@ -149,5 +151,56 @@ describe("safe device shutdown", () => {
     expect(result).toMatchObject({ stopAcknowledged: false, deflateAcknowledged: true });
     expect(result.stopError).toBeInstanceOf(Error);
     expect(result.deflateError).toBeNull();
+  });
+});
+
+describe("deflation completion confirmation", () => {
+  it("returns only after an idle level-zero STATUS", async () => {
+    const device = new MockPufferDevice({ timingMode: "fast", initialConnected: true });
+    await device.inflate({ requestId: "inflate-confirm", level: 0.6, rampMs: 1 });
+    await device.deflate({ requestId: "deflate-confirm", rampMs: 1 });
+
+    await expect(waitForConfirmedDeflatedStatus(device, { timeoutMs: 100 }))
+      .resolves.toMatchObject({ connected: true, state: "idle", level: 0, fault: null });
+  });
+
+  it("rejects a persistent deflating state and a reported fault", async () => {
+    let now = 0;
+    const persistent = {
+      getStatus: vi.fn(async () => ({
+        connected: true,
+        state: "deflating" as const,
+        level: 0.2,
+        fault: null,
+        updatedAt: new Date(0).toISOString(),
+      })),
+    };
+    await expect(waitForConfirmedDeflatedStatus(persistent, {
+      timeoutMs: 10,
+      pollIntervalMs: 5,
+      monotonicNow: () => now,
+      delay: async (milliseconds) => {
+        now += milliseconds;
+      },
+    })).rejects.toBeInstanceOf(DeviceSafeStateUnconfirmedError);
+
+    const faulted = {
+      getStatus: vi.fn(async () => ({
+        connected: true,
+        state: "fault" as const,
+        level: 0.1,
+        fault: "OVERPRESSURE",
+        updatedAt: new Date(0).toISOString(),
+      })),
+    };
+    await expect(waitForConfirmedDeflatedStatus(faulted, { timeoutMs: 10 }))
+      .rejects.toBeInstanceOf(DeviceFaultError);
+  });
+
+  it("rejects invalid confirmation timing", async () => {
+    const device = { getStatus: vi.fn() };
+    await expect(waitForConfirmedDeflatedStatus(device, { timeoutMs: 0 })).rejects.toThrow(RangeError);
+    await expect(waitForConfirmedDeflatedStatus(device, { timeoutMs: 10, pollIntervalMs: 0 }))
+      .rejects.toThrow(RangeError);
   });
 });

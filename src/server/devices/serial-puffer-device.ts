@@ -24,6 +24,7 @@ import {
   type InflateInput,
   type PufferDevice,
   type StopInput,
+  waitForConfirmedDeflatedStatus,
 } from "./types.js";
 
 interface SerialPortLike {
@@ -206,6 +207,9 @@ export class SerialPufferDevice implements PufferDevice {
       }
       try {
         await this.deflate({ requestId: randomUUID(), rampMs: this.options.defaultDeflateRampMs });
+        await waitForConfirmedDeflatedStatus(this, {
+          timeoutMs: this.options.defaultDeflateRampMs + this.options.ackTimeoutMs + 1_000,
+        });
       } catch (error) {
         safetyErrors.push(error instanceof Error ? error : new Error("Unknown DEFLATE failure."));
       }

@@ -30,6 +30,7 @@
 - [ ] 参加者向け文言を第三者が`UI_COPY.md`と照合した
 - [ ] Node.jsと依存関係をオフライン利用できる状態にした
 - [ ] `npm run lint && npm run typecheck && npm test && npm run test:e2e && npm run build`が成功した
+- [ ] `docs/DEPLOYMENT.md`に従ってproduction依存関係を含むリリースを生成し、manifestを2名で照合した
 - [ ] 1366×768と1920×1080のスクリーンショットを確認した
 - [ ] 参加者3〜5名相当のパイロットを完走した
 - [ ] iPhoneとAndroidでGoogleフォームを確認した
@@ -66,9 +67,9 @@
 3. 実験PCと表示端末を隔離LANまたは単一PCに接続し、インターネットへの経路がないことを確認します。Googleフォーム用端末は別経路にします。
 4. LANを使う場合は`allowLan`、bind先、OSファイアウォールの許可範囲を2名で照合します。生成された操作トークンをチャット、ログ、写真、スクリーンショットへ残しません。
 5. GoogleフォームのURLとQRを2名で開き、承認版の研究説明、同意チェック、11問、個人情報非収集設定を照合し、確認者名と日時を紙または承認済み管理票へ記録します。
-6. `npm run preflight`を実行し、設定パス、SHA-256、プロトコル版、Serial、COM、Google Forms、外部通信禁止、ログ先、空き容量がすべて`PASS`であることを2名で確認します。
-7. `npm run build`後、`npm run start`で起動します。
-8. `/healthz`が`ok`を返すことを確認します。
+6. 配置済みリリースの`VERIFY_RELEASE.cmd`を実行し、全ファイル、Node版、Windowsアーキテクチャ、設定SHA-256が承認記録と一致して`PASS`することを2名で確認します。
+7. `START_PRODUCTION.cmd`を実行します。ランチャー内の本番preflightで、Serial、COM、Google Forms、外部通信禁止、ログ先、空き容量がすべて`PASS`した場合だけ起動することを確認します。会場PCではnpm install、build、ソースからの直接起動を行いません。
+8. `CHECK_HEALTH.cmd`が`PASS`し、`/healthz`のプロトコル版と`deviceMode=serial`が本番設定に一致することを確認します。
 9. `/operator`と参加者用ディスプレイを開きます。
 10. 表示をフルスクリーンにし、スクロールや欠けがないことを確認します。
 11. 会場照明、表示距離、フォント可読性、フグの設置方向を確認します。

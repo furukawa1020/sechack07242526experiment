@@ -7,6 +7,10 @@
   "scripts": {
     "dev": "tsx src/server/index.ts",
     "preflight": "tsx scripts/preflight.ts",
+    "healthcheck": "tsx scripts/healthcheck.ts",
+    "release:create": "tsx scripts/create-release.ts",
+    "release:verify": "tsx scripts/verify-release.ts",
+    "deploy:prepare": "npm run lint && npm run typecheck && npm test && npm run test:e2e && npm run build && npm run release:create --",
     "build:client": "vite build",
     "build:server": "node scripts/build-server.mjs",
     "build": "npm run build:client && npm run build:server",

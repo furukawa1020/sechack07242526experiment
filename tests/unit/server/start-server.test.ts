@@ -10,11 +10,30 @@ describe("startServer production safeguards", () => {
       rootDirectory: process.cwd(),
       configPath: "config/experiment.json",
       mode: "production",
-    })).rejects.toThrow(/Mock device mode is disabled in production/iu);
+    })).rejects.toThrow(/Mock device mode is unconditionally disabled in production/iu);
+  });
+
+  it("rejects production Mock mode even when a config attempts to opt in", async () => {
+    await expect(startServer({
+      rootDirectory: process.cwd(),
+      configPath: "config/experiment.e2e.json",
+      mode: "production",
+    })).rejects.toThrow(/unconditionally disabled/iu);
   });
 
   it("treats a compiled entry as production even when NODE_ENV is test", () => {
     expect(inferServerMode(resolve("dist-server", "index.js"), "test")).toBe("production");
     expect(inferServerMode(resolve("src", "server", "index.ts"), "test")).toBe("test");
+  });
+
+  it("shares one safe shutdown operation across repeated close calls", async () => {
+    const server = await startServer({
+      rootDirectory: process.cwd(),
+      configPath: "config/experiment.e2e.json",
+      mode: "test",
+    });
+    const firstClose = server.close();
+    expect(server.close()).toBe(firstClose);
+    await firstClose;
   });
 });

@@ -58,6 +58,8 @@ async function listen(allowLan = false, operatorToken?: string) {
   const app = createApiApp({
     config: parsedConfig,
     controller,
+    configHash: "a".repeat(64),
+    appVersion: "1.0.0",
     ...(operatorToken === undefined ? {} : { operatorToken }),
   });
   const server = createServer(app);
@@ -88,6 +90,13 @@ describe("server HTTP security", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(response.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    await expect(response.json()).resolves.toEqual({
+      status: "ok",
+      appVersion: "1.0.0",
+      protocolVersion: "test-v1",
+      configHash: "a".repeat(64),
+      deviceMode: "mock",
+    });
     expect(response.headers.get("content-security-policy")).not.toContain("ws:");
   });
 

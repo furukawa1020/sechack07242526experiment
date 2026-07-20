@@ -14,6 +14,8 @@ import { PufferDeviceError } from "./devices/index.js";
 export interface ApiAppOptions {
   readonly controller: SessionController;
   readonly config: ServerExperimentConfig;
+  readonly configHash: string;
+  readonly appVersion: string;
   readonly operatorToken?: string;
 }
 
@@ -75,7 +77,9 @@ export function createApiApp(options: ApiAppOptions): Express {
     response.setHeader("Cache-Control", "no-store");
     response.json({
       status: "ok",
+      appVersion: options.appVersion,
       protocolVersion: options.config.protocolVersion,
+      configHash: options.configHash,
       deviceMode: options.config.device.mode,
     });
   });

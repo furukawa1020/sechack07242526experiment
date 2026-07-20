@@ -19,6 +19,7 @@ export interface RunningExperimentServer {
   readonly port: number;
   readonly url: string;
   readonly operatorToken: string | null;
+  readonly shutdownDeadlineMs: number;
   close(): Promise<void>;
 }
 
@@ -26,6 +27,8 @@ export interface StartServerOptions {
   readonly rootDirectory?: string;
   readonly configPath?: string;
   readonly mode?: "development" | "production" | "test";
+  /** Test-only: audit built static assets while retaining the fast Mock adapter. */
+  readonly serveBuiltAssets?: boolean;
 }
 
 function isInside(parent: string, candidate: string): boolean {
@@ -67,6 +70,9 @@ export function inferServerMode(
 export async function startServer(options: StartServerOptions = {}): Promise<RunningExperimentServer> {
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
   const mode = options.mode ?? inferServerMode();
+  if (options.serveBuiltAssets === true && mode !== "test") {
+    throw new Error("serveBuiltAssets is available only in explicit test mode.");
+  }
   const loaded = await loadExperimentConfig(
     options.configPath ?? process.env.EXPERIMENT_CONFIG_PATH ?? "config/experiment.json",
     {
@@ -75,6 +81,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     },
   );
   const { config } = loaded;
+  const appVersion = process.env.npm_package_version ?? "1.0.0";
   const dataDirectory = resolve(rootDirectory, "data");
   const configuredLogDirectory = resolve(
     rootDirectory,
@@ -100,14 +107,16 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   const controller = new SessionController({
     config,
     configHash: loaded.configHash,
-    appVersion: process.env.npm_package_version ?? "1.0.0",
+    appVersion,
     device,
     logger,
   });
   const application = await createApplication({
     controller,
     config,
-    mode,
+    configHash: loaded.configHash,
+    appVersion,
+    mode: options.serveBuiltAssets === true ? "production" : mode,
     rootDirectory,
     ...(operatorToken === null ? {} : { operatorToken }),
   });
@@ -137,34 +146,60 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
     throw error;
   }
 
-  let closed = false;
+  let closePromise: Promise<void> | undefined;
+  const closeServer = async (): Promise<void> => {
+    const shutdownErrors: Error[] = [];
+    const httpClosed = new Promise<void>((resolveClose) => {
+      httpServer.close(() => resolveClose());
+    });
+    webSocketHub.close();
+    httpServer.closeAllConnections();
+    try {
+      await controller.shutdown();
+    } catch (error) {
+      shutdownErrors.push(error instanceof Error ? error : new Error("Session shutdown failed."));
+    } finally {
+      controller.dispose();
+    }
+    // Always perform the adapter's independent STOP/DEFLATE/port-close path,
+    // even if the session-level safety path failed.
+    try {
+      await device.disconnect();
+    } catch (error) {
+      shutdownErrors.push(error instanceof Error ? error : new Error("Device disconnect failed."));
+    }
+    try {
+      await Promise.race([
+        application.close(),
+        new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
+      ]);
+    } catch (error) {
+      shutdownErrors.push(error instanceof Error ? error : new Error("Application close failed."));
+    }
+    try {
+      await Promise.race([
+        httpClosed,
+        new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
+      ]);
+    } catch (error) {
+      shutdownErrors.push(error instanceof Error ? error : new Error("HTTP close failed."));
+    }
+    if (shutdownErrors.length > 0) {
+      throw new AggregateError(shutdownErrors, "Experiment server shutdown did not complete cleanly.");
+    }
+  };
   return {
     host: config.bindHost,
     port: config.port,
     url: `http://${config.bindHost}:${config.port}`,
     operatorToken,
-    async close(): Promise<void> {
-      if (closed) return;
-      closed = true;
-      const httpClosed = new Promise<void>((resolveClose) => {
-        httpServer.close(() => resolveClose());
-      });
-      webSocketHub.close();
-      httpServer.closeAllConnections();
-      await controller.shutdown();
-      controller.dispose();
-      // A Serial adapter reports an AggregateError when STOP, DEFLATE, or port
-      // close could not be confirmed. Propagate it so the CLI exits non-zero
-      // instead of claiming a safe shutdown.
-      await device.disconnect();
-      await Promise.race([
-        application.close(),
-        new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
-      ]);
-      await Promise.race([
-        httpClosed,
-        new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
-      ]);
+    shutdownDeadlineMs: Math.max(
+      20_000,
+      config.timingMs.deflateRamp * 2 + config.device.ackTimeout * 6 + 10_000,
+    ),
+    close(): Promise<void> {
+      closePromise ??= closeServer();
+      return closePromise;
     },
   };
 }
@@ -185,12 +220,21 @@ if (entryPath !== undefined && pathToFileURL(resolve(entryPath)).href === import
           console.info("Replace the bind host in these URLs with this computer's LAN IP address.");
         }
       }
-      const shutdown = (): void => {
-        const forceExit = setTimeout(() => process.exit(1), 5_000);
+      let shutdownStarted = false;
+      const shutdown = (exitCode: 0 | 1): void => {
+        if (shutdownStarted) return;
+        shutdownStarted = true;
+        console.info("Stopping the experiment server; waiting for STOP/DEFLATE confirmation...");
+        const safetyTimeoutMs = running?.shutdownDeadlineMs ?? 190_000;
+        const forceExit = setTimeout(() => {
+          console.error("Safe shutdown did not complete before the configured safety deadline.");
+          process.exit(1);
+        }, safetyTimeoutMs);
         void running?.close().then(
           () => {
             clearTimeout(forceExit);
-            process.exit(0);
+            console.info("Experiment server stopped; verify the physical device is deflated.");
+            process.exit(exitCode);
           },
           (error: unknown) => {
             clearTimeout(forceExit);
@@ -199,8 +243,17 @@ if (entryPath !== undefined && pathToFileURL(resolve(entryPath)).href === import
           },
         );
       };
-      process.once("SIGINT", shutdown);
-      process.once("SIGTERM", shutdown);
+      process.on("SIGINT", () => shutdown(0));
+      process.on("SIGTERM", () => shutdown(0));
+      process.on("SIGBREAK", () => shutdown(0));
+      process.once("uncaughtException", (error: Error) => {
+        console.error(`Uncaught server error: ${error.message}`);
+        shutdown(1);
+      });
+      process.once("unhandledRejection", (reason: unknown) => {
+        console.error(`Unhandled server rejection: ${reason instanceof Error ? reason.message : "unknown error"}`);
+        shutdown(1);
+      });
     })
     .catch((error: unknown) => {
       console.error(error instanceof Error ? error.message : "Failed to start the experiment server.");

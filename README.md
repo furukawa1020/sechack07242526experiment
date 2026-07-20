@@ -36,6 +36,14 @@ npm run start
 
 `npm run preflight`は既定で本番ゲートです。Serial実機モード、Windows COMポート、`allowMockInProduction=false`、承認済みGoogle Forms URL形式、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。`npm run start`も本番モードで、Mock設定では安全のため起動を拒否します。
 
+会場へ配置する本番成果物は、ソースディレクトリをそのままコピーせず、次のコマンドで生成します。
+
+```powershell
+npm.cmd run deploy:prepare -- --config config/experiment.production.json
+```
+
+このコマンドは指定された5つの品質確認、ビルド、本番preflightを完了した後、`release/`へproduction依存関係を含む封印済みディレクトリを作成します。実ログ、ソース、テスト、Mock/E2E設定は含めません。会場では同梱の`VERIFY_RELEASE.cmd`と`START_PRODUCTION.cmd`を使用し、npm installや再ビルドを行いません。詳細は[Windowsローカル本番デプロイ](docs/DEPLOYMENT.md)を参照してください。
+
 起動後に開く画面：
 
 - スタッフ画面: `http://127.0.0.1:4173/operator`
@@ -74,6 +82,8 @@ npm run start
 ```
 
 本番前に`/device-test`でPING、STATUS、上限以下の膨張、収縮、STOPを確認してください。詳細は[運用手順](docs/RUNBOOK.md)と[装置通信仕様](docs/DEVICE_PROTOCOL.md)を参照してください。
+
+新しい本番設定は`config/experiment.production.example.json`から作成します。例には意図的に無効な`COM0`と空のフォームURLが入っているため、実値へ置換するまで本番ゲートを通過しません。
 
 ## 本番前点検
 
@@ -124,6 +134,8 @@ E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認
 - [参加者向け固定文言](docs/UI_COPY.md)
 - [装置通信仕様](docs/DEVICE_PROTOCOL.md)
 - [運用手順](docs/RUNBOOK.md)
+- [Windowsローカル本番デプロイ](docs/DEPLOYMENT.md)
+- [本番リリース二名照合票](docs/RELEASE_CHECKLIST.md)
 - [テスト報告](docs/TEST_REPORT.md)
 - [プロトコル変更履歴](docs/PROTOCOL_CHANGELOG.md)
 - [合成サンプルログ](docs/examples/sample-session.jsonl)

@@ -359,7 +359,10 @@ describe("SessionController", () => {
     await controller.start(created.snapshot.id);
     const stopped = await controller.emergencyStop(created.snapshot.id);
     expect(stopped).toMatchObject({ phase: "aborted", errorCode: "EMERGENCY_STOP" });
-    expect(device.commandHistory.map((entry) => entry.command).slice(-2)).toEqual(["stop", "deflate"]);
+    expect(device.commandHistory.map((entry) => entry.command).filter((command) =>
+      command === "stop" || command === "deflate"
+    ).slice(-2)).toEqual(["stop", "deflate"]);
+    expect(device.commandHistory.at(-1)?.command).toBe("status");
     await expect(controller.testInflate(0.2)).rejects.toMatchObject({ code: "DEVICE_EMERGENCY_LOCKED" });
     controller.dispose();
   });
@@ -770,7 +773,10 @@ describe("SessionController", () => {
   it("executes every shutdown path with STOP followed by DEFLATE", async () => {
     const noSession = makeController();
     await noSession.controller.shutdown();
-    expect(noSession.device.commandHistory.map((entry) => entry.command).slice(-2)).toEqual(["stop", "deflate"]);
+    expect(noSession.device.commandHistory.map((entry) => entry.command).filter((command) =>
+      command === "stop" || command === "deflate"
+    ).slice(-2)).toEqual(["stop", "deflate"]);
+    expect(noSession.device.commandHistory.at(-1)?.command).toBe("status");
     noSession.controller.dispose();
 
     const active = makeController();
@@ -784,7 +790,10 @@ describe("SessionController", () => {
       phase: "aborted",
       result: "aborted",
     });
-    expect(active.device.commandHistory.map((entry) => entry.command).slice(-2)).toEqual(["stop", "deflate"]);
+    expect(active.device.commandHistory.map((entry) => entry.command).filter((command) =>
+      command === "stop" || command === "deflate"
+    ).slice(-2)).toEqual(["stop", "deflate"]);
+    expect(active.device.commandHistory.at(-1)?.command).toBe("status");
     active.controller.dispose();
 
     const logger = new EventGateLogger("session.completed");
