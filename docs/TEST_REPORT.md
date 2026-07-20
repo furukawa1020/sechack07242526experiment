@@ -100,7 +100,7 @@ E2Eスイート8ケースはすべて成功した。E2Eでは高速MockDeviceを
 https://furukawa1020-sechack-experiment-demo.static.hf.space/
 ```
 
-Hugging Face Spaceは`sdk: static`、commit `6902f880c9cf90db3e7e9ae9f2cc02bf9b5a1cc7`で稼働中である。公開成果物は`README.md`、`index.html`、同一originのJavaScriptとCSSだけで、設定、ログ、サーバコード、フォームURLを含まない。
+Hugging Face Spaceは`sdk: static`、commit `6902f880c9cf90db3e7e9ae9f2cc02bf9b5a1cc7`で稼働中である。公開成果物は`README.md`、`index.html`、同一originのJavaScriptとCSSだけで、設定、ログ、サーバコード、フォームURLを含まない。再デプロイ手順は、今回成功した`HfApi.create_commit`方式と同じ明示的許可リストを使う`deploy/huggingface-space/deploy.py`へ固定した。
 
 `npm run test:public-demo`は1366×768と1920×1080の2件に成功した。公開URLをChromiumで再確認し、HTTP 200、6画面の操作、実機なし表示、入力・リンク・フォーム・QR・内部コードがないこと、fetch/XHR/WebSocketが0件であること、通信先が当該Static Spaceだけであることを確認した。この公開デモは本番実験や実参加者には使用しない。
 
