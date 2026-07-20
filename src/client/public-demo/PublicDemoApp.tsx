@@ -14,6 +14,36 @@ const LAST_PRESENTATION_STEP = PUBLIC_DEMO_CONDITIONS.length;
 const SUMMARY_STEP = LAST_PRESENTATION_STEP + 1;
 const TOTAL_STEPS = SUMMARY_STEP + 1;
 
+type HandlingIconKind = DemoProcessingLocation | "storage" | "audience";
+
+const HANDLING_ICON_PATHS: Readonly<Record<HandlingIconKind, string>> = Object.freeze({
+  cloud: "M16 47h31a11 11 0 0 0 .8-21.97A16 16 0 0 0 17.2 22.5 12.5 12.5 0 0 0 16 47Z",
+  local: "M15 11h34a2 2 0 0 1 2 2v30H13V13a2 2 0 0 1 2-2ZM8 51h48l-4 4H12l-4-4ZM27 51h10",
+  storage:
+    "M15 15a17 7 0 1 0 34 0 17 7 0 1 0-34 0ZM15 15v17c0 3.87 7.61 7 17 7s17-3.13 17-7V15M15 32v17c0 3.87 7.61 7 17 7s17-3.13 17-7V32",
+  audience:
+    "M5 32s10-14 27-14 27 14 27 14-10 14-27 14S5 32 5 32ZM39 32a7 7 0 1 1-14 0 7 7 0 1 1 14 0Z",
+});
+
+function HandlingIcon({ kind }: { readonly kind: HandlingIconKind }): React.JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      className="public-demo-handling-icon"
+      data-icon-kind={kind}
+      fill="none"
+      focusable="false"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2.4"
+      viewBox="0 0 64 64"
+    >
+      <path d={HANDLING_ICON_PATHS[kind]} />
+    </svg>
+  );
+}
+
 function DemoNotice(): React.JSX.Element {
   return (
     <header className="public-demo-notice" aria-label="公開デモについて">
@@ -47,22 +77,44 @@ function IntroScene(): React.JSX.Element {
   );
 }
 
-function HandlingPanel({ processing }: { readonly processing: DemoProcessingLocation }): React.JSX.Element {
+function HandlingPanel({
+  processing,
+}: {
+  readonly processing: DemoProcessingLocation;
+}): React.JSX.Element {
   const values = PUBLIC_DEMO_COPY.handling[processing];
   const rows = [
-    [PUBLIC_DEMO_COPY.handling.fields.processing, values.processing],
-    [PUBLIC_DEMO_COPY.handling.fields.storage, values.storage],
-    [PUBLIC_DEMO_COPY.handling.fields.audience, values.audience],
+    {
+      icon: processing,
+      label: PUBLIC_DEMO_COPY.handling.fields.processing,
+      value: values.processing,
+    },
+    {
+      icon: "storage",
+      label: PUBLIC_DEMO_COPY.handling.fields.storage,
+      value: values.storage,
+    },
+    {
+      icon: "audience",
+      label: PUBLIC_DEMO_COPY.handling.fields.audience,
+      value: values.audience,
+    },
   ] as const;
 
   return (
     <section className="public-demo-panel public-demo-handling" data-testid="handling-panel">
       <h2>{PUBLIC_DEMO_COPY.handling.title}</h2>
       <dl>
-        {rows.map(([label, value]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
+        {rows.map((row) => (
+          <div
+            className={row.icon === processing ? "public-demo-processing-location" : undefined}
+            key={row.label}
+          >
+            <dt>{row.label}</dt>
+            <dd>
+              <HandlingIcon kind={row.icon} />
+              <span>{row.value}</span>
+            </dd>
           </div>
         ))}
       </dl>
@@ -82,14 +134,20 @@ function PufferFigure(): React.JSX.Element {
   );
 }
 
-function ResultPanel({ condition }: { readonly condition: PublicDemoCondition }): React.JSX.Element {
+function ResultPanel({
+  condition,
+}: {
+  readonly condition: PublicDemoCondition;
+}): React.JSX.Element {
   return (
     <section className="public-demo-panel public-demo-result" data-testid="result-panel">
       <h2>{PUBLIC_DEMO_COPY.result.title}</h2>
       {condition.presentation === "label" ? (
         <div className="public-demo-label-result">
           <p>{PUBLIC_DEMO_COPY.result.metric}</p>
-          <strong aria-label={`${PUBLIC_DEMO_COPY.result.metric} ${PUBLIC_DEMO_FIXED_STATE.score} / 100`}>
+          <strong
+            aria-label={`${PUBLIC_DEMO_COPY.result.metric} ${PUBLIC_DEMO_FIXED_STATE.score} / 100`}
+          >
             {PUBLIC_DEMO_FIXED_STATE.score} <span>/ 100</span>
           </strong>
           <b>{PUBLIC_DEMO_FIXED_STATE.label}</b>
@@ -175,7 +233,11 @@ export function PublicDemoApp(): React.JSX.Element {
   return (
     <div className="public-demo-app" data-testid="public-demo-app">
       <DemoNotice />
-      <section className="public-demo-stage" aria-label="固定模擬データの表示確認" aria-live="polite">
+      <section
+        className="public-demo-stage"
+        aria-label="固定模擬データの表示確認"
+        aria-live="polite"
+      >
         <Scene step={step} />
       </section>
       <nav className="public-demo-controls" aria-label="公開デモの画面操作">

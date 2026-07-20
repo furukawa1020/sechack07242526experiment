@@ -21,7 +21,7 @@
     "test": "vitest run --coverage",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "test:public-demo": "playwright test --config playwright.public-demo.config.ts",
+    "test:public-demo": "npm run build:public-demo && playwright test --config playwright.public-demo.config.ts",
     "screenshots": "playwright test tests/e2e/screenshots.spec.ts --project=chromium"
   },
   "engines": {

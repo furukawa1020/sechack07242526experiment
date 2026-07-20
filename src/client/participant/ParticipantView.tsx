@@ -65,27 +65,23 @@ function ConditionHeader({ sequenceIndex }: { readonly sequenceIndex: 0 | 1 | 2 
   );
 }
 
-function FieldIcon({ kind }: { readonly kind: "processing" | "storage" | "audience" }): React.JSX.Element {
-  if (kind === "processing") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="4" y="5" width="16" height="12" rx="2" />
-        <path d="M9 21h6M12 17v4" />
-      </svg>
-    );
-  }
-  if (kind === "storage") {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <ellipse cx="12" cy="5" rx="8" ry="3" />
-        <path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" />
-      </svg>
-    );
-  }
+type FieldIconKind = "cloud" | "device" | "storage" | "audience";
+
+const FIELD_ICON_PATHS: Readonly<Record<FieldIconKind, string>> = {
+  cloud: "M7 18.5h10.5a4 4 0 0 0 .4-7.98A6 6 0 0 0 6.45 9.1 4.75 4.75 0 0 0 7 18.5Z",
+  device: "M5 4.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2ZM8.5 21h7M12 17.5V21",
+  storage: "M20 5c0 1.66-3.58 3-8 3S4 6.66 4 5s3.58-3 8-3 8 1.34 8 3ZM4 5v7c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 12v7c0 1.66 3.58 3 8 3s8-1.34 8-3v-7",
+  audience: "M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6ZM14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z",
+};
+
+function FieldIcon({ kind }: { readonly kind: FieldIconKind }): React.JSX.Element {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
-      <circle cx="12" cy="12" r="2.5" />
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d={FIELD_ICON_PATHS[kind]} />
     </svg>
   );
 }
@@ -93,17 +89,35 @@ function FieldIcon({ kind }: { readonly kind: "processing" | "storage" | "audien
 export function HandlingPanel({ processing }: { readonly processing: ProcessingLocation }): React.JSX.Element {
   const values = UI_COPY.handling[processing];
   const rows = [
-    { key: "processing" as const, label: UI_COPY.handling.fields.processing, value: values.processing },
-    { key: "storage" as const, label: UI_COPY.handling.fields.storage, value: values.storage },
-    { key: "audience" as const, label: UI_COPY.handling.fields.audience, value: values.audience },
+    {
+      key: "processing" as const,
+      icon: processing === "cloud" ? "cloud" as const : "device" as const,
+      label: UI_COPY.handling.fields.processing,
+      value: values.processing,
+    },
+    {
+      key: "storage" as const,
+      icon: "storage" as const,
+      label: UI_COPY.handling.fields.storage,
+      value: values.storage,
+    },
+    {
+      key: "audience" as const,
+      icon: "audience" as const,
+      label: UI_COPY.handling.fields.audience,
+      value: values.audience,
+    },
   ];
   return (
     <section className="condition-panel handling-panel" data-testid="handling-panel" aria-labelledby="handling-title">
       <h1 id="handling-title">{UI_COPY.handling.title}</h1>
       <dl className="handling-fields">
         {rows.map((row) => (
-          <div className="handling-row" key={row.key}>
-            <span className="field-icon"><FieldIcon kind={row.key} /></span>
+          <div
+            className={`handling-row${row.key === "processing" ? " handling-row-location" : ""}`}
+            key={row.key}
+          >
+            <span className="field-icon"><FieldIcon kind={row.icon} /></span>
             <div>
               <dt>{row.label}</dt>
               <dd>{row.value}</dd>

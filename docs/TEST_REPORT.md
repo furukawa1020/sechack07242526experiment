@@ -1,6 +1,6 @@
 # テスト報告
 
-対象プロトコル: `R8-010-2x2-mock-v1`
+対象プロトコル: `R8-010-2x2-mock-v2`
 
 文書状態: **ソフトウェア最終試験済み / 本番NO-GO**
 
@@ -10,14 +10,14 @@
 
 | コマンド                             | 最終結果                                                             | 実行日時             |
 | ------------------------------------ | -------------------------------------------------------------------- | -------------------- |
-| `npm run lint`                       | 成功                                                                 | 2026-07-20 19時台 JST |
-| `npm run typecheck`                  | 成功                                                                 | 2026-07-20 19時台 JST |
-| `npm test`                           | 成功: 18ファイル、167テスト                                          | 2026-07-20 19時台 JST |
-| `npm run test:e2e`                   | 成功: Chromium 8テスト                                               | 2026-07-20 19時台 JST |
-| `npm run build`                      | 成功                                                                 | 2026-07-20 19時台 JST |
-| `npm run build:public-demo`          | 成功                                                                 | 2026-07-20 19時台 JST |
-| `npm run test:public-demo`           | 成功: Chromium 2画面幅                                               | 2026-07-20 19時台 JST |
-| 公開デプロイスクリプト`--dry-run`    | 成功: README、HTML、同一originのCSS/JSの4ファイルだけを選択          | 2026-07-20 19時台 JST |
+| `npm run lint`                       | 成功                                                                 | 2026-07-20 21時台 JST |
+| `npm run typecheck`                  | 成功                                                                 | 2026-07-20 21時台 JST |
+| `npm test`                           | 成功: 18ファイル、168テスト                                          | 2026-07-20 21時台 JST |
+| `npm run test:e2e`                   | 成功: Chromium 8テスト                                               | 2026-07-20 21時台 JST |
+| `npm run build`                      | 成功                                                                 | 2026-07-20 21時台 JST |
+| `npm run build:public-demo`          | 成功                                                                 | 2026-07-20 21時台 JST |
+| `npm run test:public-demo`           | 成功: Chromium 2画面幅                                               | 2026-07-20 21時台 JST |
+| 公開デプロイスクリプト`--dry-run`    | 成功: README、HTML、同一originのCSS/JSの4ファイルだけを選択          | 2026-07-20 21時台 JST |
 | `npm run preflight -- --allow-mock`  | 成功: 開発用Mock確認                                                 | 2026-07-20           |
 | 本番設定での`npm run preflight`      | 予定どおり失敗: 未確定の`COM0`のみFAIL                               | 2026-07-20           |
 | 封印済み成果物の`VERIFY_RELEASE.cmd` | 検証用`COM999`成果物で成功。検証後に成果物を削除                     | 2026-07-20           |
@@ -78,7 +78,7 @@ E2Eスイート8ケースはすべて成功した。E2Eでは高速MockDeviceを
 
 ## 画面確認
 
-参加者向け固定文言、条件対応、提示時間、固定値は変更していない。UIは装飾用eyebrowと中央寄せメッセージカードを撤去し、左基準・罫線主体の研究機器向け表示へ整理した。
+参加者向け固定文言、条件対応、提示時間、固定値は変更していない。UIは装飾用eyebrowと中央寄せメッセージカードを撤去し、左基準・罫線主体の研究機器向け表示へ整理した。処理場所には単色線画のcloud/device iconを追加し、色、大きさ、線幅、占有枠を同一にした。刺激の顕著性が変わるため、プロトコルは`R8-010-2x2-mock-v2`へ更新した。
 
 次の7状態を1366×768と1920×1080の両方で最終撮影し、計14枚を`artifacts/screenshots/`へ保存した。
 
@@ -100,9 +100,9 @@ E2Eスイート8ケースはすべて成功した。E2Eでは高速MockDeviceを
 https://furukawa1020-sechack-experiment-demo.static.hf.space/
 ```
 
-Hugging Face Spaceは`sdk: static`、commit `6902f880c9cf90db3e7e9ae9f2cc02bf9b5a1cc7`で稼働中である。公開成果物は`README.md`、`index.html`、同一originのJavaScriptとCSSだけで、設定、ログ、サーバコード、フォームURLを含まない。再デプロイ手順は、今回成功した`HfApi.create_commit`方式と同じ明示的許可リストを使う`deploy/huggingface-space/deploy.py`へ固定した。
+Hugging Face Spaceは`sdk: static`、commit `d7ea7ca537e009d8d2df441b20781a22ee62e2c5`で稼働中である。公開成果物は`README.md`、`index.html`、同一originのJavaScriptとCSSだけで、設定、ログ、サーバコード、フォームURLを含まない。再デプロイ手順は、今回成功した`HfApi.create_commit`方式と同じ明示的許可リストを使う`deploy/huggingface-space/deploy.py`へ固定した。
 
-`npm run test:public-demo`は1366×768と1920×1080の2件に成功した。公開URLをChromiumで再確認し、HTTP 200、6画面の操作、実機なし表示、入力・リンク・フォーム・QR・内部コードがないこと、fetch/XHR/WebSocketが0件であること、通信先が当該Static Spaceだけであることを確認した。この公開デモは本番実験や実参加者には使用しない。
+`npm run test:public-demo`は1366×768と1920×1080の2件に成功した。cloud/device iconは同じ表示枠、色、線幅、寸法、背景、値の文字スタイルを使用し、可視テキストへ英語の`CLOUD`/`LOCAL`を追加していない。公開URLをChromiumで再確認し、HTTP 200、雲アイコン表示、実機なし表示、入力・リンク・フォーム・QR・内部コードがないこと、fetch/XHR/WebSocketが0件であることを確認した。この公開デモは本番実験や実参加者には使用しない。
 
 ## 本番設定の前提
 

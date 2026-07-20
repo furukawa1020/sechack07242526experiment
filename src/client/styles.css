@@ -259,12 +259,13 @@ select:focus-visible {
 }
 
 .field-icon svg {
-  width: 24px;
+  width: 28px;
+  height: 28px;
   fill: none;
   stroke: var(--heading);
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.7;
+  stroke-width: 2;
 }
 
 .handling-row dt {
@@ -278,6 +279,12 @@ select:focus-visible {
   font-size: 28px;
   font-weight: 800;
   line-height: 1.25;
+}
+
+.handling-row-location dd {
+  margin-top: 3px;
+  font-size: clamp(34px, 2.6vw, 40px);
+  letter-spacing: -0.02em;
 }
 
 .neutral-panel,

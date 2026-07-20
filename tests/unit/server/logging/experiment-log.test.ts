@@ -27,7 +27,7 @@ function session(overrides: Partial<Session> = {}): Session {
       fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
       deviceMode: "mock",
       configHash: "a".repeat(64),
-      protocolVersion: "R8-010-2x2-mock-v1",
+      protocolVersion: "R8-010-2x2-mock-v2",
       wallClockIso: "2026-07-19T12:00:00.000Z",
       monotonicMs: 0,
     }),

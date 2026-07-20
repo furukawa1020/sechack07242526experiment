@@ -42,6 +42,40 @@ function resultMarkup(processing: ProcessingLocation, presentation: Presentation
   return markup;
 }
 
+function fieldIconDetails(panel: HTMLElement): readonly {
+  readonly structure: {
+    readonly wrapperTag: string;
+    readonly wrapperClass: string;
+    readonly svgTag: string;
+    readonly viewBox: string | null;
+    readonly ariaHidden: string | null;
+    readonly focusable: string | null;
+    readonly childTags: readonly string[];
+  };
+  readonly path: string | null;
+}[] {
+  const icons = [...panel.querySelectorAll<SVGSVGElement>(".field-icon > svg")];
+  expect(icons).toHaveLength(3);
+  return icons.map((icon) => {
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+    expect(icon).toHaveAttribute("focusable", "false");
+    expect(icon.children).toHaveLength(1);
+    expect(icon.firstElementChild?.localName).toBe("path");
+    return {
+      structure: {
+        wrapperTag: icon.parentElement?.localName ?? "",
+        wrapperClass: icon.parentElement?.className ?? "",
+        svgTag: icon.localName,
+        viewBox: icon.getAttribute("viewBox"),
+        ariaHidden: icon.getAttribute("aria-hidden"),
+        focusable: icon.getAttribute("focusable"),
+        childTags: [...icon.children].map((child) => child.localName),
+      },
+      path: icon.firstElementChild?.getAttribute("d") ?? null,
+    };
+  });
+}
+
 describe("participant presentation invariants", () => {
   it("renders the label result with byte-for-byte identical right DOM for cloud and local", () => {
     expect(resultMarkup("cloud", "label")).toBe(resultMarkup("local", "label"));
@@ -55,14 +89,42 @@ describe("participant presentation invariants", () => {
     const cloud = render(<ParticipantView snapshot={snapshot("cloud", "label")} />);
     const cloudPanel = within(cloud.container).getByTestId("handling-panel");
     const cloudClass = cloudPanel.className;
-    expect(within(cloudPanel).getByText(UI_COPY.handling.cloud.processing)).toBeInTheDocument();
+    const cloudLocationValue = within(cloudPanel).getByText(UI_COPY.handling.cloud.processing);
+    expect(cloudLocationValue).toBeInTheDocument();
+    expect(cloudLocationValue.closest(".handling-row")).toHaveClass("handling-row-location");
+    const cloudIcons = fieldIconDetails(cloudPanel);
     cloud.unmount();
 
     const local = render(<ParticipantView snapshot={snapshot("local", "label")} />);
     const localPanel = within(local.container).getByTestId("handling-panel");
     expect(localPanel.className).toBe(cloudClass);
     expect(localPanel).not.toHaveAttribute("data-processing");
-    expect(within(localPanel).getByText(UI_COPY.handling.local.processing)).toBeInTheDocument();
+    const localLocationValue = within(localPanel).getByText(UI_COPY.handling.local.processing);
+    expect(localLocationValue).toBeInTheDocument();
+    expect(localLocationValue.closest(".handling-row")).toHaveClass("handling-row-location");
+    const localIcons = fieldIconDetails(localPanel);
+
+    expect(localIcons.map(({ structure }) => structure)).toEqual(
+      cloudIcons.map(({ structure }) => structure),
+    );
+    expect(localIcons[0]?.path).not.toBe(cloudIcons[0]?.path);
+    expect(localIcons.slice(1).map(({ path }) => path)).toEqual(
+      cloudIcons.slice(1).map(({ path }) => path),
+    );
+    expect(new Set(cloudIcons.map(({ structure }) => JSON.stringify(structure))).size).toBe(1);
+    expect(new Set(localIcons.map(({ structure }) => JSON.stringify(structure))).size).toBe(1);
+    expect(cloudPanel.querySelector("[data-icon-kind], [data-location]")).toBeNull();
+    expect(localPanel.querySelector("[data-icon-kind], [data-location]")).toBeNull();
+    expect([...cloudPanel.querySelectorAll(".handling-row")].map(({ className }) => className)).toEqual([
+      "handling-row handling-row-location",
+      "handling-row",
+      "handling-row",
+    ]);
+    expect([...localPanel.querySelectorAll(".handling-row")].map(({ className }) => className)).toEqual([
+      "handling-row handling-row-location",
+      "handling-row",
+      "handling-row",
+    ]);
   });
 
   it("never renders internal condition codes or participant controls on a result", () => {

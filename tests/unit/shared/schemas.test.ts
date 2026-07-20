@@ -18,7 +18,7 @@ import {
 function validConfig(): Record<string, unknown> {
   return {
     schemaVersion: 1,
-    protocolVersion: "R8-010-2x2-mock-v1",
+    protocolVersion: "R8-010-2x2-mock-v2",
     studyTitle: "身体状態の提示実験",
     bindHost: "127.0.0.1",
     port: 4173,
@@ -119,7 +119,7 @@ describe("experiment config schema", () => {
 describe("config file loading", () => {
   it("loads the repository config and returns a stable SHA-256", async () => {
     const loaded = await loadExperimentConfig();
-    expect(loaded.config.protocolVersion).toBe("R8-010-2x2-mock-v1");
+    expect(loaded.config.protocolVersion).toBe("R8-010-2x2-mock-v2");
     expect(loaded.configHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(hashExperimentConfig(loaded.config)).toBe(loaded.configHash);
   });
