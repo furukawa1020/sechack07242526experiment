@@ -6,5 +6,5 @@
     "lib": ["ES2022"],
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/server", "src/shared", "scripts", "tests/unit/server", "tests/unit/shared", "tests/unit/scripts", "tests/integration", "tests/e2e", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["src/server", "src/shared", "scripts", "tests/unit/server", "tests/unit/shared", "tests/unit/scripts", "tests/integration", "tests/e2e", "tests/public-demo", "vitest.config.ts", "playwright.config.ts", "playwright.public-demo.config.ts", "vite.public-demo.config.ts"]
 }

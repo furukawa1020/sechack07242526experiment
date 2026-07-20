@@ -12,6 +12,7 @@
     "release:verify": "tsx scripts/verify-release.ts",
     "deploy:prepare": "npm run lint && npm run typecheck && npm test && npm run test:e2e && npm run build && npm run release:create --",
     "build:client": "vite build",
+    "build:public-demo": "vite build --config vite.public-demo.config.ts",
     "build:server": "node scripts/build-server.mjs",
     "build": "npm run build:client && npm run build:server",
     "start": "node dist-server/index.js",
@@ -20,6 +21,7 @@
     "test": "vitest run --coverage",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "test:public-demo": "playwright test --config playwright.public-demo.config.ts",
     "screenshots": "playwright test tests/e2e/screenshots.spec.ts --project=chromium"
   },
   "engines": {

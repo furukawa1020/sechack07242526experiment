@@ -1,5 +1,7 @@
 node_modules/
+.venv-deploy/
 dist/
+dist-public-demo/
 dist-server/
 release/
 data/**
