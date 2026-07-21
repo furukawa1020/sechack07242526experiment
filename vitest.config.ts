@@ -1,14 +1,26 @@
 import { defineConfig } from "vitest/config";
 
+const coverageRunId = process.env.COVERAGE_RUN_ID;
+if (coverageRunId !== undefined && !/^[a-z0-9-]+$/u.test(coverageRunId)) {
+  throw new Error("COVERAGE_RUN_ID may contain only lowercase letters, digits, and hyphens.");
+}
+const coverageReportsDirectory = coverageRunId === undefined
+  ? "artifacts/coverage"
+  : `artifacts/coverage-${coverageRunId}`;
+
 export default defineConfig({
   test: {
     environment: "node",
+    // Windows CI and concurrent Codex sessions can make the intentional
+    // child-process and lock-contention tests exceed Vitest's 5 s default.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     include: ["tests/unit/**/*.test.{ts,tsx}", "tests/integration/**/*.test.ts"],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary", "html"],
-      reportsDirectory: "artifacts/coverage",
+      reportsDirectory: coverageReportsDirectory,
       include: [
         "src/shared/**/*.ts",
         "src/server/devices/**/*.ts",

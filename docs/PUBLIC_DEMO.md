@@ -11,12 +11,12 @@
 | 経路 | 用途 | 制約 |
 |---|---|---|
 | `/` | 6画面の手動確認と固定時間の自動リハーサル | ページメモリだけで進行 |
-| `/operator/` | 表示レビュー用の進行操作 | 研究用ID・同意・割付・ログなし |
-| `/display/demo/` | 読み取り専用の参加者表示レビュー | 固定パスで、参加者tokenではない |
-| `/device-test/` | 模擬装置の画面状態確認 | Serial・装置アダプタ・実機命令なし |
-| `/healthz/` | 静的成果物の配信確認 | 動的なサーバーヘルスチェックではない |
+| `/operator/index.html` | 表示レビュー用の進行操作 | 研究用ID・同意・割付・ログなし |
+| `/display/demo/index.html` | 読み取り専用の参加者表示レビュー | 固定パスで、参加者tokenではない |
+| `/device-test/index.html` | 模擬装置の画面状態確認 | Serial・装置アダプタ・実機命令なし |
+| `/healthz/index.html` | 静的成果物の配信確認 | 動的なサーバーヘルスチェックではない |
 
-`/operator/`と`/display/demo/`の同期には`BroadcastChannel`を使い、同一origin・同一ブラウザ・同一端末のタブ間で表示番号だけを一時伝達する。別端末や別ブラウザとは同期しない。ブラウザ保存、Cookie、API、WebSocketを使わず、再読み込みすると導入画面へ戻る。任意の`/display/:token`を発行する機能ではない。
+`/operator/index.html`と`/display/demo/index.html`の同期には`BroadcastChannel`を使い、同一origin・同一ブラウザ・同一端末のタブ間で表示番号だけを一時伝達する。別端末や別ブラウザとは同期しない。ブラウザ保存、Cookie、API、WebSocketを使わず、再読み込みすると導入画面へ戻る。任意の`/display/:token`を発行する機能ではない。Static Spaceはディレクトリ末尾から`index.html`を自動解決しないため、公開リンクでは`index.html`まで省略しない。
 
 処理場所は、クラウドを雲、端末内を端末の単色線画で示す。両アイコンの色、大きさ、線幅、表示枠、余白は共通にし、安全性や推奨度を示す鍵、盾、警告色、アニメーションを使用しない。
 
@@ -88,10 +88,10 @@ Space自体を新規作成する場合だけ、先にHugging Faceの画面でSta
 
 ```text
 https://furukawa1020-sechack-experiment-demo.static.hf.space/
-https://furukawa1020-sechack-experiment-demo.static.hf.space/operator/
-https://furukawa1020-sechack-experiment-demo.static.hf.space/display/demo/
-https://furukawa1020-sechack-experiment-demo.static.hf.space/device-test/
-https://furukawa1020-sechack-experiment-demo.static.hf.space/healthz/
+https://furukawa1020-sechack-experiment-demo.static.hf.space/operator/index.html
+https://furukawa1020-sechack-experiment-demo.static.hf.space/display/demo/index.html
+https://furukawa1020-sechack-experiment-demo.static.hf.space/device-test/index.html
+https://furukawa1020-sechack-experiment-demo.static.hf.space/healthz/index.html
 ```
 
 デプロイスクリプトは、更新元commitを固定した競合防止付きの単一commitで反映する。反映後は、公開commitの許可ファイル一覧とSHA-256をローカル成果物へ照合する。実配信ではHugging FaceがHTMLへSpace管理用スクリプトを注入するため、HTMLの配信bytesは原本と一致しない。そこで、配信commitを`X-Repo-Commit`で確認し、5つのHTMLは固有title・application root・ビルド済みJS/CSS参照を照合し、JS/CSSは配信bytesのSHA-256を照合する。別originへのリダイレクト、旧commit、誤ったHTML、欠落アセットは成功として扱わない。
