@@ -91,6 +91,13 @@ describe("ExperimentLogEvent allowlist", () => {
     expect(() => parseLogEvent({ ...valid, researchId: "person@example.test" })).toThrow();
     expect(() => parseLogEvent({ ...valid, processing: "local" })).toThrow(/does not match/iu);
     expect(() => parseLogEvent({ ...valid, presentation: "puffer" })).toThrow(/does not match/iu);
+    const conditionOnly = { ...valid };
+    Reflect.deleteProperty(conditionOnly, "processing");
+    Reflect.deleteProperty(conditionOnly, "presentation");
+    expect(() => parseLogEvent(conditionOnly)).toThrow(/must be present together/iu);
+    const metadataWithoutCode = { ...valid };
+    Reflect.deleteProperty(metadataWithoutCode, "conditionCode");
+    expect(() => parseLogEvent(metadataWithoutCode)).toThrow(/must be present together/iu);
     expect(() => ExperimentLogEventSchema.parse({ ...valid, configHash: "not-a-hash" })).toThrow();
   });
 

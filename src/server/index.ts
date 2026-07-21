@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import { createServer } from "node:http";
-import { basename, relative, resolve, sep } from "node:path";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { verifyReleaseDirectoryDetailed } from "../../scripts/release-manifest.js";
 import { loadExperimentConfig } from "../shared/config-loader.js";
 import { createApplication } from "./app.js";
 import {
@@ -42,8 +43,25 @@ export interface ServerCliOptions {
   readonly stoppedMessage?: string;
 }
 
+export interface ProductionReleaseCliOptions {
+  /** Test-only override for the compiled entry location. */
+  readonly entryPath?: string;
+  /** Test-only environment snapshot. The real CLI always uses process.env. */
+  readonly environment?: {
+    readonly EXPERIMENT_CONFIG_PATH?: string;
+    readonly DATA_DIRECTORY?: string;
+  };
+  /** Test seam; the real CLI always verifies the packaged deployment manifest. */
+  readonly verifyRelease?: typeof verifyReleaseDirectoryDetailed;
+  /** Test seam; the real CLI always starts through startServer. */
+  readonly start?: (options: StartServerOptions) => Promise<RunningExperimentServer>;
+}
+
 const REHEARSAL_LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const REHEARSAL_RESEARCH_ID_PATTERN = "^DEMO-[0-9]{3}$";
+const PRODUCTION_CONFIG_PATH = "config/experiment.json";
+const PRODUCTION_SERVER_DIRECTORY = "dist-server";
+const PRODUCTION_SERVER_ENTRY = "index.js";
 
 function isInside(parent: string, candidate: string): boolean {
   const pathFromParent = relative(parent, candidate);
@@ -368,6 +386,55 @@ export async function startServer(
   }
 }
 
+/**
+ * Starts the compiled production CLI only from a complete, verified release.
+ *
+ * The release root and config path are derived from the compiled entry rather
+ * than the working directory. Environment overrides are rejected instead of
+ * being silently accepted, so a launcher cannot redirect either the formal
+ * config or its configured log destination after manifest verification.
+ */
+export async function startProductionReleaseCli(
+  options: ProductionReleaseCliOptions = {},
+): Promise<RunningExperimentServer> {
+  const environment = options.environment ?? process.env;
+  const forbiddenOverrides = [
+    environment.EXPERIMENT_CONFIG_PATH === undefined ? null : "EXPERIMENT_CONFIG_PATH",
+    environment.DATA_DIRECTORY === undefined ? null : "DATA_DIRECTORY",
+  ].filter((name): name is string => name !== null);
+  if (forbiddenOverrides.length > 0) {
+    throw new Error(
+      `Production CLI prohibits environment overrides: ${forbiddenOverrides.join(", ")}.`,
+    );
+  }
+
+  const entryPath = resolve(options.entryPath ?? fileURLToPath(import.meta.url));
+  const serverDirectory = dirname(entryPath);
+  if (
+    basename(entryPath) !== PRODUCTION_SERVER_ENTRY
+    || basename(serverDirectory) !== PRODUCTION_SERVER_DIRECTORY
+  ) {
+    throw new Error(
+      "Production CLI must run as dist-server/index.js inside a packaged release.",
+    );
+  }
+  const releaseDirectory = resolve(serverDirectory, "..");
+  const verifyRelease = options.verifyRelease ?? verifyReleaseDirectoryDetailed;
+  const verification = await verifyRelease(releaseDirectory);
+  if (verification.errors.length > 0) {
+    throw new Error(
+      `Production release verification failed: ${verification.errors.join("; ")}`,
+    );
+  }
+
+  const start = options.start ?? startServer;
+  return start({
+    rootDirectory: releaseDirectory,
+    configPath: PRODUCTION_CONFIG_PATH,
+    mode: "production",
+  });
+}
+
 /** Runs a CLI entry with the same STOP/DEFLATE shutdown path in every server mode. */
 export function runServerCli(options: ServerCliOptions = {}): void {
   const start = options.start ?? (() => startServer());
@@ -444,4 +511,11 @@ function isProductionCliEntry(entryPath: string | undefined): boolean {
   return entryName === "index.ts" || entryName === "index.js";
 }
 
-if (isProductionCliEntry(process.argv[1])) runServerCli();
+if (isProductionCliEntry(process.argv[1])) {
+  const entryName = basename(fileURLToPath(import.meta.url));
+  runServerCli(
+    entryName === PRODUCTION_SERVER_ENTRY
+      ? { start: () => startProductionReleaseCli() }
+      : {},
+  );
+}

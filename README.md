@@ -38,16 +38,9 @@ npm run rehearsal
 
 このモードは`config/experiment.mock-rehearsal.json`を使い、`127.0.0.1`だけで待ち受け、MockDeviceを自動準備します。フォームURLは空で、ログは`data/mock-sessions/`へ分離されます。本番参加者には使用できません。
 
-正式な実機なし`screen`モードの本番運用では、ビルド後に次で起動します。
+正式な実機なし`screen`モードは、ソースツリーや単独の`dist-server/`から直接起動しません。承認済み設定から生成した封印済みproductionリリースだけを使用します。開発用Mockは`npm run dev`、明示的な模擬リハーサルは`npm run rehearsal`を使用します。`npm run start`を含むビルド済みproduction CLIは、manifestのない場所では起動を拒否します。
 
-```bash
-npm run preflight -- --config config/experiment.production.json
-EXPERIMENT_CONFIG_PATH=config/experiment.production.json npm run start
-```
-
-PowerShellでは起動前に`$env:EXPERIMENT_CONFIG_PATH = "config/experiment.production.json"`を設定してから`npm.cmd run start`を実行します。ソースツリーの既定`config/experiment.json`は開発用Mockなので、本番設定を明示せずに正式版を起動できません。封印済みproductionリリースでは、承認済み設定が`config/experiment.json`として同梱され、`START_PRODUCTION.cmd`が検証後に起動します。
-
-本番preflightは、プロトコル`R8-010-2x2-screen-v1`、`device.mode=screen`、空のシリアルパス、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内の二名監査GO、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。production起動も同じ設定・フォーム監査ゲートを再検証し、監査記録の欠落・NO-GO・設定との不一致・期限切れ、現在のscreenプロトコルに対する`mock`または`serial`設定があれば起動を拒否します。
+本番preflightは、プロトコル`R8-010-2x2-screen-v1`、`device.mode=screen`、空のシリアルパス、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内の二名監査GO、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。production起動はmanifest、設定ファイルのバイト列・意味内容hash、フォーム監査ゲートを再検証し、設定差し替え、環境変数による設定・ログ先上書き、`mock`または`serial`設定を拒否します。
 
 会場へ配置する本番成果物は、ソースディレクトリをそのままコピーせず、次のコマンドで生成します。
 
@@ -142,13 +135,14 @@ npm.cmd run deploy:prepare:rehearsal
 
 ## 本番前点検
 
-本番用設定を確定した後、起動と同じユーザー・同じ環境変数で実行します。
+本番用設定を確定した後、同じWindowsユーザーで次を実行します。
 
-```bash
-npm run preflight -- --config config/experiment.production.json
-npm run build
-EXPERIMENT_CONFIG_PATH=config/experiment.production.json npm run start
+```powershell
+npm.cmd run preflight -- --config config/experiment.production.json
+npm.cmd run deploy:prepare -- --config config/experiment.production.json
 ```
+
+生成された新しい`release/sechack-production-*`内で`VERIFY_RELEASE.cmd`を実行し、別の担当者が同じmanifestを照合した後、`START_PRODUCTION.cmd`から起動します。ソースツリーの`npm run start`や`node dist-server/index.js`を本番起動に使いません。
 
 点検結果には、解決済み設定パスとSHA-256、`protocolVersion`、正式`screen`モード・空のシリアルパス、固定状態、Google Forms URL、フォーム監査の状態・対象・日付・公開内容SHA-256・二名確認、bind/LAN設定、ログ保存先と空き容量が表示されます。確認者名、機密の操作トークン、環境変数全体は表示しません。別設定は`npm run preflight -- --config config/会場用設定.json`で指定できます。
 
@@ -158,7 +152,7 @@ EXPERIMENT_CONFIG_PATH=config/experiment.production.json npm run start
 
 ## 設定
 
-既定設定は`config/experiment.json`です。別ファイルを使う場合は`EXPERIMENT_CONFIG_PATH`を設定します。ログ保存先だけを`DATA_DIRECTORY`で上書きできます。
+開発時の既定設定は`config/experiment.json`です。`EXPERIMENT_CONFIG_PATH`と`DATA_DIRECTORY`による上書きは開発・テスト用だけです。封印済みproduction CLIは同梱の`config/experiment.json`と設定済みログ先だけを使用し、両環境変数が存在すれば起動を拒否します。
 
 参加者向け文言、条件定義、提示時間、固定値、フグ動作を変える場合は、研究責任者の確認後に`protocolVersion`と[プロトコル変更履歴](docs/PROTOCOL_CHANGELOG.md)を更新してください。
 

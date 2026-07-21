@@ -93,9 +93,66 @@ describe("public review routes", () => {
   it("shows an accurate fallback when tab synchronization is unavailable", () => {
     vi.unstubAllGlobals();
     vi.stubGlobal("BroadcastChannel", undefined);
-    const view = render(<PublicDisplayApp />);
+    const operator = render(<PublicOperatorApp />);
+    const display = render(<PublicDisplayApp />);
 
-    expect(within(view.container).getByText(/タブ間同期を利用できません/u)).toBeInTheDocument();
+    expect(
+      within(operator.container).getByText(/タブ間同期を利用できません/u),
+    ).toBeInTheDocument();
+    expect(within(display.container).getByText(/タブ間同期を利用できません/u)).toBeInTheDocument();
+    expect(
+      within(display.container).getByRole("link", { name: "手動デモを開く" }),
+    ).toHaveAttribute("href", "/");
+  });
+
+  it("falls back without crashing when the browser rejects channel creation", async () => {
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        constructor() {
+          throw new Error("BroadcastChannel construction failed");
+        }
+      },
+    );
+    const operator = render(<PublicOperatorApp />);
+    const display = render(<PublicDisplayApp />);
+
+    expect(
+      await within(operator.container).findByText(/タブ間同期を利用できません/u),
+    ).toBeInTheDocument();
+    expect(
+      await within(display.container).findByText(/タブ間同期を利用できません/u),
+    ).toBeInTheDocument();
+    expect(
+      within(display.container).getByRole("link", { name: "手動デモを開く" }),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back without crashing when the browser rejects channel messages", async () => {
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+
+        postMessage(): void {
+          throw new Error("BroadcastChannel post failed");
+        }
+
+        close(): void {}
+      },
+    );
+    const operator = render(<PublicOperatorApp />);
+    const display = render(<PublicDisplayApp />);
+
+    expect(
+      await within(operator.container).findByText(/タブ間同期を利用できません/u),
+    ).toBeInTheDocument();
+    expect(
+      await within(display.container).findByText(/タブ間同期を利用できません/u),
+    ).toBeInTheDocument();
+    expect(
+      within(display.container).getByRole("link", { name: "手動デモを開く" }),
+    ).toBeInTheDocument();
   });
 
   it("renders a static health page without collecting input", () => {

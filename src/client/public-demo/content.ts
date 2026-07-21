@@ -143,11 +143,15 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
       displayLink: "参加者画面を別タブで開く",
       deviceLink: "模擬装置画面を開く",
       connection: "同じブラウザ内だけで同期します",
+      unsupported:
+        "このブラウザではタブ間同期を利用できません。各画面は手動で確認できます。",
       scenes: ["共通導入", "第1提示", "第2提示", "第3提示", "第4提示", "サマリー"],
     },
     display: {
       waiting: "進行画面との接続を待っています。同じブラウザで進行画面を開いてください。",
-      unsupported: "このブラウザではタブ間同期を利用できません。トップ画面で表示を確認してください。",
+      unsupported:
+        "このブラウザではタブ間同期を利用できません。手動デモで表示を確認してください。",
+      manualLink: "手動デモを開く",
     },
     device: {
       title: "模擬装置の確認",

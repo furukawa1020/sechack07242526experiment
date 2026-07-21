@@ -18,10 +18,10 @@
 | --- | --- |
 | `npm run lint` | 成功 |
 | `npm run typecheck` | 成功 |
-| `npm test` | 成功: 29ファイル、352テスト |
+| `npm test` | 成功: 29ファイル、365テスト |
 | `npm run test:e2e` | 成功: Chromium 10テスト |
 | `npm run build` | 成功 |
-| `npm run test:public-demo` | 成功: 5画面幅、20テスト、skipなし |
+| `npm run test:public-demo` | 成功: 5画面幅、25テスト、skipなし |
 | 公開HTTPSに対するPlaywright | 成功: 1366×768、4テスト |
 | 公開デプロイスクリプト`--dry-run` | 成功: README、HTML 5件、同一originのCSS/JSだけを選択 |
 | Mockリハーサル用preflight | 成功。Mockは本番不可と警告した上で開発確認を許可 |
@@ -31,10 +31,10 @@
 
 最終カバレッジ:
 
-- Statements: 95.33%（1697/1780）
-- Branches: 90.05%（1132/1257）
-- Functions: 95.16%（315/331）
-- Lines: 96.00%（1632/1700）
+- Statements: 95.35%（1703/1786）
+- Branches: 90.08%（1136/1261）
+- Functions: 95.18%（316/332）
+- Lines: 96.01%（1637/1705）
 
 重要領域の強制閾値:
 
@@ -66,6 +66,8 @@
 - 参加者公開payloadに研究用ID、提示順、A〜D、pufferLevelを出さないこと
 - 許可外ログ項目とPII候補を拒否すること
 - 実験アプリから外部originへ自動通信しないこと
+- 封印済みproduction CLIだけが起動でき、manifest、設定バイト列、設定意味hash、protocolVersionを相互照合すること
+- productionリリース生成直前にGoogleフォーム公開内容を再取得し、承認済みhashとの不一致を拒否すること
 
 ## 3. UI確認
 

@@ -21,6 +21,10 @@ export interface LoadExperimentConfigOptions {
 export interface LoadedExperimentConfig {
   readonly config: ExperimentConfig;
   readonly configHash: string;
+  /** SHA-256 of the exact config file bytes read from disk. */
+  readonly configFileHash: string;
+  /** Exact bytes parsed and hashed for this snapshot. */
+  readonly sourceBytes: Uint8Array;
   readonly path: string;
 }
 
@@ -74,7 +78,8 @@ export async function loadExperimentConfig(
   ) {
     throw new Error("The experiment config resolved outside the allowed config directory.");
   }
-  const source = await readFile(configPath, "utf8");
+  const sourceBytes = await readFile(configPath);
+  const source = sourceBytes.toString("utf8");
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(source) as unknown;
@@ -114,6 +119,8 @@ export async function loadExperimentConfig(
   return Object.freeze({
     config,
     configHash: hashExperimentConfig(config),
+    configFileHash: createHash("sha256").update(sourceBytes).digest("hex"),
+    sourceBytes: Uint8Array.from(sourceBytes),
     path: configPath,
   });
 }

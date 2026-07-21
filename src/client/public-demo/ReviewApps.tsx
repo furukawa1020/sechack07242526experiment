@@ -44,9 +44,30 @@ function parseReviewMessage(value: unknown): ReviewMessage | null {
 }
 
 function createReviewChannel(): BroadcastChannel | null {
-  return typeof BroadcastChannel === "undefined"
-    ? null
-    : new BroadcastChannel(REVIEW_CHANNEL_NAME);
+  if (typeof BroadcastChannel !== "function") return null;
+
+  try {
+    return new BroadcastChannel(REVIEW_CHANNEL_NAME);
+  } catch {
+    return null;
+  }
+}
+
+function postReviewMessage(channel: BroadcastChannel, message: ReviewMessage): boolean {
+  try {
+    channel.postMessage(message);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function closeReviewChannel(channel: BroadcastChannel): void {
+  try {
+    channel.close();
+  } catch {
+    // A failed or already-closed review channel has no resource needed by the static demo.
+  }
 }
 
 function ReviewShell({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
@@ -60,31 +81,70 @@ function ReviewShell({ children }: { readonly children: React.ReactNode }): Reac
 
 export function PublicOperatorApp(): React.JSX.Element {
   const [step, setStep] = useState(PUBLIC_DEMO_INTRO_STEP);
+  const [channelState, setChannelState] = useState<"available" | "unsupported">(
+    typeof BroadcastChannel === "function" ? "available" : "unsupported",
+  );
   const stepRef = useRef(step);
   const channelRef = useRef<BroadcastChannel | null>(null);
 
   useEffect(() => {
+    let active = true;
+    const showUnsupported = (): void => {
+      window.queueMicrotask(() => {
+        if (active) setChannelState("unsupported");
+      });
+    };
     const channel = createReviewChannel();
     channelRef.current = channel;
-    if (channel === null) return undefined;
+    if (channel === null) {
+      showUnsupported();
+      return (): void => {
+        active = false;
+      };
+    }
+
+    const markUnsupported = (): void => {
+      if (channelRef.current === channel) channelRef.current = null;
+      closeReviewChannel(channel);
+      showUnsupported();
+    };
 
     channel.onmessage = (event: MessageEvent<unknown>): void => {
       const message = parseReviewMessage(event.data);
       if (message?.type === "review.ready") {
-        channel.postMessage({ type: "review.step", step: stepRef.current } satisfies ReviewStepMessage);
+        const sent = postReviewMessage(channel, {
+          type: "review.step",
+          step: stepRef.current,
+        } satisfies ReviewStepMessage);
+        if (!sent) markUnsupported();
       }
     };
-    channel.postMessage({ type: "review.step", step: stepRef.current } satisfies ReviewStepMessage);
+    const sent = postReviewMessage(channel, {
+      type: "review.step",
+      step: stepRef.current,
+    } satisfies ReviewStepMessage);
+    if (!sent) markUnsupported();
 
     return (): void => {
-      channelRef.current = null;
-      channel.close();
+      active = false;
+      if (channelRef.current === channel) channelRef.current = null;
+      closeReviewChannel(channel);
     };
   }, []);
 
   useEffect(() => {
     stepRef.current = step;
-    channelRef.current?.postMessage({ type: "review.step", step } satisfies ReviewStepMessage);
+    const channel = channelRef.current;
+    if (channel === null) return;
+    const sent = postReviewMessage(channel, {
+      type: "review.step",
+      step,
+    } satisfies ReviewStepMessage);
+    if (!sent) {
+      channelRef.current = null;
+      closeReviewChannel(channel);
+      window.queueMicrotask(() => setChannelState("unsupported"));
+    }
   }, [step]);
 
   return (
@@ -118,7 +178,11 @@ export function PublicOperatorApp(): React.JSX.Element {
             <p>
               {step + 1} / {PUBLIC_DEMO_TOTAL_STEPS}画面
             </p>
-            <small>{PUBLIC_DEMO_COPY.review.operator.connection}</small>
+            <small data-review-channel-state={channelState}>
+              {channelState === "unsupported"
+                ? PUBLIC_DEMO_COPY.review.operator.unsupported
+                : PUBLIC_DEMO_COPY.review.operator.connection}
+            </small>
           </div>
         </section>
 
@@ -136,12 +200,23 @@ export function PublicOperatorApp(): React.JSX.Element {
 export function PublicDisplayApp(): React.JSX.Element {
   const [step, setStep] = useState(PUBLIC_DEMO_INTRO_STEP);
   const [connectionState, setConnectionState] = useState<"unsupported" | "waiting" | "connected">(
-    typeof BroadcastChannel === "undefined" ? "unsupported" : "waiting",
+    typeof BroadcastChannel === "function" ? "waiting" : "unsupported",
   );
 
   useEffect(() => {
+    let active = true;
+    const showUnsupported = (): void => {
+      window.queueMicrotask(() => {
+        if (active) setConnectionState("unsupported");
+      });
+    };
     const channel = createReviewChannel();
-    if (channel === null) return undefined;
+    if (channel === null) {
+      showUnsupported();
+      return (): void => {
+        active = false;
+      };
+    }
 
     channel.onmessage = (event: MessageEvent<unknown>): void => {
       const message = parseReviewMessage(event.data);
@@ -150,9 +225,19 @@ export function PublicDisplayApp(): React.JSX.Element {
         setConnectionState("connected");
       }
     };
-    channel.postMessage({ type: "review.ready" } satisfies ReviewReadyMessage);
+    const sent = postReviewMessage(channel, { type: "review.ready" } satisfies ReviewReadyMessage);
+    if (!sent) {
+      closeReviewChannel(channel);
+      showUnsupported();
+      return (): void => {
+        active = false;
+      };
+    }
 
-    return (): void => channel.close();
+    return (): void => {
+      active = false;
+      closeReviewChannel(channel);
+    };
   }, []);
 
   return (
@@ -165,11 +250,16 @@ export function PublicDisplayApp(): React.JSX.Element {
         <Scene step={step} />
       </main>
       {connectionState === "connected" ? null : (
-        <p className="public-review-display-note">
-          {connectionState === "unsupported"
-            ? PUBLIC_DEMO_COPY.review.display.unsupported
-            : PUBLIC_DEMO_COPY.review.display.waiting}
-        </p>
+        <aside className="public-review-display-note" aria-live="polite">
+          <p>
+            {connectionState === "unsupported"
+              ? PUBLIC_DEMO_COPY.review.display.unsupported
+              : PUBLIC_DEMO_COPY.review.display.waiting}
+          </p>
+          {connectionState === "unsupported" ? (
+            <a href="/">{PUBLIC_DEMO_COPY.review.display.manualLink}</a>
+          ) : null}
+        </aside>
       )}
     </ReviewShell>
   );

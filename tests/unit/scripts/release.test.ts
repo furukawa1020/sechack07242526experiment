@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createRelease, parseCreateReleaseArguments } from "../../../scripts/create-release.js";
 import {
@@ -19,7 +19,11 @@ import {
   type ReleaseManifest,
 } from "../../../scripts/release-manifest.js";
 import { runReleaseVerification } from "../../../scripts/verify-release.js";
-import { SCREEN_PROTOCOL_VERSION } from "../../../src/shared/schemas.js";
+import { hashExperimentConfig } from "../../../src/shared/config-loader.js";
+import {
+  parseExperimentConfig,
+  SCREEN_PROTOCOL_VERSION,
+} from "../../../src/shared/schemas.js";
 
 interface ConfigOverrides {
   readonly allowLan?: boolean;
@@ -38,7 +42,49 @@ const execFileAsync = promisify(execFile);
 const SYNTHETIC_SOURCE_COMMIT = "1".repeat(40);
 const SYNTHETIC_SOURCE_REPOSITORY = "https://github.com/example/sechack-release-fixture.git";
 const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
+const EXPECTED_FORM_TITLE =
+  "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜研究説明・参加同意・アンケート";
+const EXPECTED_FORM_FINAL_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q/viewform?usp=send_form";
 const TODAY_IN_JAPAN = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+
+function approvedFormPayload(): { readonly html: string; readonly sha256: string } {
+  const content = [
+    "この実験では、同じ固定模擬データを4つの方法で提示します。",
+    "表示される値は、あなた自身を測定したものではありません。",
+    "この実験では、心拍その他の生体データを取得しません。",
+    "状態は画面上のフグのふくらみで表します。",
+    "アンケート回答は、Googleフォームの送信時にGoogleへ送信・保存されます。",
+    "4つの提示をすべて見終え、サマリーが表示された後、このフォームへ戻ってください。",
+    "各提示の直後には回答せず、4つの提示がすべて終了してから回答してください。",
+    "第1提示から第4提示までを、11問でそれぞれ評価してください。",
+  ].join(" ");
+  const rows = ["第1提示", "第2提示", "第3提示", "第4提示"];
+  const scale = ["1全くそう思わない", "2", "3", "4", "5", "6", "7非常にそう思う"];
+  const items = Array.from({ length: 11 }, (_unused, questionIndex) => [
+    null,
+    `評価質問${String(questionIndex + 1)}`,
+    null,
+    7,
+    rows.map((row) => [null, scale.map((label) => [label]), 0, [row]]),
+  ]);
+  const payload = JSON.stringify([content, [null, items]]);
+  return Object.freeze({
+    html: `<title>${EXPECTED_FORM_TITLE}</title><script>var FB_PUBLIC_LOAD_DATA_ = ${payload};</script>`,
+    sha256: createHash("sha256").update(payload, "utf8").digest("hex"),
+  });
+}
+
+const APPROVED_FORM = approvedFormPayload();
+
+const approvedFormFetch = (async (): Promise<Response> => {
+  const response = new Response(APPROVED_FORM.html, {
+    status: 200,
+    headers: { "Content-Type": "text/html; charset=utf-8" },
+  });
+  Object.defineProperty(response, "url", { value: EXPECTED_FORM_FINAL_URL });
+  return response;
+}) as typeof fetch;
 
 function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
   const mode = overrides.mode ?? "screen";
@@ -76,7 +122,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
       protocolVersion,
       formUrl,
       auditedOn: TODAY_IN_JAPAN,
-      contentSha256: "c".repeat(64),
+      contentSha256: formUrl === "" ? "0".repeat(64) : APPROVED_FORM.sha256,
       twoPersonVerified: formUrl !== "",
     },
     logging: {
@@ -169,12 +215,15 @@ async function createManifestFixture(): Promise<{
   const root = await newTemporaryRoot("sechack-manifest-");
   await writeRelative(root, "app.txt", "alpha");
   await writeRelative(root, "nested/config.txt", "bravo");
+  const configBytes = JSON.stringify(configSource());
+  const parsedConfig = parseExperimentConfig(JSON.parse(configBytes) as unknown);
+  await writeRelative(root, "config/experiment.json", configBytes);
   await writeRelative(root, "data/sessions/runtime.jsonl", "ignored runtime data");
   const manifest = await createReleaseManifest(root, {
     appVersion: "9.8.7",
-    protocolVersion: "release-test-v1",
-    configHash: "a".repeat(64),
-    configFileHash: "b".repeat(64),
+    protocolVersion: parsedConfig.protocolVersion,
+    configHash: hashExperimentConfig(parsedConfig),
+    configFileHash: createHash("sha256").update(configBytes).digest("hex"),
     sourceCommit: SYNTHETIC_SOURCE_COMMIT,
     sourceRepository: SYNTHETIC_SOURCE_REPOSITORY,
   });
@@ -261,6 +310,7 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
 }
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await Promise.all(
     temporaryRoots.splice(0).map(async (root) => {
       await rm(root, { recursive: true, force: true });
@@ -323,7 +373,11 @@ describe("deployment manifest verification", () => {
     expect(manifest.schemaVersion).toBe(2);
     expect(manifest.sourceCommit).toBe(SYNTHETIC_SOURCE_COMMIT);
     expect(manifest.sourceRepository).toBe(SYNTHETIC_SOURCE_REPOSITORY);
-    expect(manifest.files.map((file) => file.path)).toEqual(["app.txt", "nested/config.txt"]);
+    expect(manifest.files.map((file) => file.path)).toEqual([
+      "app.txt",
+      "config/experiment.json",
+      "nested/config.txt",
+    ]);
     expect(manifest.files[0]).toEqual({
       path: "app.txt",
       bytes: 5,
@@ -401,6 +455,64 @@ describe("deployment manifest verification", () => {
     await expect(verifyReleaseDirectory(root)).resolves.toContain("SHA-256 mismatch: app.txt");
   });
 
+  it("binds manifest semantic hash and protocolVersion to the packaged config", async () => {
+    const semanticFixture = await createManifestFixture();
+    const semanticManifest: ReleaseManifest = {
+      ...semanticFixture.manifest,
+      configHash: "0".repeat(64),
+    };
+    await writeFile(
+      join(semanticFixture.root, RELEASE_MANIFEST_NAME),
+      `${JSON.stringify(semanticManifest, null, 2)}\n`,
+      "utf8",
+    );
+    await expect(verifyReleaseDirectory(semanticFixture.root)).resolves.toContain(
+      "Config semantic SHA-256 mismatch: config/experiment.json",
+    );
+
+    const protocolFixture = await createManifestFixture();
+    const protocolManifest: ReleaseManifest = {
+      ...protocolFixture.manifest,
+      protocolVersion: "different-protocol-v1",
+    };
+    await writeFile(
+      join(protocolFixture.root, RELEASE_MANIFEST_NAME),
+      `${JSON.stringify(protocolManifest, null, 2)}\n`,
+      "utf8",
+    );
+    await expect(verifyReleaseDirectory(protocolFixture.root)).resolves.toContain(
+      `Config protocolVersion mismatch: expected different-protocol-v1, got ${SCREEN_PROTOCOL_VERSION}`,
+    );
+  });
+
+  it("rejects a rehashed packaged config when its approved semantics changed", async () => {
+    const { root, manifest } = await createManifestFixture();
+    const changedSource = JSON.stringify({
+      ...configSource(),
+      studyTitle: "unapproved semantic change",
+    });
+    const changedHash = createHash("sha256").update(changedSource).digest("hex");
+    await writeFile(join(root, "config", "experiment.json"), changedSource, "utf8");
+    const modified: ReleaseManifest = {
+      ...manifest,
+      configFileHash: changedHash,
+      files: manifest.files.map((file) =>
+        file.path === "config/experiment.json"
+          ? { ...file, bytes: Buffer.byteLength(changedSource), sha256: changedHash }
+          : file,
+      ),
+    };
+    await writeFile(
+      join(root, RELEASE_MANIFEST_NAME),
+      `${JSON.stringify(modified, null, 2)}\n`,
+      "utf8",
+    );
+
+    const errors = await verifyReleaseDirectory(root);
+    expect(errors).toContain("Config semantic SHA-256 mismatch: config/experiment.json");
+    expect(errors).not.toContain("Config file SHA-256 mismatch: config/experiment.json");
+  });
+
   it("detects unexpected and missing controlled files", async () => {
     const extraFixture = await createManifestFixture();
     await writeRelative(extraFixture.root, "unexpected.txt", "unexpected");
@@ -459,6 +571,27 @@ describe("release creation", () => {
       }),
     ).rejects.toThrow("worktree must be clean");
     expect(await pathExists(join(root, "release", "dirty"))).toBe(false);
+  });
+
+  it("requires live Google Form verification when createRelease is called directly", async () => {
+    const root = await createReleaseSource();
+    let fetchCount = 0;
+    vi.stubGlobal("fetch", async () => {
+      fetchCount += 1;
+      throw new Error("live form unavailable");
+    });
+    await expect(
+      createRelease({
+        rootDirectory: root,
+        configPath: "config/site-production.json",
+        outputPath: "release/no-live-form",
+        buildArtifacts: false,
+        installDependencies: false,
+        writeLine: () => undefined,
+      }),
+    ).rejects.toThrow("live form unavailable");
+    expect(fetchCount).toBe(1);
+    expect(await pathExists(join(root, "release", "no-live-form"))).toBe(false);
   });
 
   it.each([
@@ -646,7 +779,9 @@ describe("release creation", () => {
 
   it("creates only the approved offline payload and a self-consistent manifest", async () => {
     const root = await createReleaseSource();
+    vi.stubGlobal("fetch", approvedFormFetch);
     const sourceCommit = await runGit(root, ["rev-parse", "HEAD"]);
+    const sourceConfigBytes = await readFile(join(root, "config", "site-production.json"));
     const outputLines: string[] = [];
     const output = await createRelease({
       rootDirectory: root,
@@ -698,6 +833,9 @@ describe("release creation", () => {
       await readFile(join(output, "config", "experiment.json"), "utf8"),
     ) as Record<string, unknown>;
     expect(releasedConfig).toEqual(configSource());
+    await expect(readFile(join(output, "config", "experiment.json"))).resolves.toEqual(
+      sourceConfigBytes,
+    );
     const runtimePackage = JSON.parse(
       await readFile(join(output, "package.json"), "utf8"),
     ) as Record<string, unknown>;
@@ -714,6 +852,10 @@ describe("release creation", () => {
     ) as ReleaseManifest;
     expect(manifest.appVersion).toBe("9.8.7");
     expect(manifest.protocolVersion).toBe(SCREEN_PROTOCOL_VERSION);
+    expect(manifest.configFileHash).toBe(
+      createHash("sha256").update(sourceConfigBytes).digest("hex"),
+    );
+    expect(manifest.configHash).toBe(hashExperimentConfig(parseExperimentConfig(releasedConfig)));
     expect(manifest.sourceCommit).toBe(sourceCommit);
     expect(manifest.sourceCommit).toMatch(/^[a-f0-9]{40}$/u);
     expect(manifest.sourceRepository).toBe(SYNTHETIC_SOURCE_REPOSITORY);
@@ -726,6 +868,8 @@ describe("release creation", () => {
 
     const launcher = await readFile(join(output, "START_PRODUCTION.cmd"), "utf8");
     expect(launcher).not.toContain("--allow-mock");
+    expect(launcher).not.toContain("EXPERIMENT_CONFIG_PATH");
+    expect(launcher).not.toContain("DATA_DIRECTORY");
     expect(launcher.indexOf("verify-release.js")).toBeLessThan(launcher.indexOf("preflight.js"));
     expect(launcher.indexOf("preflight.js")).toBeLessThan(
       launcher.indexOf("dist-server\\index.js"),
@@ -734,6 +878,7 @@ describe("release creation", () => {
 
   it("rejects output outside or below a nested release path and never overwrites an existing release", async () => {
     const root = await createReleaseSource();
+    vi.stubGlobal("fetch", approvedFormFetch);
     await expect(
       createRelease({
         rootDirectory: root,

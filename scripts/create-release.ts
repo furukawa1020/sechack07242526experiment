@@ -15,6 +15,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { collectPreflightReport, type PreflightReport } from "./preflight.js";
+import { fetchPublicFormAudit } from "./audit-public-form.js";
 import {
   createReleaseManifest,
   isCredentialFreeSourceRepository,
@@ -22,6 +23,7 @@ import {
   writeReleaseManifest,
 } from "./release-manifest.js";
 import {
+  assessReleaseFormVerification,
   renderReleaseFormVerification,
   verifyReleaseForm,
 } from "./verify-release-form.js";
@@ -323,8 +325,6 @@ const PRODUCTION_WINDOWS_LAUNCHERS = Object.freeze({
     'set "NODE_ENV=production"',
     'set "NODE_OPTIONS="',
     'set "NODE_PATH="',
-    'set "EXPERIMENT_CONFIG_PATH=config\\experiment.json"',
-    'set "DATA_DIRECTORY=data\\sessions"',
     "node dist-server\\verify-release.js",
     "if errorlevel 1 exit /b 1",
     "node dist-server\\preflight.js --config config\\experiment.json",
@@ -513,11 +513,24 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   const configPath =
     options.configPath ??
     (releaseKind === "mock-rehearsal" ? DEFAULT_MOCK_REHEARSAL_CONFIG_PATH : DEFAULT_CONFIG_PATH);
+  // Freeze one exact byte snapshot before any gate runs. Every config digest and
+  // the packaged config below are bound back to this same snapshot.
+  const configSnapshot = await loadExperimentConfig(configPath, {
+    rootDirectory,
+    production: false,
+  });
   const report = await collectPreflightReport({
     rootDirectory,
     configPath,
     allowMock: releaseKind === "mock-rehearsal",
   });
+  if (
+    !samePath(configSnapshot.path, report.configPath) ||
+    configSnapshot.configHash !== report.configHash ||
+    configSnapshot.configFileHash !== report.configFileHash
+  ) {
+    throw new Error("Experiment config changed while the release gates were running.");
+  }
   const failures = report.checks.filter((check) => check.status === "fail");
   if (failures.length > 0) {
     const gateName =
@@ -528,6 +541,18 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     assertMockRehearsalReleaseConfig(report, rootDirectory);
   } else {
     assertProductionReleaseMetadata(report);
+    const publicFormReport = await fetchPublicFormAudit(
+      configSnapshot.config.formUrl,
+      globalThis.fetch,
+    );
+    const formVerification = assessReleaseFormVerification(
+      configSnapshot.config,
+      publicFormReport,
+    );
+    renderReleaseFormVerification(formVerification, writeLine);
+    if (!formVerification.approved) {
+      throw new Error("Production Google Form live verification failed.");
+    }
   }
 
   if (options.buildArtifacts ?? true) {
@@ -609,18 +634,26 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     await mkdir(resolve(stagingDirectory, "config"));
     const packagedConfigName =
       releaseKind === "production" ? "experiment.json" : "experiment.mock-rehearsal.json";
-    await copyFile(report.configPath, resolve(stagingDirectory, "config", packagedConfigName));
+    const packagedConfigPath = `config/${packagedConfigName}`;
+    await writeFile(
+      resolve(stagingDirectory, "config", packagedConfigName),
+      configSnapshot.sourceBytes,
+      { flag: "wx" },
+    );
     if (releaseKind === "production") {
       const packagedConfig = await loadExperimentConfig(
-        `config/${packagedConfigName}`,
+        packagedConfigPath,
         {
           rootDirectory: stagingDirectory,
           allowedDirectory: resolve(stagingDirectory, "config"),
           production: true,
         },
       );
-      if (packagedConfig.configHash !== report.configHash) {
-        throw new Error("Packaged production screen config hash does not match preflight metadata.");
+      if (
+        packagedConfig.configHash !== configSnapshot.configHash ||
+        packagedConfig.configFileHash !== configSnapshot.configFileHash
+      ) {
+        throw new Error("Packaged production screen config does not match the validated byte snapshot.");
       }
       await mkdir(resolve(stagingDirectory, "docs"));
       for (const name of [
@@ -693,8 +726,8 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     const manifest = await createReleaseManifest(stagingDirectory, {
       appVersion,
       protocolVersion: report.protocolVersion,
-      configHash: report.configHash,
-      configFileHash: report.configFileHash,
+      configHash: configSnapshot.configHash,
+      configFileHash: configSnapshot.configFileHash,
       sourceCommit: sourceProvenance.sourceCommit,
       ...(sourceProvenance.sourceRepository === undefined
         ? {}

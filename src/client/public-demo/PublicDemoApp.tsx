@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 
 import {
   PUBLIC_DEMO_CONDITIONS,
@@ -28,6 +28,24 @@ const FIRST_REHEARSAL_FRAME: PublicDemoRehearsalFrame = Object.freeze({
   conditionIndex: 0,
   phase: "handling",
 });
+
+function scrollPublicDemoToTop(): void {
+  const isScrolled =
+    window.scrollY !== 0 || document.documentElement.scrollTop !== 0 || document.body.scrollTop !== 0;
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  if (!isScrolled) return;
+
+  try {
+    window.scrollTo({ left: 0, top: 0 });
+  } catch {
+    try {
+      window.scrollTo(0, 0);
+    } catch {
+      // The document scrollTop assignments above remain the compatibility fallback.
+    }
+  }
+}
 
 function nextRehearsalFrame(frame: PublicDemoRehearsalFrame): PublicDemoRehearsalFrame | null {
   switch (frame.phase) {
@@ -414,9 +432,8 @@ function SummaryScene(): React.JSX.Element {
 }
 
 export function Scene({ step }: { readonly step: number }): React.JSX.Element {
-  useEffect(() => {
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
+  useLayoutEffect(() => {
+    scrollPublicDemoToTop();
   }, [step]);
 
   if (step === PUBLIC_DEMO_INTRO_STEP) return <IntroScene />;
@@ -436,9 +453,8 @@ export function PublicDemoApp({
   const [rehearsalFrame, setRehearsalFrame] = useState<PublicDemoRehearsalFrame | null>(null);
   const rehearsalRunning = rehearsalFrame !== null;
 
-  useEffect(() => {
-    document.documentElement.scrollTop = 0;
-    document.body.scrollTop = 0;
+  useLayoutEffect(() => {
+    scrollPublicDemoToTop();
   }, [rehearsalFrame]);
 
   useEffect(() => {

@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -209,6 +210,11 @@ describe("config file loading", () => {
     expect(loaded.config.protocolVersion).toBe(SCREEN_PROTOCOL_VERSION);
     expect(loaded.configHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(hashExperimentConfig(loaded.config)).toBe(loaded.configHash);
+    const sourceBytes = await readFile(loaded.path);
+    expect(Buffer.from(loaded.sourceBytes)).toEqual(sourceBytes);
+    expect(loaded.configFileHash).toBe(
+      createHash("sha256").update(sourceBytes).digest("hex"),
+    );
   });
 
   it("blocks path traversal and production MockDevice misuse", async () => {

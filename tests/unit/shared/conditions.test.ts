@@ -17,6 +17,13 @@ import {
 } from "../../../src/shared/conditions.js";
 
 describe("experimental conditions", () => {
+  it("freezes protocol constants at runtime", () => {
+    expect(Object.isFrozen(CONDITION_CODES)).toBe(true);
+    expect(Object.isFrozen(ORDER_CODES)).toBe(true);
+    expect(Object.isFrozen(CONDITIONS)).toBe(true);
+    expect(Object.values(CONDITIONS).every((condition) => Object.isFrozen(condition))).toBe(true);
+  });
+
   it("locks the A-D mapping required by the protocol", () => {
     expect(CONDITIONS).toEqual({
       A: { processing: "cloud", presentation: "label" },

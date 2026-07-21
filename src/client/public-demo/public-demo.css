@@ -687,6 +687,11 @@ output {
   font-size: 14px;
 }
 
+.public-review-current-panel small[data-review-channel-state="unsupported"] {
+  color: #172033;
+  font-weight: 700;
+}
+
 .public-review-links {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -722,12 +727,30 @@ output {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  margin: 0;
+  display: grid;
+  gap: 12px;
+  width: min(440px, calc(100% - 48px));
   padding: 12px 16px;
   border: 1px solid #d8dde6;
   background: #fff;
   color: #657085;
   font-size: 14px;
+}
+
+.public-review-display-note p {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.public-review-display-note a {
+  color: #245aa6;
+  font-weight: 800;
+  text-underline-offset: 3px;
+}
+
+.public-review-display-note a:focus-visible {
+  outline: 3px solid #245aa6;
+  outline-offset: 3px;
 }
 
 .public-review-device {

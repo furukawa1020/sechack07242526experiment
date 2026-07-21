@@ -1,4 +1,4 @@
-export const CONDITION_CODES = ["A", "B", "C", "D"] as const;
+export const CONDITION_CODES = Object.freeze(["A", "B", "C", "D"] as const);
 
 export type ConditionCode = (typeof CONDITION_CODES)[number];
 export type ProcessingLocation = "cloud" | "local";
@@ -13,14 +13,14 @@ export type ConditionDefinition = Readonly<{
  * The four experimental conditions are protocol constants. Do not make this
  * mapping configurable: changing it changes the experiment itself.
  */
-export const CONDITIONS = {
-  A: { processing: "cloud", presentation: "label" },
-  B: { processing: "local", presentation: "label" },
-  C: { processing: "local", presentation: "puffer" },
-  D: { processing: "cloud", presentation: "puffer" },
-} as const satisfies Readonly<Record<ConditionCode, ConditionDefinition>>;
+export const CONDITIONS = Object.freeze({
+  A: Object.freeze({ processing: "cloud", presentation: "label" }),
+  B: Object.freeze({ processing: "local", presentation: "label" }),
+  C: Object.freeze({ processing: "local", presentation: "puffer" }),
+  D: Object.freeze({ processing: "cloud", presentation: "puffer" }),
+} as const satisfies Readonly<Record<ConditionCode, ConditionDefinition>>);
 
-export const ORDER_CODES = ["ABDC", "BCAD", "CDBA", "DACB"] as const;
+export const ORDER_CODES = Object.freeze(["ABDC", "BCAD", "CDBA", "DACB"] as const);
 
 export type OrderCode = (typeof ORDER_CODES)[number];
 export type SequenceIndex = 0 | 1 | 2 | 3;
@@ -28,7 +28,9 @@ export type SequenceIndex = 0 | 1 | 2 | 3;
 type ConditionSequence = readonly [ConditionCode, ConditionCode, ConditionCode, ConditionCode];
 type MutablePositionCounts = Record<ConditionCode, [number, number, number, number]>;
 
-export const SEQUENCE_INDICES = [0, 1, 2, 3] as const satisfies readonly SequenceIndex[];
+export const SEQUENCE_INDICES = Object.freeze(
+  [0, 1, 2, 3] as const satisfies readonly SequenceIndex[],
+);
 
 export interface OrderDesignValidation {
   readonly valid: boolean;

@@ -7,8 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   inferServerMode,
+  startProductionReleaseCli,
   startServer,
   type RunningExperimentServer,
+  type StartServerOptions,
 } from "../../../src/server/index.js";
 import {
   SCREEN_PROTOCOL_VERSION,
@@ -19,6 +21,17 @@ type JsonRecord = Record<string, unknown>;
 
 const temporaryRoots: string[] = [];
 const runningServers: RunningExperimentServer[] = [];
+
+function fakeRunningServer(): RunningExperimentServer {
+  return {
+    host: "127.0.0.1",
+    port: 4173,
+    url: "http://127.0.0.1:4173",
+    operatorToken: null,
+    shutdownDeadlineMs: 20_000,
+    async close(): Promise<void> {},
+  };
+}
 
 function record(value: unknown): JsonRecord {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -143,6 +156,123 @@ afterEach(async () => {
   await Promise.all(
     temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
+});
+
+describe("production release CLI seal", () => {
+  it("verifies its own release root before starting the fixed packaged config", async () => {
+    const releaseRoot = resolve("synthetic-production-release");
+    const entryPath = join(releaseRoot, "dist-server", "index.js");
+    const events: string[] = [];
+    let startOptions: StartServerOptions | undefined;
+    const expectedServer = fakeRunningServer();
+
+    const server = await startProductionReleaseCli({
+      entryPath,
+      environment: {},
+      async verifyRelease(directory) {
+        events.push("verify");
+        expect(directory).toBe(releaseRoot);
+        return {
+          errors: Object.freeze([]),
+          manifestSha256: "a".repeat(64),
+          sourceCommit: "b".repeat(40),
+        };
+      },
+      async start(options) {
+        events.push("start");
+        startOptions = options;
+        return expectedServer;
+      },
+    });
+
+    expect(server).toBe(expectedServer);
+    expect(events).toEqual(["verify", "start"]);
+    expect(startOptions).toEqual({
+      rootDirectory: releaseRoot,
+      configPath: "config/experiment.json",
+      mode: "production",
+    });
+  });
+
+  it("fails closed when the release manifest verification reports any error", async () => {
+    let started = false;
+    await expect(startProductionReleaseCli({
+      entryPath: resolve("sealed-release", "dist-server", "index.js"),
+      environment: {},
+      async verifyRelease() {
+        return {
+          errors: Object.freeze(["SHA-256 mismatch: config/experiment.json"]),
+          manifestSha256: "a".repeat(64),
+          sourceCommit: "b".repeat(40),
+        };
+      },
+      async start() {
+        started = true;
+        return fakeRunningServer();
+      },
+    })).rejects.toThrow(/Production release verification failed.*SHA-256 mismatch/iu);
+    expect(started).toBe(false);
+  });
+
+  it.each([
+    ["EXPERIMENT_CONFIG_PATH", { EXPERIMENT_CONFIG_PATH: "config/other.json" }],
+    ["DATA_DIRECTORY", { DATA_DIRECTORY: "data/other" }],
+  ] as const)("rejects the %s production environment override before verification", async (
+    variableName,
+    environment,
+  ) => {
+    let verified = false;
+    let started = false;
+    await expect(startProductionReleaseCli({
+      entryPath: resolve("sealed-release", "dist-server", "index.js"),
+      environment,
+      async verifyRelease() {
+        verified = true;
+        return {
+          errors: Object.freeze([]),
+          manifestSha256: "a".repeat(64),
+          sourceCommit: "b".repeat(40),
+        };
+      },
+      async start() {
+        started = true;
+        return fakeRunningServer();
+      },
+    })).rejects.toThrow(new RegExp(variableName, "u"));
+    expect(verified).toBe(false);
+    expect(started).toBe(false);
+  });
+
+  it("rejects a production entry outside the fixed dist-server/index.js location", async () => {
+    let verified = false;
+    await expect(startProductionReleaseCli({
+      entryPath: resolve("dist-server", "renamed.js"),
+      environment: {},
+      async verifyRelease() {
+        verified = true;
+        return {
+          errors: Object.freeze([]),
+          manifestSha256: "a".repeat(64),
+          sourceCommit: "b".repeat(40),
+        };
+      },
+    })).rejects.toThrow(/must run as dist-server\/index\.js/iu);
+    expect(verified).toBe(false);
+  });
+
+  it("rejects an unpackaged compiled entry when no deployment manifest exists", async () => {
+    const releaseRoot = await mkdtemp(join(tmpdir(), "sechack-unsealed-production-"));
+    temporaryRoots.push(releaseRoot);
+    await mkdir(join(releaseRoot, "dist-server"), { recursive: true });
+
+    await expect(startProductionReleaseCli({
+      entryPath: join(releaseRoot, "dist-server", "index.js"),
+      environment: {},
+      async start() {
+        return fakeRunningServer();
+      },
+    })).rejects.toThrow(/Production release verification failed.*manifest/iu);
+  });
 });
 
 describe("startServer production safeguards", () => {

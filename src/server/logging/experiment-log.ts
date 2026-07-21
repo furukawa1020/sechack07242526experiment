@@ -58,6 +58,15 @@ const experimentLogEventShape = {
 } satisfies Record<ExperimentLogEventAllowedField, z.ZodType>;
 
 export const ExperimentLogEventSchema = z.object(experimentLogEventShape).strict().superRefine((event, context) => {
+  const conditionMetadata = [event.conditionCode, event.processing, event.presentation];
+  const conditionMetadataCount = conditionMetadata.filter((value) => value !== undefined).length;
+  if (conditionMetadataCount !== 0 && conditionMetadataCount !== conditionMetadata.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["conditionCode"],
+      message: "conditionCode, processing and presentation must be present together.",
+    });
+  }
   if (event.conditionCode !== undefined) {
     const expected = CONDITIONS[event.conditionCode];
     if (event.processing !== undefined && event.processing !== expected.processing) {

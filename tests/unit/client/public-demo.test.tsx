@@ -193,6 +193,21 @@ describe("public demo", () => {
     expect(document.querySelector("[data-scene='result']")).not.toBeNull();
   });
 
+  it("returns to the top on every visible scene transition", () => {
+    const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
+    render(<PublicDemoApp />);
+    scrollTo.mockClear();
+    document.documentElement.scrollTop = 480;
+    document.body.scrollTop = 480;
+
+    next();
+
+    expect(scrollTo).toHaveBeenCalledWith({ left: 0, top: 0 });
+    expect(document.documentElement.scrollTop).toBe(0);
+    expect(document.body.scrollTop).toBe(0);
+    expect(screen.getByText(PUBLIC_DEMO_COPY.notice.research)).toBeInTheDocument();
+  });
+
   it("automatically replays the four timed presentation phases and ends at the summary", () => {
     vi.useFakeTimers();
     render(<PublicDemoApp />);

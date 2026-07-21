@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
+import { hashExperimentConfig } from "../src/shared/config-loader.js";
+import {
+  parseExperimentConfig,
+  type ExperimentConfig,
+} from "../src/shared/schemas.js";
+
 export const RELEASE_MANIFEST_NAME = "DEPLOYMENT_MANIFEST.json";
 
 export interface ReleaseManifestFile {
@@ -36,6 +42,10 @@ export interface ReleaseVerificationResult {
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
+const RELEASE_CONFIG_PATHS = Object.freeze([
+  "config/experiment.json",
+  "config/experiment.mock-rehearsal.json",
+]);
 
 function toManifestPath(value: string): string {
   return value.split(sep).join("/");
@@ -185,8 +195,37 @@ export async function createReleaseManifest(
   ) {
     throw new Error("Release source repository is not a credential-free supported Git URL.");
   }
+  if (!SHA256_PATTERN.test(metadata.configHash)) {
+    throw new Error("Release config hash must be a lowercase SHA-256 digest.");
+  }
+  if (!SHA256_PATTERN.test(metadata.configFileHash)) {
+    throw new Error("Release config file hash must be a lowercase SHA-256 digest.");
+  }
   const rootDirectory = resolve(releaseDirectory);
   const paths = await listRegularFiles(rootDirectory);
+  const includedConfigPaths = RELEASE_CONFIG_PATHS.filter((path) => paths.includes(path));
+  if (includedConfigPaths.length !== 1) {
+    throw new Error("Release payload must include exactly one approved experiment config path.");
+  }
+  const configPath = includedConfigPaths[0]!;
+  const configSource = await readFile(resolve(rootDirectory, configPath));
+  if (sha256Bytes(configSource) !== metadata.configFileHash) {
+    throw new Error("Release config file hash does not match the packaged config bytes.");
+  }
+  let config: ExperimentConfig;
+  try {
+    config = parseExperimentConfig(
+      JSON.parse(new TextDecoder().decode(configSource)) as unknown,
+    );
+  } catch {
+    throw new Error("Release config could not be parsed for manifest binding.");
+  }
+  if (hashExperimentConfig(config) !== metadata.configHash) {
+    throw new Error("Release config semantic hash does not match the packaged config.");
+  }
+  if (config.protocolVersion !== metadata.protocolVersion) {
+    throw new Error("Release protocolVersion does not match the packaged config.");
+  }
   const files: ReleaseManifestFile[] = [];
   for (const path of paths) {
     const absolutePath = resolve(rootDirectory, path);
@@ -279,6 +318,38 @@ export async function verifyReleaseDirectoryDetailed(
   }
   if (parsed.buildRuntime.arch !== process.arch) {
     errors.push(`Architecture mismatch: expected ${parsed.buildRuntime.arch}, got ${process.arch}`);
+  }
+  const includedConfigPaths = RELEASE_CONFIG_PATHS.filter((path) =>
+    parsed.files.some((file) => file.path === path),
+  );
+  if (includedConfigPaths.length !== 1) {
+    errors.push("Manifest must control exactly one approved experiment config path.");
+  } else {
+    const configPath = includedConfigPaths[0]!;
+    const configEntry = parsed.files.find((file) => file.path === configPath)!;
+    if (configEntry.sha256 !== parsed.configFileHash) {
+      errors.push(`Manifest config file hash is not bound to its file entry: ${configPath}`);
+    }
+    try {
+      const packagedConfigSource = await readFile(resolve(rootDirectory, configPath));
+      const packagedConfigFileHash = sha256Bytes(packagedConfigSource);
+      if (packagedConfigFileHash !== parsed.configFileHash) {
+        errors.push(`Config file SHA-256 mismatch: ${configPath}`);
+      }
+      const packagedConfig = parseExperimentConfig(
+        JSON.parse(new TextDecoder().decode(packagedConfigSource)) as unknown,
+      );
+      if (hashExperimentConfig(packagedConfig) !== parsed.configHash) {
+        errors.push(`Config semantic SHA-256 mismatch: ${configPath}`);
+      }
+      if (packagedConfig.protocolVersion !== parsed.protocolVersion) {
+        errors.push(
+          `Config protocolVersion mismatch: expected ${parsed.protocolVersion}, got ${packagedConfig.protocolVersion}`,
+        );
+      }
+    } catch {
+      errors.push(`Packaged config could not be parsed and bound to manifest metadata: ${configPath}`);
+    }
   }
   const expectedPaths = new Set(parsed.files.map((file) => file.path));
   let actualPaths: readonly string[] = [];
