@@ -102,4 +102,6 @@ https://furukawa1020-sechack-experiment-demo.static.hf.space/healthz/index.html
 
 画面証跡は`npm.cmd run test:public-demo`で毎回再生成する。導入、クラウド×状態ラベル、端末内×状態ラベル、クラウド×フグ、端末内×フグ、サマリーの6画面を各検証幅で保存し、レビュー進行画面と読み取り専用表示は1366×768と1920×1080で`artifacts/screenshots/`へ保存する。画像はローカルで二名確認するが、Gitおよび公開・本番成果物には含めない。古い画像を手作業で流用しない。
 
-静的HTMLのmeta CSPには、meta配信で有効なディレクティブだけを記載する。`frame-ancestors`はHTTPレスポンスヘッダーでのみ有効なためmetaへ記載せず、ブラウザに無視される設定を安全対策として扱わない。Hugging Face SpaceではREADME front matterの`disable_embedding: true`を設定する。この公開デモには入力、認証、研究データ、フォーム導線を含めない。厳密なHTTPヘッダーによる埋め込み禁止が必要な別配信先では、ホスティング側のGETレスポンスへ`Content-Security-Policy: frame-ancestors 'none'`を設定して確認する。
+静的HTMLのmeta CSPには、meta配信で有効なディレクティブだけを記載する。`frame-ancestors`はHTTPレスポンスヘッダーでのみ有効なためmetaへ記載せず、ブラウザに無視される設定を安全対策として扱わない。Hugging Face SpaceではREADME front matterの`disable_embedding: true`を設定するが、直接配信される`.static.hf.space` URLのセキュリティ境界として扱わない。
+
+2026-07-21のChromiumによる外部originからの実測では、公開中の5経路すべてがiframe内に描画された。したがって、現行配信先には厳密な埋め込み禁止がない。この制約を受け入れられるのは、公開デモが入力、認証、研究データ、フォーム導線、永続状態を一切持たず、実参加者へ使用しない表示レビュー専用だからである。厳密な埋め込み禁止が必要になった場合は、GETレスポンスへ`Content-Security-Policy: frame-ancestors 'none'`または同等のHTTPヘッダーを設定できる配信先へ移行し、外部originからのiframe描画が拒否されることを実ブラウザで確認する。

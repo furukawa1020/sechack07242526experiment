@@ -25,3 +25,5 @@ short_description: 実機・入力・保存を使わないSecHack365実験提示
 - `/device-test/index.html`は画面上の模擬状態だけを変え、USBシリアルや実機へ命令しません。
 
 公開ホスティング事業者の通常のアクセスログの対象にはなり得るため、このSpaceを実参加者による研究手順に使用しないでください。
+
+`disable_embedding: true`を設定していますが、直接配信される`.static.hf.space` URLは外部サイトのiframe内でも表示できます。この設定をセキュリティ境界として扱わないでください。厳密な埋め込み禁止が必要な用途では、HTTPレスポンスへ`Content-Security-Policy: frame-ancestors 'none'`を設定できる配信先が必要です。

@@ -127,6 +127,8 @@ https://furukawa1020-sechack-experiment-demo.static.hf.space/
 
 `npm run test:public-demo`は1366×768、1920×1080、390×844、320×568、844×390の5画面幅で20/20テストに成功し、skipは0件だった。静的デプロイのdry-runはREADME、HTML 5件、同一originのCSS/JSだけを選択した。cloud/device iconは同じ表示枠、色、線幅、寸法、背景、値の文字スタイルを使用し、可視テキストへ英語の`CLOUD`/`LOCAL`を追加していない。公開後は5経路すべてのHTTP 200と実ブラウザ描画、同一ブラウザ内の表示同期、模擬装置操作を再確認し、外部originへのリクエストとWebSocketはいずれも0件だった。アプリ自身は入力、フォーム、QR、内部コード、研究ログ、実機制御、および能動的な外部通信を持たない。この公開デモは本番実験や実参加者には使用しない。
 
+同日、外部originのHTMLから公開5経路をiframeへ読み込むChromium実測を行い、5経路すべてが描画された。README front matterに`disable_embedding: true`が設定されていても、直接配信される`.static.hf.space` URLへの厳密な埋め込み禁止にはならない。この公開デモは入力、認証、研究データ、フォーム導線、永続状態を持たないため表示レビュー用途に限定して継続するが、HTTPヘッダーによる`frame-ancestors 'none'`を設定できない現行配信先を本番参加者向けに転用しない。
+
 ## 本番設定の前提
 
 本番設定で使用予定のGoogleフォームURLは次である。

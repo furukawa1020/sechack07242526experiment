@@ -71,6 +71,8 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 
 公開版の配信commitは`f0d3c97f9422b11c892994d159ed38a2bbbc8437`です。正式なローカル版と公開レビュー版の差は[公開デモ（模擬表示）](docs/PUBLIC_DEMO.md)を参照してください。
 
+公開版の直接URLは外部サイトのiframe内でも表示できるため、埋め込み禁止を必要とする本番用途には使えません。入力・認証・研究データを持たない表示レビュー専用です。
+
 ## MockDeviceでのデモ
 
 通常は、上記の`npm run rehearsal`を使用してください。ビルド後にスタッフ画面`http://127.0.0.1:4173/operator`を開けば、実機なしで4提示を完走できます。
