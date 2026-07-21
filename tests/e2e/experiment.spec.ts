@@ -220,9 +220,11 @@ test("結果提示中のMock装置切断ではSTOP・収縮を試行してセッ
     throw new TypeError("Mock device command history must be an array.");
   }
   expect(commands).toEqual(expect.arrayContaining(["inflate", "stop", "deflate"]));
-  const inflateIndex = commands.indexOf("inflate");
-  expect(commands.indexOf("stop", inflateIndex + 1)).toBeGreaterThan(inflateIndex);
-  expect(commands.indexOf("deflate", inflateIndex + 1)).toBeGreaterThan(inflateIndex);
+  const inflateIndex = commands.lastIndexOf("inflate");
+  const stopIndex = commands.indexOf("stop", inflateIndex + 1);
+  const deflateIndex = commands.indexOf("deflate", inflateIndex + 1);
+  expect(stopIndex).toBeGreaterThan(inflateIndex);
+  expect(deflateIndex).toBeGreaterThan(stopIndex);
 
   const csv = await request.get("/api/exports/sessions.csv");
   expect(csv.ok()).toBeTruthy();

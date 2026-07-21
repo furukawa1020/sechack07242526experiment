@@ -61,6 +61,7 @@ async function listen(allowLan = false, operatorToken?: string) {
     controller,
     configHash: "a".repeat(64),
     appVersion: "1.0.0",
+    mode: "test",
     ...(operatorToken === undefined ? {} : { operatorToken }),
   });
   const server = createServer(app);
@@ -139,6 +140,34 @@ describe("server HTTP security", () => {
       error: "APIが見つかりません。",
       code: "API_NOT_FOUND",
     });
+  });
+
+  it("refuses test-only device hooks outside explicit test mode", () => {
+    const parsedConfig = config();
+    const controller = new SessionController({
+      config: parsedConfig,
+      configHash: "0".repeat(64),
+      appVersion: "1.0.0",
+      rehearsal: false,
+      device: new MockPufferDevice({ timingMode: "fast", initialConnected: true }),
+      logger: new EmptyLogger(),
+    });
+    controllers.push(controller);
+    const testHooks = {
+      injectUnexpectedMockDisconnect(): void {},
+      readMockDeviceCommands(): readonly string[] { return []; },
+    };
+
+    for (const mode of ["development", "production", "rehearsal"] as const) {
+      expect(() => createApiApp({
+        config: parsedConfig,
+        controller,
+        configHash: "a".repeat(64),
+        appVersion: "1.0.0",
+        mode,
+        testHooks,
+      })).toThrow("API test hooks are available only in explicit test mode.");
+    }
   });
 
   it("requires the random operator token on LAN operator APIs", async () => {

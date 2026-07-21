@@ -70,6 +70,7 @@ async function start(operatorToken?: string): Promise<RunningWebSocketTestServer
     controller,
     configHash: "a".repeat(64),
     appVersion: "1.0.0",
+    mode: "test",
   });
   const server = createServer(app);
   const hub = new WebSocketHub(server, controller, {

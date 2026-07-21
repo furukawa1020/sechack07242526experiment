@@ -201,10 +201,11 @@ export async function startServer(
       config,
       configHash: loaded.configHash,
       appVersion,
-      mode: options.serveBuiltAssets === true ? "production" : mode,
+      mode,
       rootDirectory,
       ...(operatorToken === null ? {} : { operatorToken }),
       ...(testHooks === undefined ? {} : { testHooks }),
+      ...(options.serveBuiltAssets === true ? { serveBuiltAssets: true } : {}),
     });
     const httpServer = createServer(application.app);
     const webSocketHub = new WebSocketHub(httpServer, controller, {

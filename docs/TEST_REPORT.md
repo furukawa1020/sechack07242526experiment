@@ -12,7 +12,7 @@
 | -------------------------------------------- | ------------------------------------------------------------------- | ---------- |
 | `npm run lint`                               | 成功                                                                | 2026-07-21 |
 | `npm run typecheck`                          | 成功                                                                | 2026-07-21 |
-| `npm test`                                   | 成功: 24ファイル、261テスト                                         | 2026-07-21 |
+| `npm test`                                   | 成功: 24ファイル、262テスト                                         | 2026-07-21 |
 | `npm run test:e2e`                           | 成功: Chromium 9テスト                                              | 2026-07-21 |
 | `npm run build`                              | 成功                                                                | 2026-07-21 |
 | `npm run build:public-demo`                  | 成功                                                                | 2026-07-21 |
@@ -111,7 +111,7 @@ E2Eスイート9ケースはすべて成功した。E2Eでは高速MockDeviceを
 https://furukawa1020-sechack-experiment-demo.static.hf.space/
 ```
 
-現行版はHugging Face Static Spaceのcommit `b6e9fba6c1c005a8286f118850aebf4495881815`へデプロイ済みである。配布スクリプトによる許可ファイル一覧とSHA-256の照合、配信commit・固有title・application root・JS/CSS参照の照合、および全5経路のHTTP 200確認に成功した。
+現行版はHugging Face Static Spaceのcommit `f0d3c97f9422b11c892994d159ed38a2bbbc8437`へデプロイ済みである。配布スクリプトによる許可ファイル一覧とSHA-256の照合、配信commit・固有title・application root・JS/CSS参照の照合、および全5経路のHTTP 200確認に成功した。公開HTTPSを対象にしたPlaywright 20ケースもすべて成功した。
 
 現行ローカル成果物には`/`、`/operator/index.html`、`/display/demo/index.html`、`/device-test/index.html`、`/healthz/index.html`の5経路がある。トップの自動リハーサルは4提示を8秒・3秒・15秒・7秒で進め、フグを画面上だけで6秒膨張・保持・6秒収縮する。進行状態はページメモリだけに置き、研究用ID、同意、フォーム、ログ、API、WebSocket、ブラウザ保存、装置アダプタ、実機命令を使用しない。
 

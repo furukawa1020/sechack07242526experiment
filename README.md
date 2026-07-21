@@ -69,7 +69,7 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 - [模擬装置確認](https://furukawa1020-sechack-experiment-demo.static.hf.space/device-test/index.html)
 - [公開版の稼働確認](https://furukawa1020-sechack-experiment-demo.static.hf.space/healthz/index.html)
 
-公開版の配信commitは`b6e9fba6c1c005a8286f118850aebf4495881815`です。正式なローカル版と公開レビュー版の差は[公開デモ（模擬表示）](docs/PUBLIC_DEMO.md)を参照してください。
+公開版の配信commitは`f0d3c97f9422b11c892994d159ed38a2bbbc8437`です。正式なローカル版と公開レビュー版の差は[公開デモ（模擬表示）](docs/PUBLIC_DEMO.md)を参照してください。
 
 ## MockDeviceでのデモ
 

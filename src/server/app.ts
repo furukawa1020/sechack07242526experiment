@@ -11,19 +11,23 @@ import { securityMiddleware } from "./security/http-security.js";
 import type { SessionController } from "./sessions/session-controller.js";
 import { PufferDeviceError } from "./devices/index.js";
 
+export type ApplicationMode = "development" | "production" | "rehearsal" | "test";
+
 export interface ApiAppOptions {
   readonly controller: SessionController;
   readonly config: ServerExperimentConfig;
   readonly configHash: string;
   readonly appVersion: string;
+  readonly mode: ApplicationMode;
   readonly operatorToken?: string;
   /** Present only in an explicitly started test server; never mounted in production or rehearsal. */
   readonly testHooks?: ApiTestHooks;
 }
 
 export interface ApplicationOptions extends ApiAppOptions {
-  readonly mode: "development" | "production" | "rehearsal" | "test";
   readonly rootDirectory?: string;
+  /** Test-only: serve the compiled client while retaining explicit test-mode API boundaries. */
+  readonly serveBuiltAssets?: boolean;
 }
 
 export interface ApplicationRuntime {
@@ -65,6 +69,9 @@ const apiErrorHandler: ErrorRequestHandler = (error: unknown, _request, response
 
 /** Creates the API surface without starting a listener; useful for integration tests. */
 export function createApiApp(options: ApiAppOptions): Express {
+  if (options.testHooks !== undefined && options.mode !== "test") {
+    throw new Error("API test hooks are available only in explicit test mode.");
+  }
   const app = express();
   app.disable("x-powered-by");
   app.use(
@@ -94,11 +101,17 @@ export function createApiApp(options: ApiAppOptions): Express {
 }
 
 export async function createApplication(options: ApplicationOptions): Promise<ApplicationRuntime> {
+  if (options.serveBuiltAssets === true && options.mode !== "test") {
+    throw new Error("serveBuiltAssets is available only in explicit test mode.");
+  }
   const app = createApiApp(options);
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
   let close = async (): Promise<void> => undefined;
 
-  if (options.mode === "development" || options.mode === "test") {
+  if (
+    (options.mode === "development" || options.mode === "test")
+    && options.serveBuiltAssets !== true
+  ) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       root: rootDirectory,
@@ -109,7 +122,11 @@ export async function createApplication(options: ApplicationOptions): Promise<Ap
     });
     app.use(vite.middlewares);
     close = async () => vite.close();
-  } else if (options.mode === "production" || options.mode === "rehearsal") {
+  } else if (
+    options.mode === "production"
+    || options.mode === "rehearsal"
+    || (options.mode === "test" && options.serveBuiltAssets === true)
+  ) {
     const clientDirectory = resolve(rootDirectory, "dist");
     const indexPath = resolve(clientDirectory, "index.html");
     if (!existsSync(indexPath)) {
