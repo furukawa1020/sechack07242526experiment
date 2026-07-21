@@ -9,24 +9,16 @@ import { pathToFileURL } from "node:url";
 
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
+import { startServer } from "../../src/server/index.js";
+
 interface RunningBuiltServer {
   readonly url: string;
   close(): Promise<void>;
 }
 
-interface BuiltServerModule {
-  readonly startServer: (options: {
-    readonly rootDirectory: string;
-    readonly configPath: string;
-    readonly mode: "test";
-    readonly serveBuiltAssets: true;
-  }) => Promise<RunningBuiltServer>;
-}
-
 type JsonRecord = Record<string, unknown>;
 
 const WORKSPACE = resolve(import.meta.dirname, "../..");
-const FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
 
 let temporaryRoot: string | null = null;
 let deployment: RunningBuiltServer | null = null;
@@ -84,17 +76,14 @@ async function buildAndStartProductionServer(): Promise<RunningBuiltServer> {
     await readFile(resolve(WORKSPACE, "config/experiment.e2e.json"), "utf8"),
   );
   const config = record(sourceConfig);
-  const logging = record(config["logging"]);
   const device = record(config["device"]);
   await writeFile(
     join(temporaryRoot, "config/experiment.json"),
     `${JSON.stringify({
       ...config,
       port,
-      formUrl: FORM_URL,
-      logging: { ...logging, directory: "./data/sessions" },
       // Exercise the formal hardware-free adapter through the compiled server.
-      // This remains an automated UI audit, never a production approval.
+      // Test mode adds a permanent nonparticipant banner and suppresses forms.
       device: { ...device, mode: "screen", allowMockInProduction: false },
     }, null, 2)}\n`,
     "utf8",
@@ -103,15 +92,16 @@ async function buildAndStartProductionServer(): Promise<RunningBuiltServer> {
   const builtModuleValue: unknown = await import(
     `${pathToFileURL(resolve(WORKSPACE, "dist-server/index.js")).href}?deployment=${Date.now()}`
   );
-  if (
-    builtModuleValue === null
-    || typeof builtModuleValue !== "object"
-    || typeof (builtModuleValue as { readonly startServer?: unknown }).startServer !== "function"
-  ) {
-    throw new Error("The built server does not export startServer().");
-  }
-  const builtModule = builtModuleValue as BuiltServerModule;
-  return builtModule.startServer({
+  expect(Object.keys(builtModuleValue as object)).toEqual(["startProductionReleaseCli"]);
+  expect(
+    (builtModuleValue as { readonly startProductionReleaseCli?: unknown })
+      .startProductionReleaseCli,
+  ).toEqual(expect.any(Function));
+  expect(builtModuleValue).not.toHaveProperty("startServer");
+
+  // Exercise the compiled client and static-asset routing without exposing a
+  // generic runtime entry from the production bundle.
+  return startServer({
     rootDirectory: temporaryRoot,
     configPath: "config/experiment.json",
     mode: "test",
@@ -156,7 +146,7 @@ test.afterAll(async () => {
   }
 });
 
-test("built production server keeps direct routes, QR, caching, and runtime requests deployment-safe", async ({
+test("built nonparticipant client keeps direct routes, caching, and runtime requests deployment-safe", async ({
   browser,
   request,
 }) => {
@@ -226,6 +216,9 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   expect(operatorResponse?.status()).toBe(200);
   expect(operatorResponse?.headers()["cache-control"]).toBe("no-store");
   await expect(operator.getByTestId("operator-app")).toBeVisible();
+  await expect(operator.getByText("実機なし・模擬リハーサル")).toBeVisible();
+  await expect(operator.getByText(/本番参加者には使用しないでください/u)).toBeVisible();
+  await expect(operator.locator(".screen-mode-pill")).toHaveCount(0);
   await expectNoDocumentOverflow(operator);
   const operatorReload = await operator.reload();
   expect(operatorReload?.status()).toBe(200);
@@ -255,9 +248,9 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   const connected = await request.post(`${baseUrl}/api/device/connect`);
   expect(connected.ok()).toBeTruthy();
   await operator.goto(`${baseUrl}/operator`);
-  await operator.getByLabel("研究用ID").fill("SH26-950");
-  await operator.getByRole("checkbox", { name: /研究説明・参加同意を確認済み/u }).check();
-  await operator.getByRole("button", { name: "セッションを準備" }).click();
+  await operator.getByLabel("研究用ID").fill("TEST-950");
+  await operator.getByRole("checkbox", { name: /リハーサル開始条件を確認済み/u }).check();
+  await operator.getByRole("button", { name: "リハーサルを準備" }).click();
   await expect(operator.getByRole("heading", { name: "進行状況" })).toBeVisible();
   const sessionId = await operator.evaluate(() => window.sessionStorage.getItem("sechack.active-session-id"));
   expect(sessionId).not.toBeNull();
@@ -306,34 +299,26 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   const displayToken = decodeURIComponent(displayPath.slice("/display/".length));
   const publicResponse = await request.get(`${baseUrl}/api/display/${encodeURIComponent(displayToken)}`);
   expect(publicResponse.ok()).toBeTruthy();
-  expect(record(record(await publicResponse.json()).snapshot)["formUrl"]).toBe(FORM_URL);
+  expect(record(record(await publicResponse.json()).snapshot)["formUrl"]).toBeNull();
+  await expect(
+    display.getByText("研究参加用ではありません・回答送信なし・実機なし"),
+  ).toBeVisible();
 
   const formLink = display.getByRole("link", { name: "Googleフォームを開いて回答する" });
-  await expect(formLink).toHaveAttribute("href", FORM_URL);
-  await expect(formLink).toHaveAttribute("target", "_blank");
-  await expect(formLink).toHaveAttribute("rel", /noreferrer/u);
+  await expect(formLink).toHaveCount(0);
   const qr = display.getByRole("img", { name: "Googleフォームを開くQRコード" });
-  await expect(qr).toBeVisible();
-  await expect(qr).toHaveAttribute("src", /^data:image\/png;base64,/u);
-  const qrState = await qr.evaluate((image) => {
-    const element = image as HTMLImageElement;
-    return { complete: element.complete, naturalWidth: element.naturalWidth, naturalHeight: element.naturalHeight };
-  });
-  expect(qrState.complete).toBe(true);
-  expect(qrState.naturalWidth).toBeGreaterThan(0);
-  expect(qrState.naturalHeight).toBeGreaterThan(0);
-  const qrSource = await qr.getAttribute("src");
-  const pngBytes = Buffer.from(qrSource?.split(",", 2)[1] ?? "", "base64");
-  expect(pngBytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+  await expect(qr).toHaveCount(0);
 
   expect(display.url()).toBe(`${baseUrl}${displayPath}`);
   expect(context.pages()).toHaveLength(2);
   expect(externalRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
 
-  await operator.getByRole("checkbox", { name: /Googleフォームの回答完了を確認済み/u }).check();
-  await operator.getByRole("button", { name: "回答完了を確認してセッション完了" }).click();
-  await expect(display.getByRole("heading", { name: "ご協力ありがとうございました" })).toBeVisible();
+  await operator.getByRole("checkbox", { name: /リハーサルの確認を完了済み/u }).check();
+  await operator.getByRole("button", { name: "確認を完了してリハーサル終了" }).click();
+  await expect(
+    display.getByRole("heading", { name: "模擬リハーサルを終了しました" }),
+  ).toBeVisible();
 
   const invalidDisplay = await context.newPage();
   const invalidResponse = await invalidDisplay.goto(`${baseUrl}/display/invalid-token`);

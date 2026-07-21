@@ -64,7 +64,7 @@ async function writeTestConfig(root: string, port: number): Promise<void> {
         ...source,
         port,
         logging: {
-          directory: "./data/sessions",
+          directory: "./data/test",
           includeAbortedInOrderBalancing: true,
         },
       },

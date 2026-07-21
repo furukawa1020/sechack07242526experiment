@@ -33,6 +33,7 @@ import {
   SCREEN_PRODUCTION_RESEARCH_ID_PATTERN,
 } from "../src/shared/production-policy.js";
 import { SCREEN_PROTOCOL_VERSION } from "../src/shared/schemas.js";
+import { acquireBuildLock } from "./build-lock.mjs";
 
 const DEFAULT_CONFIG_PATH = "config/experiment.production.json";
 const DEFAULT_MOCK_REHEARSAL_CONFIG_PATH = "config/experiment.mock-rehearsal.json";
@@ -475,20 +476,25 @@ async function installProductionDependencies(directory: string): Promise<void> {
   });
 }
 
-async function buildReleaseArtifacts(rootDirectory: string): Promise<void> {
+async function buildReleaseArtifacts(
+  rootDirectory: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
   await new Promise<void>((resolveBuild, rejectBuild) => {
     const child =
       process.platform === "win32"
-        ? spawn("npm.cmd run build", [], {
-            cwd: rootDirectory,
-            shell: true,
-            stdio: "inherit",
-          })
-        : spawn("npm", ["run", "build"], {
-            cwd: rootDirectory,
-            shell: false,
-            stdio: "inherit",
-          });
+         ? spawn("npm.cmd run build", [], {
+             cwd: rootDirectory,
+             env: environment,
+             shell: true,
+             stdio: "inherit",
+           })
+         : spawn("npm", ["run", "build"], {
+             cwd: rootDirectory,
+             env: environment,
+             shell: false,
+             stdio: "inherit",
+           });
     child.once("error", rejectBuild);
     child.once("exit", (code, signal) => {
       if (code === 0) {
@@ -507,6 +513,8 @@ async function buildReleaseArtifacts(rootDirectory: string): Promise<void> {
 export async function createRelease(options: CreateReleaseOptions = {}): Promise<string> {
   const writeLine = options.writeLine ?? console.info;
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
+  const buildLock = await acquireBuildLock(rootDirectory, { kind: "release" });
+  try {
   const releaseKind = options.releaseKind ?? "production";
   const sourceProvenance = await collectSourceProvenance(rootDirectory);
   const releaseRoot = resolve(rootDirectory, "release");
@@ -557,7 +565,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
 
   if (options.buildArtifacts ?? true) {
     writeLine("Building release artifacts from the recorded clean source commit...");
-    await buildReleaseArtifacts(rootDirectory);
+    await buildReleaseArtifacts(rootDirectory, buildLock.childEnvironment());
     const postBuildProvenance = await collectSourceProvenance(rootDirectory);
     if (
       postBuildProvenance.sourceCommit !== sourceProvenance.sourceCommit ||
@@ -771,6 +779,9 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       : "Next: run VERIFY_MOCK_RELEASE.cmd, then START_MOCK_DEMO.cmd. This is not a production research release.",
   );
   return outputDirectory;
+  } finally {
+    await buildLock.release();
+  }
 }
 
 export async function runCreateRelease(

@@ -46,6 +46,16 @@ describe("server build", () => {
       "verify-release.js",
       "verify-release.js.map",
     ]);
+
+    const productionEntry: unknown = await import(
+      `${pathToFileURL(resolve(SERVER_OUTPUT_DIRECTORY, "index.js")).href}?seal=${Date.now()}`
+    );
+    expect(Object.keys(productionEntry as object)).toEqual(["startProductionReleaseCli"]);
+    expect(
+      (productionEntry as { readonly startProductionReleaseCli?: unknown })
+        .startProductionReleaseCli,
+    ).toEqual(expect.any(Function));
+    expect(productionEntry).not.toHaveProperty("startServer");
   });
 
   it("accepts only the absolute repository dist-server directory", async () => {

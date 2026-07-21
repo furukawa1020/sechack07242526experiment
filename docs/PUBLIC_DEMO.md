@@ -94,7 +94,7 @@ https://furukawa1020-sechack-experiment-demo.static.hf.space/device-test/index.h
 https://furukawa1020-sechack-experiment-demo.static.hf.space/healthz/index.html
 ```
 
-2026-07-21にcommit `14d6a6069c30c63aa1d1561c7d8b6e9a9d94f2d0`を配信し、許可ファイル一覧とSHA-256、配信commit、全5経路のHTTP 200、実ブラウザ描画、同一ブラウザ内の表示同期、模擬装置操作を確認した。ローカル成果物は同期非対応時の手動導線を含む5画面幅・25ケースすべて成功し、公開HTTPSへ直接実行した1366×768の4ケースもすべて成功した。この実測中の外部originへのリクエストとWebSocketはともに0件だった。
+2026-07-21にcommit `72e4c23dd80b31290862fefe01eb3c25045e7ce1`を配信し、許可ファイル一覧とSHA-256、配信commit、全5経路のHTTP 200、実ブラウザ描画、同一ブラウザ内の表示同期、模擬装置操作を確認した。ローカル成果物は同期非対応時の手動導線を含む5画面幅・25ケースすべて成功し、公開HTTPSへ直接実行した1366×768の5ケースもすべて成功した。この実測中の外部originへのリクエストとWebSocketはともに0件だった。
 
 デプロイスクリプトは、更新元commitを固定した競合防止付きの単一commitで反映する。反映後は、公開commitの許可ファイル一覧とSHA-256をローカル成果物へ照合する。実配信ではHugging FaceがHTMLへSpace管理用スクリプトを注入するため、HTMLの配信bytesは原本と一致しない。そこで、配信commitを`X-Repo-Commit`で確認し、5つのHTMLは固有title・application root・ビルド済みJS/CSS参照を照合し、JS/CSSは配信bytesのSHA-256を照合する。別originへのリダイレクト、旧commit、誤ったHTML、欠落アセットは成功として扱わない。
 

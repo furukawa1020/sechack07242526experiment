@@ -38,10 +38,18 @@ export interface ReleaseVerificationResult {
   readonly manifestSha256: string | null;
   readonly sourceCommit: string | null;
   readonly sourceRepository?: string;
+  /** Immutable manifest values bound to the verified production runtime. */
+  readonly manifest: {
+    readonly appVersion: string;
+    readonly protocolVersion: string;
+    readonly configHash: string;
+    readonly configFileHash: string;
+  } | null;
 }
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
+const APP_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
 const RELEASE_CONFIG_PATHS = Object.freeze([
   "config/experiment.json",
   "config/experiment.mock-rehearsal.json",
@@ -136,6 +144,7 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
   if (
     candidate.schemaVersion !== 2 ||
     typeof candidate.appVersion !== "string" ||
+    !APP_VERSION_PATTERN.test(candidate.appVersion) ||
     typeof candidate.protocolVersion !== "string" ||
     !SHA256_PATTERN.test(String(candidate.configHash)) ||
     !SHA256_PATTERN.test(String(candidate.configFileHash)) ||
@@ -186,6 +195,9 @@ export async function createReleaseManifest(
     | "sourceRepository"
   >,
 ): Promise<ReleaseManifest> {
+  if (!APP_VERSION_PATTERN.test(metadata.appVersion)) {
+    throw new Error("Release appVersion contains forbidden characters or exceeds 80 characters.");
+  }
   if (!SOURCE_COMMIT_PATTERN.test(metadata.sourceCommit)) {
     throw new Error("Release source commit must be a full lowercase 40-character Git commit ID.");
   }
@@ -203,6 +215,28 @@ export async function createReleaseManifest(
   }
   const rootDirectory = resolve(releaseDirectory);
   const paths = await listRegularFiles(rootDirectory);
+  if (paths.filter((path) => path === "package.json").length !== 1) {
+    throw new Error("Release payload must include exactly one package.json file.");
+  }
+  try {
+    const packageValue: unknown = JSON.parse(
+      await readFile(resolve(rootDirectory, "package.json"), "utf8"),
+    );
+    const packageVersion = packageValue !== null && typeof packageValue === "object"
+      ? (packageValue as Readonly<Record<string, unknown>>)["version"]
+      : undefined;
+    if (packageVersion !== metadata.appVersion) {
+      throw new Error("Release appVersion does not match the packaged package.json.");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === "Release appVersion does not match the packaged package.json.") {
+      throw error;
+    }
+    throw new Error(
+      "Release package.json could not be parsed for appVersion binding.",
+      { cause: error },
+    );
+  }
   const includedConfigPaths = RELEASE_CONFIG_PATHS.filter((path) => paths.includes(path));
   if (includedConfigPaths.length !== 1) {
     throw new Error("Release payload must include exactly one approved experiment config path.");
@@ -295,6 +329,7 @@ export async function verifyReleaseDirectoryDetailed(
       ]),
       manifestSha256,
       sourceCommit: null,
+      manifest: null,
     });
   }
   if (!isReleaseManifest(parsed)) {
@@ -302,6 +337,7 @@ export async function verifyReleaseDirectoryDetailed(
       errors: Object.freeze(["Deployment manifest has an invalid structure."]),
       manifestSha256,
       sourceCommit: null,
+      manifest: null,
     });
   }
 
@@ -318,6 +354,26 @@ export async function verifyReleaseDirectoryDetailed(
   }
   if (parsed.buildRuntime.arch !== process.arch) {
     errors.push(`Architecture mismatch: expected ${parsed.buildRuntime.arch}, got ${process.arch}`);
+  }
+  const packageEntries = parsed.files.filter((file) => file.path === "package.json");
+  if (packageEntries.length !== 1) {
+    errors.push("Manifest must control exactly one package.json file.");
+  } else {
+    try {
+      const packageValue: unknown = JSON.parse(
+        await readFile(resolve(rootDirectory, "package.json"), "utf8"),
+      );
+      const packageVersion = packageValue !== null && typeof packageValue === "object"
+        ? (packageValue as Readonly<Record<string, unknown>>)["version"]
+        : undefined;
+      if (packageVersion !== parsed.appVersion) {
+        errors.push(
+          `Package appVersion mismatch: expected ${parsed.appVersion}, got ${String(packageVersion)}.`,
+        );
+      }
+    } catch {
+      errors.push("Packaged package.json could not be parsed and bound to manifest appVersion.");
+    }
   }
   const includedConfigPaths = RELEASE_CONFIG_PATHS.filter((path) =>
     parsed.files.some((file) => file.path === path),
@@ -385,6 +441,12 @@ export async function verifyReleaseDirectoryDetailed(
     manifestSha256,
     sourceCommit: parsed.sourceCommit,
     ...(parsed.sourceRepository === undefined ? {} : { sourceRepository: parsed.sourceRepository }),
+    manifest: Object.freeze({
+      appVersion: parsed.appVersion,
+      protocolVersion: parsed.protocolVersion,
+      configHash: parsed.configHash,
+      configFileHash: parsed.configFileHash,
+    }),
   });
 }
 

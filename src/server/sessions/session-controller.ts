@@ -49,7 +49,7 @@ export interface SessionControllerOptions {
   readonly config: ServerExperimentConfig;
   readonly configHash: string;
   readonly appVersion: string;
-  /** True only for the explicit, loopback-only hardware-free rehearsal entry point. */
+  /** True only for a nonparticipant development, rehearsal, or automated test runtime. */
   readonly rehearsal: boolean;
   readonly device: PufferDevice;
   readonly logger: SessionLogWriter;
@@ -105,7 +105,7 @@ export class SessionController {
   private deviceOperationTail: Promise<void> = Promise.resolve();
   private phaseTimer: ReturnType<typeof setTimeout> | null = null;
   private timerGeneration = 0;
-  private handlingFailure = false;
+  private failureTask: Promise<void> | null = null;
   private emergencyLocked = false;
   private lastDeviceStatus: DeviceStatus | null = null;
   private lastSafetyFailure: Error | null = null;
@@ -128,6 +128,10 @@ export class SessionController {
         this.handleBackgroundFailure(error, "DEVICE_STATUS_HANDLER_FAILED");
       }));
     });
+  }
+
+  public get isRehearsal(): boolean {
+    return this.rehearsal;
   }
 
   public dispose(): void {
@@ -376,6 +380,24 @@ export class SessionController {
   }
 
   public async abort(sessionId: string): Promise<OperatorSessionSnapshot> {
+    const failureInFlight = this.failureTask;
+    if (failureInFlight !== null) {
+      await failureInFlight;
+      const failed = this.requireActive(sessionId);
+      if (failed.phase === "error") {
+        const terminal = await this.enterTerminalPhase(
+          failed,
+          "aborted",
+          "aborted",
+          failed.errorCode,
+          "session.aborted",
+        );
+        this.requireSafetyConfirmed();
+        this.requireAuditStorageHealthy();
+        if (this.activeSessionId === sessionId) this.activeSessionId = null;
+        return this.operatorSnapshot(terminal);
+      }
+    }
     const session = this.requireActive(sessionId);
     if (TERMINAL_PHASES.has(session.phase)) {
       throw conflict("終了済みセッションは中止できません。", "SESSION_ALREADY_TERMINAL");
@@ -393,6 +415,29 @@ export class SessionController {
   public async emergencyStop(sessionId: string): Promise<OperatorSessionSnapshot> {
     this.cancelTimer();
     this.emergencyLocked = true;
+    const failureInFlight = this.failureTask;
+    if (failureInFlight !== null) {
+      // A critical display failure starts STOP synchronously before publishing
+      // failureTask. Join that single STOP/DEFLATE sequence instead of racing a
+      // second terminal transition or a second deflation command.
+      await failureInFlight;
+      const failed = this.get(sessionId);
+      if (this.activeSessionId === sessionId && failed.phase === "error") {
+        await this.enterTerminalPhase(
+          failed,
+          "aborted",
+          "aborted",
+          "EMERGENCY_STOP",
+          "session.emergencyStop",
+        );
+      }
+      this.requireSafetyConfirmed();
+      this.requireAuditStorageHealthy();
+      if (this.activeSessionId === sessionId && TERMINAL_PHASES.has(this.get(sessionId).phase)) {
+        this.activeSessionId = null;
+      }
+      return this.operatorSnapshot(this.get(sessionId));
+    }
     // Start STOP before consulting session state so stale Operator views can
     // always repeat the global physical safety command.
     const safety = this.safeStopAndDeflate();
@@ -933,48 +978,56 @@ export class SessionController {
   }
 
   private async failSession(session: RuntimeSession, failureCode: string): Promise<void> {
+    if (this.failureTask !== null) {
+      await this.failureTask;
+      return;
+    }
     const current = this.sessions.get(session.id);
     if (
-      this.handlingFailure
-      || current === undefined
+      current === undefined
       || current.phase === "error"
       || TERMINAL_PHASES.has(current.phase)
     ) return;
-    this.handlingFailure = true;
+    const task = this.performFailSession(current, failureCode);
+    this.failureTask = task;
     try {
-      this.cancelTimer();
-      const protectedSession = this.patchSession(current, {
-        recoveryRequired: true,
-        phaseEndsAt: null,
-        phaseEndsMonotonicMs: null,
-        remainingMs: null,
-      });
-      this.sessions.set(protectedSession.id, protectedSession);
-      this.emit({ type: "session.snapshot", sessionId: protectedSession.id });
-      await this.safeStopAndDeflate();
-
-      const monotonic = this.monotonicNow();
-      const timestamp = this.now().toISOString();
-      const latest = this.sessions.get(protectedSession.id) ?? protectedSession;
-      const updated = this.transition(latest, "error", {
-        result: "error",
-        errorCode: failureCode,
-        recoveryRequired: false,
-        phaseStartedAt: timestamp,
-        phaseEndsAt: null,
-        phaseStartedMonotonicMs: monotonic,
-        phaseEndsMonotonicMs: null,
-        remainingMs: null,
-      });
-      this.sessions.set(updated.id, updated);
-      this.emit({ type: "session.error", sessionId: updated.id });
-      try {
-        await this.audit(this.get(updated.id), "session.error");
-      } catch (error) {
-        console.error(error instanceof Error ? error.message : "Error-state audit failed.");
-      }
+      await task;
     } finally {
-      this.handlingFailure = false;
+      if (this.failureTask === task) this.failureTask = null;
+    }
+  }
+
+  private async performFailSession(current: RuntimeSession, failureCode: string): Promise<void> {
+    this.cancelTimer();
+    const protectedSession = this.patchSession(current, {
+      recoveryRequired: true,
+      phaseEndsAt: null,
+      phaseEndsMonotonicMs: null,
+      remainingMs: null,
+    });
+    this.sessions.set(protectedSession.id, protectedSession);
+    this.emit({ type: "session.snapshot", sessionId: protectedSession.id });
+    await this.safeStopAndDeflate();
+
+    const monotonic = this.monotonicNow();
+    const timestamp = this.now().toISOString();
+    const latest = this.sessions.get(protectedSession.id) ?? protectedSession;
+    const updated = this.transition(latest, "error", {
+      result: "error",
+      errorCode: failureCode,
+      recoveryRequired: false,
+      phaseStartedAt: timestamp,
+      phaseEndsAt: null,
+      phaseStartedMonotonicMs: monotonic,
+      phaseEndsMonotonicMs: null,
+      remainingMs: null,
+    });
+    this.sessions.set(updated.id, updated);
+    this.emit({ type: "session.error", sessionId: updated.id });
+    try {
+      await this.audit(this.get(updated.id), "session.error");
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : "Error-state audit failed.");
     }
   }
 
@@ -995,7 +1048,10 @@ export class SessionController {
         timeoutMs: this.config.timingMs.deflateRamp + this.config.device.ackTimeout + 1_000,
       });
       this.lastDeviceStatus = confirmedStatus;
-      this.trackBackgroundTask(this.auditActiveDeviceEvent("device.deflate.complete"));
+      // The error transition is intentionally held until the confirmed-safe state
+      // has a durable audit entry. Participant neutralization and both safety
+      // commands have already happened, so this wait cannot delay STOP/DEFLATE.
+      await this.auditActiveDeviceEventStrict("device.deflate.complete");
     } catch (error) {
       firstError ??= error;
     }
@@ -1056,6 +1112,12 @@ export class SessionController {
     } catch (error) {
       this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
     }
+  }
+
+  private async auditActiveDeviceEventStrict(eventType: string): Promise<void> {
+    const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
+    if (active === undefined) return;
+    await this.audit(active, eventType);
   }
 
   private trackBackgroundTask(task: Promise<void>): void {
@@ -1152,6 +1214,7 @@ export class SessionController {
     const publicView = this.publicSnapshot(session);
     return {
       ...session,
+      rehearsal: this.rehearsal,
       serverNow: publicView.serverNow,
       pufferSurface: publicView.pufferSurface,
       pufferRamp: publicView.pufferRamp,
@@ -1204,7 +1267,10 @@ export class SessionController {
       recoveryRequired: session.recoveryRequired,
       result: session.result,
       summary,
-      formUrl: showSummary && this.config.formUrl.length > 0 ? this.config.formUrl : null,
+      formUrl:
+        showSummary && !this.rehearsal && this.config.formUrl.length > 0
+          ? this.config.formUrl
+          : null,
     };
     return base;
   }

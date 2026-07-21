@@ -10,8 +10,12 @@ import {
   startProductionReleaseCli,
   startServer,
   type RunningExperimentServer,
-  type StartServerOptions,
+  type VerifiedProductionStartOptions,
 } from "../../../src/server/index.js";
+import {
+  loadExperimentConfig,
+  type LoadedExperimentConfig,
+} from "../../../src/shared/config-loader.js";
 import {
   SCREEN_PROTOCOL_VERSION,
   STUDY_FORM_URL,
@@ -38,6 +42,20 @@ function record(value: unknown): JsonRecord {
     throw new TypeError("Expected a JSON object.");
   }
   return value as JsonRecord;
+}
+
+function successfulVerification(loaded: LoadedExperimentConfig) {
+  return {
+    errors: Object.freeze([]),
+    manifestSha256: "a".repeat(64),
+    sourceCommit: "b".repeat(40),
+    manifest: Object.freeze({
+      appVersion: "9.8.7",
+      protocolVersion: loaded.config.protocolVersion,
+      configHash: loaded.configHash,
+      configFileHash: loaded.configFileHash,
+    }),
+  } as const;
 }
 
 async function reservePort(): Promise<number> {
@@ -159,11 +177,12 @@ afterEach(async () => {
 });
 
 describe("production release CLI seal", () => {
-  it("verifies its own release root before starting the fixed packaged config", async () => {
+  it("verifies, loads once, binds, and starts from the same fixed config snapshot", async () => {
     const releaseRoot = resolve("synthetic-production-release");
     const entryPath = join(releaseRoot, "dist-server", "index.js");
     const events: string[] = [];
-    let startOptions: StartServerOptions | undefined;
+    const loaded = await loadExperimentConfig("config/experiment.e2e.json");
+    let startOptions: VerifiedProductionStartOptions | undefined;
     const expectedServer = fakeRunningServer();
 
     const server = await startProductionReleaseCli({
@@ -172,11 +191,13 @@ describe("production release CLI seal", () => {
       async verifyRelease(directory) {
         events.push("verify");
         expect(directory).toBe(releaseRoot);
-        return {
-          errors: Object.freeze([]),
-          manifestSha256: "a".repeat(64),
-          sourceCommit: "b".repeat(40),
-        };
+        return successfulVerification(loaded);
+      },
+      async loadConfig(path, options) {
+        events.push("load");
+        expect(path).toBe("config/experiment.json");
+        expect(options).toMatchObject({ rootDirectory: releaseRoot, production: true });
+        return loaded;
       },
       async start(options) {
         events.push("start");
@@ -186,12 +207,25 @@ describe("production release CLI seal", () => {
     });
 
     expect(server).toBe(expectedServer);
-    expect(events).toEqual(["verify", "start"]);
-    expect(startOptions).toEqual({
-      rootDirectory: releaseRoot,
-      configPath: "config/experiment.json",
-      mode: "production",
-    });
+    expect(events).toEqual(["verify", "load", "start"]);
+    expect(startOptions?.rootDirectory).toBe(releaseRoot);
+    expect(startOptions?.loadedConfig).toBe(loaded);
+    expect(startOptions?.appVersion).toBe("9.8.7");
+  });
+
+  it("fails closed when a verifier reports success without a manifest binding", async () => {
+    await expect(startProductionReleaseCli({
+      entryPath: resolve("synthetic-production-release", "dist-server", "index.js"),
+      environment: {},
+      async verifyRelease() {
+        return {
+          errors: Object.freeze([]),
+          manifestSha256: "a".repeat(64),
+          sourceCommit: "b".repeat(40),
+          manifest: null,
+        };
+      },
+    })).rejects.toThrow(/no manifest binding/iu);
   });
 
   it("fails closed when the release manifest verification reports any error", async () => {
@@ -204,6 +238,7 @@ describe("production release CLI seal", () => {
           errors: Object.freeze(["SHA-256 mismatch: config/experiment.json"]),
           manifestSha256: "a".repeat(64),
           sourceCommit: "b".repeat(40),
+          manifest: null,
         };
       },
       async start() {
@@ -228,11 +263,12 @@ describe("production release CLI seal", () => {
       environment,
       async verifyRelease() {
         verified = true;
-        return {
-          errors: Object.freeze([]),
-          manifestSha256: "a".repeat(64),
-          sourceCommit: "b".repeat(40),
-        };
+          return {
+            errors: Object.freeze([]),
+            manifestSha256: "a".repeat(64),
+            sourceCommit: "b".repeat(40),
+            manifest: null,
+          };
       },
       async start() {
         started = true;
@@ -254,6 +290,7 @@ describe("production release CLI seal", () => {
           errors: Object.freeze([]),
           manifestSha256: "a".repeat(64),
           sourceCommit: "b".repeat(40),
+          manifest: null,
         };
       },
     })).rejects.toThrow(/must run as dist-server\/index\.js/iu);
@@ -273,37 +310,66 @@ describe("production release CLI seal", () => {
       },
     })).rejects.toThrow(/Production release verification failed.*manifest/iu);
   });
+
+  it.each(["configFileHash", "configHash", "protocolVersion"] as const)(
+    "rejects a loaded config whose %s differs from the verified manifest",
+    async (field) => {
+      const loaded = await loadExperimentConfig("config/experiment.e2e.json");
+      const verified = successfulVerification(loaded);
+      const manifest = {
+        ...verified.manifest,
+        [field]: field === "protocolVersion" ? "different-protocol" : "0".repeat(64),
+      };
+      let started = false;
+
+      await expect(startProductionReleaseCli({
+        entryPath: resolve("synthetic-production-release", "dist-server", "index.js"),
+        environment: {},
+        async verifyRelease() {
+          return { ...verified, manifest };
+        },
+        async loadConfig() {
+          return loaded;
+        },
+        async start() {
+          started = true;
+          return fakeRunningServer();
+        },
+      })).rejects.toThrow(new RegExp(field, "u"));
+      expect(started).toBe(false);
+    },
+  );
 });
 
 describe("startServer production safeguards", () => {
-  it("rejects the default MockDevice config whenever production mode is selected", async () => {
+  it("rejects direct production startup before trusting the default Mock config", async () => {
     const root = await createRehearsalFixture();
     await expect(startServer({
       rootDirectory: root,
       configPath: "config/rehearsal.json",
       mode: "production",
-    })).rejects.toThrow(/Mock device mode is unconditionally disabled in production/iu);
+    })).rejects.toThrow(/verified sealed release CLI/iu);
   });
 
-  it("rejects production Mock mode even when a config attempts to opt in", async () => {
+  it("rejects direct production even when a Mock config attempts to opt in", async () => {
     const root = await createRehearsalFixture({ allowMockInProduction: true });
     await expect(startServer({
       rootDirectory: root,
       configPath: "config/rehearsal.json",
       mode: "production",
-    })).rejects.toThrow(/unconditionally disabled/iu);
+    })).rejects.toThrow(/verified sealed release CLI/iu);
   });
 
-  it("rejects Serial production startup before evaluating form-audit evidence", async () => {
+  it("rejects direct Serial production before reading its self-asserted audit evidence", async () => {
     const root = await createRehearsalFixture({ deviceMode: "serial" });
     await expect(startServer({
       rootDirectory: root,
       configPath: "config/rehearsal.json",
       mode: "production",
-    })).rejects.toThrow(/Production device policy.*serial-device-not-allowed/iu);
+    })).rejects.toThrow(/verified sealed release CLI/iu);
   });
 
-  it("starts formal screen production without Serial hardware and auto-connects safely", async () => {
+  it("rejects a direct formal-looking screen config without a verified release capability", async () => {
     const root = await createRehearsalFixture({
       deviceMode: "screen",
       formUrl: STUDY_FORM_URL,
@@ -311,31 +377,104 @@ describe("startServer production safeguards", () => {
       loggingDirectory: "./data/sessions",
       researchIdPattern: "^SH26-[0-9]{3}$",
     });
-    const server = await startServer({
+    await expect(startServer({
       rootDirectory: root,
       configPath: "config/rehearsal.json",
       mode: "production",
-    });
-    runningServers.push(server);
+    })).rejects.toThrow(/verified sealed release CLI/iu);
+  });
 
-    const health = await fetch(`${server.url}/healthz`);
-    await expect(health.json()).resolves.toMatchObject({
-      status: "ok",
-      protocolVersion: SCREEN_PROTOCOL_VERSION,
+  it("rejects a formal Google Form and GO evidence in nonparticipant test mode", async () => {
+    const root = await createRehearsalFixture({
       deviceMode: "screen",
+      formUrl: STUDY_FORM_URL,
+      formAuditGo: true,
+      loggingDirectory: "./data/sessions",
+      researchIdPattern: "^SH26-[0-9]{3}$",
     });
-    const deviceStatus = await fetch(`${server.url}/api/device/status`);
-    await expect(deviceStatus.json()).resolves.toMatchObject({
-      status: { connected: true, state: "idle", level: 0, fault: null, mode: "screen" },
+    await expect(startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "test",
+      serveBuiltAssets: true,
+    })).rejects.toThrow(/Test mode prohibits a real Google Form destination/iu);
+  });
+
+  it("rejects a production log-directory override in test mode", async () => {
+    const root = await createRehearsalFixture();
+    const previousDataDirectory = process.env.DATA_DIRECTORY;
+    process.env.DATA_DIRECTORY = "./data/sessions";
+    try {
+      await expect(startServer({
+        rootDirectory: root,
+        configPath: "config/rehearsal.json",
+        mode: "test",
+      })).rejects.toThrow(/prohibits overriding its isolated test log directory/iu);
+    } finally {
+      if (previousDataDirectory === undefined) delete process.env.DATA_DIRECTORY;
+      else process.env.DATA_DIRECTORY = previousDataDirectory;
+    }
+  });
+
+  it("rejects the formal participant ID namespace in test mode", async () => {
+    const root = await createRehearsalFixture({ researchIdPattern: "^SH26-[0-9]{3}$" });
+    await expect(startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "test",
+    })).rejects.toThrow(/TEST-001 or DEMO-001 research ID format/iu);
+  });
+
+  it("rejects the Serial adapter in test mode", async () => {
+    const root = await createRehearsalFixture({ deviceMode: "serial" });
+    await expect(startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "test",
+    })).rejects.toThrow(/Test mode prohibits the Serial device adapter/iu);
+  });
+
+  it("rejects self-asserted GO form evidence in test mode", async () => {
+    const root = await createRehearsalFixture({
+      deviceMode: "screen",
+      formUrl: "https://docs.google.com/forms/d/e/TEST_FORM_ID/viewform",
+      formAuditGo: true,
     });
+    await expect(startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "test",
+    })).rejects.toThrow(/Test mode prohibits GO form-audit evidence/iu);
+  });
+
+  it("rejects a production log directory in test-mode configuration", async () => {
+    const root = await createRehearsalFixture({ loggingDirectory: "./data/sessions" });
+    await expect(startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "test",
+    })).rejects.toThrow(/Test mode requires an isolated test log directory/iu);
+  });
+
+  it("rejects LAN and external-runtime configurations in test mode", async () => {
+    const lanRoot = await createRehearsalFixture({ bindHost: "0.0.0.0", allowLan: true });
+    await expect(startServer({
+      rootDirectory: lanRoot,
+      configPath: "config/rehearsal.json",
+      mode: "test",
+    })).rejects.toThrow(/Test mode must bind to a loopback host/iu);
+
+    const externalRoot = await createRehearsalFixture({ allowExternalRuntimeRequests: true });
+    await expect(startServer({
+      rootDirectory: externalRoot,
+      configPath: "config/rehearsal.json",
+      mode: "test",
+    })).rejects.toThrow(/External runtime requests are prohibited/iu);
   });
 
   it("treats a compiled entry as production even when NODE_ENV is test", () => {
-    expect(inferServerMode(resolve("dist-server", "index.js"), "test")).toBe("production");
-    expect(inferServerMode(resolve("src", "server", "index.ts"), "test"))
-      .toBe("development");
-    expect(inferServerMode(resolve("src", "server", "index.ts"), "production"))
-      .toBe("production");
+    expect(inferServerMode(resolve("dist-server", "index.js"))).toBe("production");
+    expect(inferServerMode(resolve("src", "server", "index.ts"))).toBe("development");
   });
 
   it.each(["screen", "serial"] as const)(
@@ -361,26 +500,119 @@ describe("startServer production safeguards", () => {
     },
   );
 
-  it("does not let NODE_ENV=test turn a direct source start into test mode", async () => {
+  it("keeps a valid source development runtime visibly nonparticipant", async () => {
     const root = await createRehearsalFixture({
-      deviceMode: "screen",
-      formUrl: STUDY_FORM_URL,
-      formAuditGo: true,
-      loggingDirectory: "./data/sessions",
-      researchIdPattern: "^SH26-[0-9]{3}$",
+      researchIdPattern: "^DEV-[0-9]{3}$",
+      loggingDirectory: "./data/dev-sessions",
     });
-    const previousNodeEnvironment = process.env.NODE_ENV;
-    process.env.NODE_ENV = "test";
-    try {
-      await expect(startServer({
-        rootDirectory: root,
-        configPath: "config/rehearsal.json",
-      })).rejects.toThrow(/Development mode requires the Mock device adapter/iu);
-    } finally {
-      if (previousNodeEnvironment === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = previousNodeEnvironment;
-    }
+    const server = await startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "development",
+    });
+    runningServers.push(server);
+
+    const operatorConfig = await fetch(`${server.url}/api/operator/config`);
+    await expect(operatorConfig.json()).resolves.toMatchObject({
+      researchIdPattern: "^DEV-[0-9]{3}$",
+      rehearsal: true,
+    });
+    const created = await fetch(`${server.url}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        researchId: "DEV-001",
+        consentConfirmed: true,
+        orderCode: "ABDC",
+      }),
+    });
+    expect(created.status).toBe(201);
+    const payload = record(await created.json());
+    expect(record(payload["snapshot"])["rehearsal"]).toBe(true);
+    expect(record(payload["snapshot"])["formUrl"]).toBeNull();
   });
+
+  it("rejects a real form, formal ID, and production log path in development mode", async () => {
+    const formRoot = await createRehearsalFixture({
+      formUrl: STUDY_FORM_URL,
+      researchIdPattern: "^DEV-[0-9]{3}$",
+      loggingDirectory: "./data/dev-sessions",
+    });
+    await expect(startServer({
+      rootDirectory: formRoot,
+      configPath: "config/rehearsal.json",
+      mode: "development",
+    })).rejects.toThrow(/Development mode prohibits a Google Form destination/iu);
+
+    const idRoot = await createRehearsalFixture({
+      researchIdPattern: "^SH26-[0-9]{3}$",
+      loggingDirectory: "./data/dev-sessions",
+    });
+    await expect(startServer({
+      rootDirectory: idRoot,
+      configPath: "config/rehearsal.json",
+      mode: "development",
+    })).rejects.toThrow(/Development mode requires the DEV-001 research ID format/iu);
+
+    const logRoot = await createRehearsalFixture({
+      researchIdPattern: "^DEV-[0-9]{3}$",
+      loggingDirectory: "./data/sessions",
+    });
+    await expect(startServer({
+      rootDirectory: logRoot,
+      configPath: "config/rehearsal.json",
+      mode: "development",
+    })).rejects.toThrow(/isolated data\/dev-sessions log directory/iu);
+  });
+
+  it("rejects LAN and GO audit evidence in development mode", async () => {
+    const lanRoot = await createRehearsalFixture({
+      bindHost: "0.0.0.0",
+      allowLan: true,
+      researchIdPattern: "^DEV-[0-9]{3}$",
+      loggingDirectory: "./data/dev-sessions",
+    });
+    await expect(startServer({
+      rootDirectory: lanRoot,
+      configPath: "config/rehearsal.json",
+      mode: "development",
+    })).rejects.toThrow(/Development mode must bind to a loopback host/iu);
+
+    const auditRoot = await createRehearsalFixture({
+      formAuditGo: true,
+      researchIdPattern: "^DEV-[0-9]{3}$",
+      loggingDirectory: "./data/dev-sessions",
+    });
+    await expect(startServer({
+      rootDirectory: auditRoot,
+      configPath: "config/rehearsal.json",
+      mode: "development",
+    })).rejects.toThrow(/Development mode prohibits GO form-audit evidence/iu);
+  });
+
+  it.each(["test", "production"])(
+    "does not let NODE_ENV=%s change a direct source start out of development mode",
+    async (nodeEnvironment) => {
+      const root = await createRehearsalFixture({
+        deviceMode: "screen",
+        formUrl: STUDY_FORM_URL,
+        formAuditGo: true,
+        loggingDirectory: "./data/sessions",
+        researchIdPattern: "^SH26-[0-9]{3}$",
+      });
+      const previousNodeEnvironment = process.env.NODE_ENV;
+      process.env.NODE_ENV = nodeEnvironment;
+      try {
+        await expect(startServer({
+          rootDirectory: root,
+          configPath: "config/rehearsal.json",
+        })).rejects.toThrow(/Development mode requires the Mock device adapter/iu);
+      } finally {
+        if (previousNodeEnvironment === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnvironment;
+      }
+    },
+  );
 
   it("shares one safe shutdown operation across repeated close calls", async () => {
     const root = await createRehearsalFixture();
@@ -437,8 +669,7 @@ describe("startServer production safeguards", () => {
       mode: "rehearsal",
     })).rejects.toThrow(/Rehearsal mode requires the Mock device adapter/iu);
 
-    expect(inferServerMode(resolve("dist-server", "index.js"), "development"))
-      .toBe("production");
+    expect(inferServerMode(resolve("dist-server", "index.js"))).toBe("production");
   });
 
   it("keeps rehearsal Mock-only when the formal screen adapter is configured", async () => {

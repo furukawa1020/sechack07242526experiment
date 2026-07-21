@@ -4,7 +4,7 @@
   "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
   "bindHost": "127.0.0.1",
   "port": 4173,
-  "researchIdPattern": "^SH26-[0-9]{3}$",
+  "researchIdPattern": "^TEST-[0-9]{3}$",
   "orders": ["ABDC", "BCAD", "CDBA", "DACB"],
   "fixedState": { "score": 72, "label": "高ストレス", "pufferLevel": 0.6 },
   "timingMs": {

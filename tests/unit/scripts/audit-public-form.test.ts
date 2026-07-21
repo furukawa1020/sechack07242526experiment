@@ -20,12 +20,15 @@ const SCALE = [
   "7非常にそう思う",
 ] as const;
 const ROWS = ["第1提示", "第2提示", "第3提示", "第4提示"] as const;
+const EXTERNAL_NON_TRANSMISSION_COPY =
+  "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存することはありません。";
 const SCREEN_PROTOCOL_COPY = [
   "この実験では、同じ固定模擬データを4つの方法で提示します。",
   "表示される値は、あなた自身を測定したものではありません。",
   "この実験では、心拍その他の生体データを取得しません。",
   "状態は画面上のフグのふくらみで表します。",
   "アンケート回答は、Googleフォームの送信時にGoogleへ送信・保存されます。",
+  EXTERNAL_NON_TRANSMISSION_COPY,
 ].join(" ");
 
 interface FormFixtureOptions {
@@ -128,6 +131,60 @@ describe("public Google Form audit", () => {
     );
     expect(report.findings.find((item) => item.id === "screen-protocol-copy")?.status)
       .toBe("fail");
+  });
+
+  it("fails when only the app external non-transmission and non-storage explanation is missing", () => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml([
+        "この実験では、同じ固定模擬データを4つの方法で提示します。",
+        "表示される値は、あなた自身を測定したものではありません。",
+        "この実験では、心拍その他の生体データを取得しません。",
+        "状態は画面上のフグのふくらみで表します。",
+        "アンケート回答は、Googleフォームの送信時にGoogleへ送信・保存されます。",
+        "4つの提示をすべて体験した後、全11問へ回答してください。",
+      ].join(" "), { omitScreenProtocolCopy: true }),
+    );
+    const finding = report.findings.find((item) => item.id === "screen-protocol-copy");
+    expect(finding?.status).toBe("fail");
+    expect(finding?.detail).toContain("1/1/1/1/1/0");
+  });
+
+  it("rejects copy that permits external transmission while denying only storage", () => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml([
+        "この実験では、同じ固定模擬データを4つの方法で提示します。",
+        "表示される値は、あなた自身を測定したものではありません。",
+        "この実験では、心拍その他の生体データを取得しません。",
+        "状態は画面上のフグのふくらみで表します。",
+        "アンケート回答は、Googleフォームの送信時にGoogleへ送信・保存されます。",
+        "この実験用Webアプリから、固定模擬身体データを外部へ送信しますが、保存しません。",
+      ].join(" "), { omitScreenProtocolCopy: true }),
+    );
+    const finding = report.findings.find((item) => item.id === "screen-protocol-copy");
+    expect(finding?.status).toBe("fail");
+    expect(finding?.detail).toContain("1/1/1/1/1/0");
+  });
+
+  it.each([
+    "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存しませんとは言い切れません。",
+    "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存しないよう努めます。",
+    "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存しませんが必要時には送信します。",
+  ])("rejects qualified or reversible non-transmission copy: %s", (unsafeCopy) => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml(
+        SCREEN_PROTOCOL_COPY.replace(EXTERNAL_NON_TRANSMISSION_COPY, unsafeCopy),
+        { omitScreenProtocolCopy: true },
+      ),
+    );
+    const finding = report.findings.find((item) => item.id === "screen-protocol-copy");
+    expect(finding?.status).toBe("fail");
+    expect(finding?.detail).toContain("1/1/1/1/1/0");
   });
 
   it("still rejects an affirmative immediate-answer instruction beside the approved negation", () => {

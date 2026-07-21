@@ -62,6 +62,7 @@ export function createApiRouter(
     response.json({
       researchIdPattern: config.researchIdPattern,
       protocolVersion: config.protocolVersion,
+      rehearsal: controller.isRehearsal,
     });
   });
 

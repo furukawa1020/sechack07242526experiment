@@ -284,7 +284,7 @@ Googleフォームを開くQRコード
 
 ## 13. 模擬リハーサル専用表示
 
-次の文言は、専用ランチャーから明示的な`rehearsal`起動モードで開始し、かつ`device.mode=mock`、空のフォームURL、loopback限定をすべて満たす模擬リハーサルでだけ表示する。条件値が同じでも通常の開発起動では表示しない。正式実験の刺激や参加者向け文言には含めない。
+次の文言は、非参加者専用の`development`、`rehearsal`、`test`でだけ表示する。`development`は`device.mode=mock`、空のフォームURL、loopback限定、`DEV-001`形式のID、`data/dev-sessions`配下のログを必須とする。`rehearsal`は`device.mode=mock`、空のフォームURL、loopback限定、模擬専用ログを必須とする。`test`は`mock`または`screen`を許可するが、loopback限定、外部通信禁止、実GoogleフォームとGO監査証跡の禁止、フォーム誘導の非表示、隔離ログ、`TEST-001`または`DEMO-001`形式のID、Serial禁止を必須とする。正式productionでは必ず非表示にする。正式実験の刺激や参加者向け文言には含めない。
 
 ### 常設表示
 

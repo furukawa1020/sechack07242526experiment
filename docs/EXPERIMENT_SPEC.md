@@ -412,11 +412,15 @@ stateDiagram-v2
     idle --> setup
     setup --> intro: prerequisites satisfied
     intro --> handling: operator starts
+    intro --> intro: display loss / pause until Operator confirms
     handling --> processing: timer
+    handling --> handling: display loss / pause until Operator confirms
     processing --> result: timer
+    processing --> processing: display loss / pause until Operator confirms
     result --> reset: timer
     reset --> handling: next condition and device ready
     reset --> summary: fourth condition finished
+    summary --> summary: display loss / pause until Operator confirms
     summary --> completed: form completion confirmed
     idle --> aborted: abort
     setup --> aborted: abort
@@ -426,12 +430,19 @@ stateDiagram-v2
     result --> aborted: abort
     reset --> aborted: abort
     summary --> aborted: abort
-    handling --> error: device/display fault
-    processing --> error: device/display fault
-    result --> error: device/display fault
-    reset --> error: device/display fault
+    setup --> error: device fault
+    intro --> error: device fault
+    handling --> error: device fault
+    processing --> error: device fault
+    result --> error: device fault or A-D display loss after safety sequence
+    reset --> error: device fault or A-D display loss after safety sequence
+    summary --> error: device fault
     error --> aborted: operator acknowledges
 ```
+
+`result`または`reset`中の参加者画面喪失は、提示方式に関係なくA〜Dすべてで再開不能とする。遷移順は、(1) タイマー停止と参加者表示の即時中立化、(2) STOP試行、(3) DEFLATE試行と完了確認、(4) 成功時の`device.deflate.complete`または確認失敗の監査記録、(5) `error`遷移と`session.error`記録、の順に固定する。DEFLATEを確認できなくても提示へ戻してはならない。
+
+`intro`、`handling`、`processing`または`summary`中の参加者画面喪失は、同じフェーズのままタイマーを停止して`recoveryRequired`とする。再接続だけでは進行を再開せず、Operatorが明示確認した後に限り、保存した残り時間と新しいサーバ時刻から再開する。
 
 不正な遷移はHTTP 409またはドメインエラーとして拒否する。
 
@@ -580,6 +591,15 @@ MockDevice：
 - 専用模擬リハーサルのサマリーではGoogleフォームへの回答を案内しない
 - 上記の模擬表示は本番では非表示
 - Operatorには常にMockであることを明示
+
+自動テスト用`test`ランタイム：
+
+- `mock`または`screen`だけを許可し、Serial、LAN、外部通信、実Googleフォーム、GO監査証跡、本番ログ先、正式研究用IDを拒否
+- 参加者画面とOperatorの両方へ非参加者用の模擬表示を常設し、フォームURL、リンク、QR、回答完了文言を出さない
+- `TEST-001`または`DEMO-001`形式の合成IDと、`data/test`、`data/e2e-sessions`、`data/mock-sessions`配下の隔離ログだけを許可
+- ビルド済み`screen`画面の試験であっても、本番GO、同意取得、参加者セッションとして扱わない
+
+ソース用`development`ランタイムも非参加者専用とし、Mock、loopback、外部通信なし、空フォーム、GO監査証跡なし、`DEV-001`形式、`data/dev-sessions`配下のログを起動時に強制する。参加者画面とOperatorへ同じ模擬表示を常設し、正式研究用IDや実参加者を扱わない。
 
 ScreenPufferDevice：
 
@@ -748,6 +768,8 @@ Playwrightで外部URLへのrequestを監視し、localhost以外への自動通
 
 4順序すべてを高速MockDeviceで完走する。
 
+E2Eサーバは明示的な`test`モードで起動し、参加者画面とOperatorへ非参加者表示を常設する。実Googleフォーム、正式研究用ID、Serial、本番ログ先は使用しない。ビルド済み`screen`経路の確認でもフォームURL、リンク、QRを出さない。
+
 各E2Eで確認：
 
 - 全フェーズ
@@ -772,6 +794,8 @@ Playwrightで外部URLへのrequestを監視し、localhost以外への自動通
 - 正式起動は承認済みproduction設定を明示し、preflightがPASSした場合だけ成功する。現在のNO-GO設定では起動とリリース生成を拒否する
 - `ScreenPufferDevice`だけで実機なしの正式画面を実行可能
 - MockDeviceだけで開発・模擬リハーサルを実演可能
+- 自動テストは非参加者表示、合成ID、隔離ログ、フォーム非表示を強制し、本番と識別できる
+- ソース開発起動も非参加者表示、`DEV-001`形式、開発専用ログ、空フォームを強制する
 - 2つのブラウザウィンドウが同期
 - 参加者画面に操作UIなし
 - 同一固定値が4条件へ使われる

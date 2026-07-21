@@ -38,9 +38,9 @@ npm run rehearsal
 
 このモードは`config/experiment.mock-rehearsal.json`を使い、`127.0.0.1`だけで待ち受け、MockDeviceを自動準備します。フォームURLは空で、ログは`data/mock-sessions/`へ分離されます。本番参加者には使用できません。
 
-正式な実機なし`screen`モードは、ソースツリーや単独の`dist-server/`から直接起動しません。承認済み設定から生成した封印済みproductionリリースだけを使用します。開発用Mockは`npm run dev`、明示的な模擬リハーサルは`npm run rehearsal`を使用します。`npm run start`を含むビルド済みproduction CLIは、manifestのない場所では起動を拒否します。
+正式な実機なし`screen`モードは、ソースツリーや単独の`dist-server/`から直接起動しません。承認済み設定から生成した封印済みproductionリリースだけを使用します。開発用Mockは`npm run dev`、明示的な模擬リハーサルは`npm run rehearsal`を使用します。ビルド済み`dist-server/index.js`は封印起動関数だけを公開し、汎用`startServer`を公開しません。`npm run start`を含むproduction CLIは、manifestのない場所では起動を拒否します。
 
-本番preflightは、プロトコル`R8-010-2x2-screen-v1`、`device.mode=screen`、空のシリアルパス、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内の二名監査GO、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。production起動はmanifest、設定ファイルのバイト列・意味内容hash、フォーム監査ゲートを再検証し、設定差し替え、環境変数による設定・ログ先上書き、`mock`または`serial`設定を拒否します。
+本番preflightは、プロトコル`R8-010-2x2-screen-v1`、`device.mode=screen`、空のシリアルパス、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内の二名監査GO、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。production起動はmanifest、設定ファイルのバイト列・意味内容hash、フォーム監査ゲートを再検証します。その後に固定パスから一度だけ読んだ設定スナップショットのバイトhash・意味hash・protocolVersionと、管理対象`package.json.version`へ相互拘束したappVersionを検証済みmanifestへ結び付け、その同じスナップショットとappVersionで表示・監査記録して起動します。検証後の設定再読込、設定差し替え、環境変数による設定・ログ先上書き、`mock`または`serial`設定を拒否します。
 
 会場へ配置する本番成果物は、ソースディレクトリをそのままコピーせず、次のコマンドで生成します。
 
@@ -48,7 +48,7 @@ npm run rehearsal
 npm.cmd run deploy:prepare -- --config config/experiment.production.json
 ```
 
-このコマンドは指定された5つの品質確認、ビルド、本番preflightを完了した後、`release/`へproduction依存関係を含む封印済みディレクトリを作成します。実ログ、ソース、テスト、Mock/E2E設定は含めません。会場では同梱の`VERIFY_RELEASE.cmd`と`START_PRODUCTION.cmd`を使用し、npm installや再ビルドを行いません。詳細は[Windowsローカル本番デプロイ](docs/DEPLOYMENT.md)を参照してください。
+このコマンドは指定された5つの品質確認、ビルド、本番preflightを完了した後、`release/`へproduction依存関係を含む封印済みディレクトリを作成します。生成中は`release/.build.lock`を排他的に保持し、別のビルドやリリースによる`dist/`・`dist-server/`の混在を拒否します。実ログ、ソース、テスト、Mock/E2E設定は含めません。会場では同梱の`VERIFY_RELEASE.cmd`と`START_PRODUCTION.cmd`を使用し、npm installや再ビルドを行いません。詳細は[Windowsローカル本番デプロイ](docs/DEPLOYMENT.md)を参照してください。
 
 起動後に開く画面：
 
@@ -67,7 +67,7 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 - [模擬装置確認](https://furukawa1020-sechack-experiment-demo.static.hf.space/device-test/index.html)
 - [公開版の稼働確認](https://furukawa1020-sechack-experiment-demo.static.hf.space/healthz/index.html)
 
-公開版の配信commitは`14d6a6069c30c63aa1d1561c7d8b6e9a9d94f2d0`です。正式なローカル版と公開レビュー版の差は[公開デモ（模擬表示）](docs/PUBLIC_DEMO.md)を参照してください。
+公開版の配信commitは`72e4c23dd80b31290862fefe01eb3c25045e7ce1`です。正式なローカル版と公開レビュー版の差は[公開デモ（模擬表示）](docs/PUBLIC_DEMO.md)を参照してください。
 
 公開版の直接URLは外部サイトのiframe内でも表示できるため、埋め込み禁止を必要とする本番用途には使えません。入力・認証・研究データを持たない表示レビュー専用です。
 
@@ -86,7 +86,7 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 
 この経路にはGoogleフォームへのリンクや回答確認はありません。`SH26-001`形式の研究用ID、実参加者、実回答、実機は使用しないでください。詳しい安全境界は[実機なし模擬リハーサル](docs/MOCK_REHEARSAL.md)にまとめています。
 
-ソース変更中に開発サーバを使う場合だけ、以下の手順を使用します。
+ソース変更中に開発サーバを使う場合だけ、以下の手順を使用します。development起動も非参加者専用であり、Mock、loopback、空フォーム、`DEV-001`形式、`data/dev-sessions/`を起動時に強制し、参加者画面とOperatorへ模擬表示を常設します。
 
 1. `config/experiment.json`の`device.mode`が`mock`であることを確認し、`npm run dev`で起動します。
 2. スタッフ画面を開き、装置表示がMockであることを確認して「装置を接続」を押します。
@@ -175,7 +175,7 @@ npm run test:e2e
 npm run build
 ```
 
-E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認します。スクリーンショットは`npm run screenshots`で`artifacts/screenshots/`へローカル生成し、Gitおよび公開・本番成果物には含めません。
+E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認します。テストサーバはloopback、合成`TEST-001`形式ID、隔離ログ、実フォーム非表示、Serial禁止を強制し、参加者画面とOperatorへ「研究参加用ではありません」を常設します。ビルド済み`screen`経路の試験も同じ非参加者境界内で行います。スクリーンショットは`npm run screenshots`で`artifacts/screenshots/`へローカル生成し、Gitおよび公開・本番成果物には含めません。
 
 ## 仕様
 

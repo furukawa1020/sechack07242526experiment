@@ -116,19 +116,28 @@ export interface CreateSessionInput {
 }
 
 export const experimentApi = {
-  async getOperatorConfig(): Promise<{ readonly researchIdPattern: string; readonly protocolVersion: string }> {
+  async getOperatorConfig(): Promise<{
+    readonly researchIdPattern: string;
+    readonly protocolVersion: string;
+    readonly rehearsal: boolean;
+  }> {
     const raw = await requestJson("/api/operator/config");
     if (typeof raw !== "object" || raw === null) throw invalidResponse();
     const record = raw as Readonly<Record<string, unknown>>;
     const researchIdPattern = record["researchIdPattern"];
     const protocolVersion = record["protocolVersion"];
-    if (typeof researchIdPattern !== "string" || typeof protocolVersion !== "string") throw invalidResponse();
+    const rehearsal = record["rehearsal"];
+    if (
+      typeof researchIdPattern !== "string"
+      || typeof protocolVersion !== "string"
+      || typeof rehearsal !== "boolean"
+    ) throw invalidResponse();
     try {
       void new RegExp(researchIdPattern, "u");
     } catch {
       throw invalidResponse();
     }
-    return { researchIdPattern, protocolVersion };
+    return { researchIdPattern, protocolVersion, rehearsal };
   },
 
   async createSession(input: CreateSessionInput): Promise<CreatedSession> {

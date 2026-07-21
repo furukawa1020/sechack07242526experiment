@@ -171,21 +171,50 @@ describe("experiment state machine", () => {
     }
   });
 
-  it("marks display loss for operator-confirmed recovery", () => {
-    const handling: Session = {
+  it.each(["intro", "handling", "processing", "summary"] as const)(
+    "marks %s display loss for operator-confirmed recovery",
+    (phase) => {
+      const active: Session = {
+        ...newSession(),
+        phase,
+        ...(phase === "handling" || phase === "processing"
+          ? { sequenceIndex: 0 as const, currentCondition: "A" as const }
+          : {}),
+      };
+      const disconnected = setDisplayConnection(active, false, iso(10));
+      expect(disconnected.displayConnected).toBe(false);
+      expect(disconnected.recoveryRequired).toBe(true);
+      expect(() => confirmSessionRecovery(disconnected, iso(11))).toThrow(/reconnect/iu);
+      const reconnected = setDisplayConnection(disconnected, true, iso(12));
+      expect(reconnected.recoveryRequired).toBe(true);
+      expect(confirmSessionRecovery(reconnected, iso(13)).recoveryRequired).toBe(false);
+    },
+  );
+
+  it.each([
+    ["A", "result"],
+    ["B", "result"],
+    ["C", "result"],
+    ["D", "result"],
+    ["A", "reset"],
+    ["B", "reset"],
+    ["C", "reset"],
+    ["D", "reset"],
+  ] as const)("makes condition %s %s display loss non-resumable", (condition, phase) => {
+    const critical: Session = {
       ...newSession(),
-      phase: "handling",
+      phase,
       sequenceIndex: 0,
-      currentCondition: "A",
+      currentCondition: condition,
     };
-    const disconnected = setDisplayConnection(handling, false, iso(10));
-    expect(disconnected.displayConnected).toBe(false);
-    expect(disconnected.recoveryRequired).toBe(true);
-    expect(() => confirmSessionRecovery(disconnected, iso(11))).toThrow(/reconnect/iu);
-    const reconnected = setDisplayConnection(disconnected, true, iso(12));
-    expect(reconnected.recoveryRequired).toBe(true);
-    expect(confirmSessionRecovery(reconnected, iso(13)).recoveryRequired).toBe(false);
-    expect(setDisplayConnection(newSession(), false, iso(14)).recoveryRequired).toBe(false);
+    const disconnected = setDisplayConnection(critical, false, iso(20));
+    expect(disconnected).toMatchObject({ displayConnected: false, recoveryRequired: true });
+    const reconnected = setDisplayConnection(disconnected, true, iso(21));
+    expect(() => confirmSessionRecovery(reconnected, iso(22))).toThrow(/stimulus loss/iu);
+  });
+
+  it("does not require recovery when an idle display disconnects", () => {
+    expect(setDisplayConnection(newSession(), false, iso(30)).recoveryRequired).toBe(false);
   });
 
   it("updates device state with normalized values only", () => {
@@ -235,6 +264,14 @@ describe("experiment state machine", () => {
       { position: 4, processing: "local", presentation: "puffer" },
     ]);
     expect(summary.formUrl).toBe("https://example.test/form");
+    expect(toPublicSnapshot(
+      { ...active, phase: "summary", currentCondition: null },
+      25,
+      timing,
+      "https://example.test/form",
+      true,
+      iso(25),
+    ).formUrl).toBeNull();
     expect(toPublicSnapshot({ ...active, deviceMode: "serial" }, 25, timing).pufferSurface)
       .toBe("physical");
     expect(getRemainingMs(newSession(), 10)).toBeNull();

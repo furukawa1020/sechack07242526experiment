@@ -24,6 +24,7 @@ export interface PublicSessionSnapshot extends PublicSnapshot {
 }
 
 export interface OperatorSessionSnapshot extends RuntimeSession {
+  readonly rehearsal: boolean;
   readonly serverNow: string;
   readonly pufferSurface: PublicSnapshot["pufferSurface"];
   readonly pufferRamp: PublicSnapshot["pufferRamp"];

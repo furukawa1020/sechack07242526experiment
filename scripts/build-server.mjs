@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { build } from "esbuild";
 
+import { acquireBuildLock } from "./build-lock.mjs";
+
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..");
 const SERVER_OUTPUT_DIRECTORY = resolve(WORKSPACE_DIRECTORY, "dist-server");
@@ -51,26 +53,31 @@ async function cleanServerOutputDirectory(outputDirectory) {
 }
 
 async function buildServer() {
-  await cleanServerOutputDirectory(SERVER_OUTPUT_DIRECTORY);
+  const buildLock = await acquireBuildLock(WORKSPACE_DIRECTORY);
+  try {
+    await cleanServerOutputDirectory(SERVER_OUTPUT_DIRECTORY);
 
-  await build({
-    absWorkingDir: WORKSPACE_DIRECTORY,
-    entryPoints: {
-      index: "src/server/index.ts",
-      rehearsal: "src/server/rehearsal.ts",
-      preflight: "scripts/preflight.ts",
-      healthcheck: "scripts/healthcheck.ts",
-      "verify-release": "scripts/verify-release.ts",
-    },
-    outdir: SERVER_OUTPUT_DIRECTORY,
-    bundle: true,
-    platform: "node",
-    format: "esm",
-    target: "node22",
-    packages: "external",
-    sourcemap: true,
-    legalComments: "none",
-  });
+    await build({
+      absWorkingDir: WORKSPACE_DIRECTORY,
+      entryPoints: {
+        index: "src/server/production-entry.ts",
+        rehearsal: "src/server/rehearsal.ts",
+        preflight: "scripts/preflight.ts",
+        healthcheck: "scripts/healthcheck.ts",
+        "verify-release": "scripts/verify-release.ts",
+      },
+      outdir: SERVER_OUTPUT_DIRECTORY,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node22",
+      packages: "external",
+      sourcemap: true,
+      legalComments: "none",
+    });
+  } finally {
+    await buildLock.release();
+  }
 }
 
 const invokedScript = process.argv[1] === undefined ? undefined : resolve(process.argv[1]);

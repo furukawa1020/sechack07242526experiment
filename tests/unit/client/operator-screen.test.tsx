@@ -5,16 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiMocks = vi.hoisted(() => ({
   getDeviceStatus: vi.fn(),
+  getOperatorConfig: vi.fn(),
 }));
 
 vi.mock("../../../src/client/shared/api.js", () => ({
   errorMessage: (error: unknown) => error instanceof Error ? error.message : "error",
   getOperatorToken: () => null,
   experimentApi: {
-    getOperatorConfig: vi.fn().mockResolvedValue({
-      researchIdPattern: "^SH26-[0-9]{3}$",
-      protocolVersion: "R8-010-2x2-screen-v1",
-    }),
+    getOperatorConfig: apiMocks.getOperatorConfig,
     getDeviceStatus: apiMocks.getDeviceStatus,
   },
 }));
@@ -29,6 +27,11 @@ import { OperatorScreen } from "../../../src/client/operator/OperatorScreen.js";
 describe("operator screen-mode guidance", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    apiMocks.getOperatorConfig.mockResolvedValue({
+      researchIdPattern: "^SH26-[0-9]{3}$",
+      protocolVersion: "R8-010-2x2-screen-v1",
+      rehearsal: false,
+    });
     apiMocks.getDeviceStatus.mockResolvedValue({
       mode: "screen",
       state: "idle",
@@ -69,5 +72,21 @@ describe("operator screen-mode guidance", () => {
     expect(screen.getByText(/本番参加者には使用しないでください/u)).toBeInTheDocument();
     expect(screen.getByText("リハーサル開始条件を確認済み")).toBeInTheDocument();
     expect(screen.queryByText("画面上のフグ・実機なし正式方式")).not.toBeInTheDocument();
+  });
+
+  it("keeps a screen-based test runtime visibly nonparticipant", async () => {
+    apiMocks.getOperatorConfig.mockResolvedValue({
+      researchIdPattern: "^TEST-[0-9]{3}$",
+      protocolVersion: "R8-010-2x2-screen-v1",
+      rehearsal: true,
+    });
+    render(<OperatorScreen />);
+
+    expect(await screen.findByText("実機なし・模擬リハーサル")).toBeInTheDocument();
+    expect(screen.getByText(/本番参加者には使用しないでください/u)).toBeInTheDocument();
+    expect(screen.getByText("リハーサル開始条件を確認済み")).toBeInTheDocument();
+    expect(screen.queryByText("画面上のフグ・実機なし正式方式")).not.toBeInTheDocument();
+    expect(screen.queryByText("参加者セッション")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Googleフォームの回答完了/u)).not.toBeInTheDocument();
   });
 });

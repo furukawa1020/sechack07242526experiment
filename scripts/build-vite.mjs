@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { build } from "vite";
 
+import { acquireBuildLock } from "./build-lock.mjs";
+
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..");
 
@@ -63,16 +65,21 @@ export async function buildViteTarget(targetName) {
   if (target === undefined) {
     throw new Error("Usage: node scripts/build-vite.mjs <client|public-demo>");
   }
-  const outputDirectory = resolve(WORKSPACE_DIRECTORY, target.outputName);
-  await cleanViteOutputDirectory(outputDirectory, target.outputName);
-  await build({
-    configFile: target.configFile,
-    root: target.rootDirectory,
-    build: {
-      emptyOutDir: false,
-      outDir: outputDirectory,
-    },
-  });
+  const buildLock = await acquireBuildLock(WORKSPACE_DIRECTORY);
+  try {
+    const outputDirectory = resolve(WORKSPACE_DIRECTORY, target.outputName);
+    await cleanViteOutputDirectory(outputDirectory, target.outputName);
+    await build({
+      configFile: target.configFile,
+      root: target.rootDirectory,
+      build: {
+        emptyOutDir: false,
+        outDir: outputDirectory,
+      },
+    });
+  } finally {
+    await buildLock.release();
+  }
 }
 
 const invokedScript = process.argv[1] === undefined ? undefined : resolve(process.argv[1]);

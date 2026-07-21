@@ -138,8 +138,14 @@ async function expectParticipantSurfaceFillsViewport(page: Page): Promise<void> 
     const surface = element.getBoundingClientRect();
     const footerElement = element.querySelector<HTMLElement>(".participant-footer");
     const footer = footerElement?.getBoundingClientRect();
+    const rehearsalNoticeElement = element.querySelector<HTMLElement>(".participant-rehearsal-notice");
+    const rehearsalNotice = rehearsalNoticeElement?.getBoundingClientRect();
     const sceneElement = [...element.children]
-      .find((child): child is HTMLElement => child instanceof HTMLElement && child !== footerElement);
+      .find((child): child is HTMLElement => (
+        child instanceof HTMLElement
+        && child !== footerElement
+        && child !== rehearsalNoticeElement
+      ));
     const scene = sceneElement?.getBoundingClientRect();
     return {
       footerBottom: footer?.bottom ?? null,
@@ -150,6 +156,7 @@ async function expectParticipantSurfaceFillsViewport(page: Page): Promise<void> 
       sceneLeft: scene?.left ?? null,
       sceneTop: scene?.top ?? null,
       sceneWidth: scene?.width ?? null,
+      expectedSceneTop: rehearsalNotice?.bottom ?? 0,
       top: surface.top,
       viewportHeight: window.innerHeight,
       viewportWidth: window.innerWidth,
@@ -163,7 +170,7 @@ async function expectParticipantSurfaceFillsViewport(page: Page): Promise<void> 
   expect(geometry.height).toBeCloseTo(geometry.viewportHeight, 1);
   expect(geometry.footerBottom).toBeCloseTo(geometry.viewportHeight, 1);
   expect(geometry.sceneLeft).toBeCloseTo(0, 1);
-  expect(geometry.sceneTop).toBeCloseTo(0, 1);
+  expect(geometry.sceneTop).toBeCloseTo(geometry.expectedSceneTop, 1);
   expect(geometry.sceneWidth).toBeCloseTo(geometry.viewportWidth, 1);
   expect(geometry.sceneBottom).toBeCloseTo(geometry.footerTop ?? Number.NaN, 1);
 }
@@ -320,7 +327,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
   await ensureDevice(request);
   // The preceding emergency-stop E2E intentionally locks device-test actions.
   // Creating and safely deleting a setup session is the production reset path.
-  const resetSession = await create(request, "SH26-939", "ABDC");
+  const resetSession = await create(request, "TEST-939", "ABDC");
   expect((await request.delete(`/api/sessions/${encodeURIComponent(resetSession.id)}`)).ok()).toBeTruthy();
 
   for (const [viewportIndex, viewport] of VIEWPORTS.entries()) {
@@ -379,7 +386,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await capture(processingPage, `participant-processing-${viewport.label}`);
     await processingPage.close();
 
-    const labelSession = await create(request, `SH26-94${viewportIndex * 2}`, "ABDC");
+    const labelSession = await create(request, `TEST-94${viewportIndex * 2}`, "ABDC");
     await page.goto(labelSession.displayUrl);
     await waitForDisplay(request, labelSession.id);
 
@@ -416,7 +423,13 @@ test("主要画面の承認用スクリーンショットを生成する", async
       timeout: 15_000,
     });
     await expect(page.locator(".message-eyebrow")).toHaveCount(0);
-    await expect(page.getByRole("img", { name: "Googleフォームを開くQRコード" })).toBeVisible();
+    await expect(page.getByTestId("participant-app")).toHaveAttribute("data-rehearsal", "true");
+    await expect(page.getByRole("note")).toContainText("研究参加用ではありません・回答送信なし・実機なし");
+    await expect(page.locator(".summary-heading .multiline-copy")).toHaveText(
+      /4つの模擬提示を確認しました。\s*Googleフォームへの回答や送信は行いません。/u,
+    );
+    await expect(page.getByRole("link", { name: "Googleフォームを開いて回答する" })).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Googleフォームを開くQRコード" })).toHaveCount(0);
     await expectParticipantSurfaceFillsViewport(page);
     await expectChildrenCenteredWithin(
       page.locator(".participant-summary"),
@@ -427,7 +440,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await sessionAction(request, labelSession.id, "confirm-form-complete");
     await operatorPage.close();
 
-    const pufferSession = await create(request, `SH26-94${viewportIndex * 2 + 1}`, "CDBA");
+    const pufferSession = await create(request, `TEST-94${viewportIndex * 2 + 1}`, "CDBA");
     await page.goto(pufferSession.displayUrl);
     await waitForDisplay(request, pufferSession.id);
     const pufferOperatorPage = await page.context().newPage();

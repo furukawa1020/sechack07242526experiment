@@ -196,6 +196,7 @@ describe("server HTTP security", () => {
     await expect(operatorConfig.json()).resolves.toEqual({
       researchIdPattern: "^SH26-[0-9]{3}$",
       protocolVersion: "test-v1",
+      rehearsal: false,
     });
 
     const inflate = await fetch(`${running.url}/api/device/inflate`, {

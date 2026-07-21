@@ -40,6 +40,16 @@ export const PUFFER_DEVICE_STATES = [
 export type PufferDeviceState = (typeof PUFFER_DEVICE_STATES)[number];
 export type SessionResult = "ok" | "aborted" | "error" | null;
 
+const DISPLAY_DEPENDENT_PHASES = new Set<ExperimentPhase>([
+  "intro",
+  "handling",
+  "processing",
+  "result",
+  "reset",
+  "summary",
+]);
+const NON_RESUMABLE_DISPLAY_LOSS_PHASES = new Set<ExperimentPhase>(["result", "reset"]);
+
 export interface Session {
   readonly id: string;
   readonly researchId: string;
@@ -370,7 +380,7 @@ export function setDisplayConnection(
   connected: boolean,
   wallClockIso: string,
 ): Session {
-  const requiresRecovery = !connected && ["handling", "processing", "result", "reset"].includes(session.phase);
+  const requiresRecovery = !connected && DISPLAY_DEPENDENT_PHASES.has(session.phase);
   return Object.freeze({
     ...session,
     displayConnected: connected,
@@ -382,6 +392,11 @@ export function setDisplayConnection(
 export function confirmSessionRecovery(session: Session, wallClockIso: string): Session {
   if (!session.displayConnected) {
     throw new InvalidSessionTransitionError("The participant display must reconnect before recovery.");
+  }
+  if (session.recoveryRequired && NON_RESUMABLE_DISPLAY_LOSS_PHASES.has(session.phase)) {
+    throw new InvalidSessionTransitionError(
+      "Display loss during result or reset is stimulus loss and cannot be recovered.",
+    );
   }
   return Object.freeze({
     ...session,
@@ -446,6 +461,6 @@ export function toPublicSnapshot(
     remainingMs: getRemainingMs(session, monotonicMs),
     result: session.result,
     summary,
-    formUrl: showSummary && formUrl !== "" ? formUrl : null,
+    formUrl: showSummary && !rehearsal && formUrl !== "" ? formUrl : null,
   });
 }

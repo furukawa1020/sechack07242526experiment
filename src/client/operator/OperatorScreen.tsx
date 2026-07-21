@@ -150,7 +150,7 @@ function SetupForm({
   automaticOrder,
   manualOrder,
   researchIdPattern,
-  isMock,
+  isRehearsal,
   busy,
   onResearchId,
   onConsent,
@@ -163,7 +163,7 @@ function SetupForm({
   readonly automaticOrder: boolean;
   readonly manualOrder: OrderCode;
   readonly researchIdPattern: string;
-  readonly isMock: boolean;
+  readonly isRehearsal: boolean;
   readonly busy: boolean;
   readonly onResearchId: (value: string) => void;
   readonly onConsent: (value: boolean) => void;
@@ -176,7 +176,7 @@ function SetupForm({
     <form className="operator-card setup-form" onSubmit={onSubmit}>
       <div className="card-heading">
         <span className="step-number">1</span>
-        <div><h2>{isMock ? "模擬リハーサル" : "参加者セッション"}</h2></div>
+        <div><h2>{isRehearsal ? "模擬リハーサル" : "参加者セッション"}</h2></div>
       </div>
       <label className="field-label" htmlFor="research-id">研究用ID</label>
       <input
@@ -202,10 +202,10 @@ function SetupForm({
           onChange={(event) => onConsent(event.target.checked)}
         />
         <span>
-          <strong>{isMock
+          <strong>{isRehearsal
             ? "リハーサル開始条件を確認済み"
             : "提示開始前に、承認済み手順で研究説明・参加同意を確認済み"}</strong>
-          <small>{isMock
+          <small>{isRehearsal
             ? "実参加者・実回答には使用しません"
             : "口頭確認だけでは開始しません。Googleフォームで事後送信する方式は、責任者承認済みの手順に限ります。"}</small>
         </span>
@@ -243,7 +243,7 @@ function SetupForm({
       </fieldset>
 
       <button className="primary-button" type="submit" disabled={busy || !validId || !consentConfirmed}>
-        {isMock ? "リハーサルを準備" : "セッションを準備"}
+        {isRehearsal ? "リハーサルを準備" : "セッションを準備"}
       </button>
     </form>
   );
@@ -309,7 +309,7 @@ function ActionPanel({
   emergencyPending,
   formComplete,
   fullscreenConfirmed,
-  isMock,
+  isRehearsal,
   onFormComplete,
   onFullscreenConfirmed,
   onAction,
@@ -321,7 +321,7 @@ function ActionPanel({
   readonly emergencyPending: boolean;
   readonly formComplete: boolean;
   readonly fullscreenConfirmed: boolean;
-  readonly isMock: boolean;
+  readonly isRehearsal: boolean;
   readonly onFormComplete: (checked: boolean) => void;
   readonly onFullscreenConfirmed: (checked: boolean) => void;
   readonly onAction: (action: "prepare" | "start" | "resume" | "abort" | "confirm-form-complete") => void;
@@ -396,7 +396,7 @@ function ActionPanel({
         {session.phase === "summary" ? (
           <label className="check-row compact-check">
             <input type="checkbox" checked={formComplete} onChange={(event) => onFormComplete(event.target.checked)} />
-            {isMock ? "リハーサルの確認を完了済み" : "Googleフォームの回答完了を確認済み"}
+            {isRehearsal ? "リハーサルの確認を完了済み" : "Googleフォームの回答完了を確認済み"}
           </label>
         ) : null}
         {session.phase === "summary" ? (
@@ -406,7 +406,7 @@ function ActionPanel({
             onClick={() => onAction("confirm-form-complete")}
             disabled={busy || !formComplete}
           >
-            {isMock ? "確認を完了してリハーサル終了" : "回答完了を確認してセッション完了"}
+            {isRehearsal ? "確認を完了してリハーサル終了" : "回答完了を確認してセッション完了"}
           </button>
         ) : null}
         {session.phase === "completed" || session.phase === "aborted" ? (
@@ -499,11 +499,15 @@ export function OperatorScreen(): React.JSX.Element {
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [researchIdPattern, setResearchIdPattern] = useState(DEFAULT_RESEARCH_ID_PATTERN);
+  const [rehearsal, setRehearsal] = useState(false);
 
   useEffect(() => {
     let current = true;
     void experimentApi.getOperatorConfig().then((config) => {
-      if (current) setResearchIdPattern(config.researchIdPattern);
+      if (current) {
+        setResearchIdPattern(config.researchIdPattern);
+        setRehearsal(config.rehearsal);
+      }
     }).catch((error: unknown) => {
       if (current) setFailure(errorMessage(error));
     });
@@ -677,8 +681,8 @@ export function OperatorScreen(): React.JSX.Element {
   const displayedDevice = session !== null && (session.device.connected || session.device.fault !== null)
     ? session.device
     : device;
-  const isMock = displayedDevice.mode === "mock";
   const isScreen = displayedDevice.mode === "screen";
+  const isRehearsal = rehearsal || session?.rehearsal === true || displayedDevice.mode === "mock";
   const events = session?.recentEvents ?? [];
   const operatorClass = useMemo(
     () => busy || emergencyPending ? "operator-app is-busy" : "operator-app",
@@ -692,8 +696,8 @@ export function OperatorScreen(): React.JSX.Element {
           <h1>実験進行コンソール</h1>
         </div>
         <div className="operator-header-actions">
-          {isMock ? <span className="rehearsal-pill">実機なし・模擬リハーサル</span> : null}
-          {isScreen ? <span className="screen-mode-pill">画面上のフグ・実機なし正式方式</span> : null}
+          {isRehearsal ? <span className="rehearsal-pill">実機なし・模擬リハーサル</span> : null}
+          {isScreen && !isRehearsal ? <span className="screen-mode-pill">画面上のフグ・実機なし正式方式</span> : null}
           <span className={`connection-pill status-${realtime.status}`}>同期 {connectionLabel(realtime.status)}</span>
           <button type="button" className="secondary-button" onClick={() => { void exportCsv(); }} disabled={busy}>
             CSVを出力
@@ -702,7 +706,7 @@ export function OperatorScreen(): React.JSX.Element {
       </header>
 
       {failure === null ? null : <div className="operator-banner is-failure" role="alert">{failure}</div>}
-      {isMock ? (
+      {isRehearsal ? (
         <div className="operator-banner is-rehearsal" role="status">
           実機は動作しません。固定模擬データによる開発・リハーサル専用です。本番参加者には使用しないでください。
         </div>
@@ -718,7 +722,7 @@ export function OperatorScreen(): React.JSX.Element {
               automaticOrder={automaticOrder}
               manualOrder={manualOrder}
               researchIdPattern={researchIdPattern}
-              isMock={isMock}
+              isRehearsal={isRehearsal}
               busy={busy}
               onResearchId={setResearchId}
               onConsent={setConsentConfirmed}
@@ -735,7 +739,7 @@ export function OperatorScreen(): React.JSX.Element {
                 emergencyPending={emergencyPending}
                 formComplete={formComplete}
                 fullscreenConfirmed={fullscreenConfirmed}
-                isMock={isMock}
+                isRehearsal={isRehearsal}
                 onFormComplete={setFormComplete}
                 onFullscreenConfirmed={setFullscreenConfirmed}
                 onAction={(action) => { void sessionAction(action); }}

@@ -18,11 +18,11 @@
 | --- | --- |
 | `npm run lint` | 成功 |
 | `npm run typecheck` | 成功 |
-| `npm test` | 成功: 29ファイル、365テスト |
+| `npm test` | 成功: 30ファイル、413テスト |
 | `npm run test:e2e` | 成功: Chromium 10テスト |
 | `npm run build` | 成功 |
 | `npm run test:public-demo` | 成功: 5画面幅、25テスト、skipなし |
-| 公開HTTPSに対するPlaywright | 成功: 1366×768、4テスト |
+| 公開HTTPSに対するPlaywright | 成功: 1366×768、5テスト |
 | 公開デプロイスクリプト`--dry-run` | 成功: README、HTML 5件、同一originのCSS/JSだけを選択 |
 | Mockリハーサル用preflight | 成功。Mockは本番不可と警告した上で開発確認を許可 |
 | screen本番設定用preflight | 期待どおり拒否: `formAudit`の1項目だけがFAIL |
@@ -31,17 +31,17 @@
 
 最終カバレッジ:
 
-- Statements: 95.35%（1703/1786）
-- Branches: 90.08%（1136/1261）
-- Functions: 95.18%（316/332）
-- Lines: 96.01%（1637/1705）
+- Statements: 95.44%（1740/1823）
+- Branches: 90.15%（1163/1290）
+- Functions: 95.22%（319/335）
+- Lines: 96.03%（1670/1739）
 
 重要領域の強制閾値:
 
 | 対象 | 最終値または判定 | 強制閾値 |
 | --- | --- | --- |
 | 条件対応・順序割付 | 全指標100% | 全指標100% |
-| ステートマシン | Statements 96.55%、Branches 96.05%、Functions 100%、Lines 96.42% | 全指標90%以上 |
+| ステートマシン | Statements 96.70%、Branches 96.17%、Functions 100%、Lines 96.59% | 全指標90%以上 |
 | ScreenPufferDevice | Statements 97.22%、Branches 90%、Functions 100%、Lines 99.24% | 全指標90%以上 |
 | MockPufferDevice | Statements 97.38%、Branches 90.90%、Functions 96.55%、Lines 97.35% | 全指標90%以上 |
 | SerialPufferDevice（将来境界） | Statements 96.55%、Branches 91.23%、Functions 95.91%、Lines 97.52% | 全指標90%以上 |
@@ -58,7 +58,9 @@
 - C/Dの右側DOM・文言・命令列・画面フグ描画が同一
 - 画面フグの6秒膨張、保持、6秒収縮とサーバ時刻同期
 - `ScreenPufferDevice`がUSB・ネットワーク・障害注入なしで起動すること
-- ビルド済みサーバを`device.mode=screen`で完走できること
+- ビルド済みクライアントを`device.mode=screen`の非参加者テスト用ローカルランタイムで完走できること
+- `test`モードがloopback、合成ID、隔離ログ、実フォーム非表示、GO証跡禁止、Serial禁止を強制し、参加者画面とOperatorへ非参加者表示を常設すること
+- `development`モードもMock、loopback、`DEV-001`形式、開発専用ログ、空フォームを強制し、参加者画面とOperatorへ非参加者表示を常設すること
 - Mockは開発・E2E・明示的リハーサルだけに限定され、本番で拒否されること
 - 通常フェーズの再読み込みはOperator確認まで停止すること
 - result/reset中に実際に参加者ページを再読み込みすると、STOP、DEFLATE、errorとなり再開できないこと
@@ -66,7 +68,9 @@
 - 参加者公開payloadに研究用ID、提示順、A〜D、pufferLevelを出さないこと
 - 許可外ログ項目とPII候補を拒否すること
 - 実験アプリから外部originへ自動通信しないこと
-- 封印済みproduction CLIだけが起動でき、manifest、設定バイト列、設定意味hash、protocolVersionを相互照合すること
+- 封印済みproduction CLIだけが起動でき、manifestと一度だけ読み込んだ設定スナップショットのバイトhash、意味hash、protocolVersionを相互照合し、管理対象`package.json.version`へ拘束したmanifestのappVersionと同じ値で表示・監査記録すること
+- `dist-server/index.js`が汎用`startServer`をexportせず、ソースからの直接production起動も拒否すること
+- リリース生成が共有build lockを保持し、検証済みtokenを持つ子ビルドだけを許可して、並行ビルドによる成果物混在を拒否すること
 - productionリリース生成直前にGoogleフォーム公開内容を再取得し、承認済みhashとの不一致を拒否すること
 
 ## 3. UI確認
@@ -93,9 +97,9 @@ Playwrightで次の9状態を1366×768と1920×1080の両方で生成し、計18
 
 配信commit:
 
-`14d6a6069c30c63aa1d1561c7d8b6e9a9d94f2d0`
+`72e4c23dd80b31290862fefe01eb3c25045e7ce1`
 
-ルート、operator、display、device-test、healthzの5経路が外部HTTPSからHTTP 200を返すことを確認した。配信commit、許可ファイル一覧、HTMLマーカー、JS/CSSのSHA-256も一致した。公開HTTPSを実ブラウザで4テスト完走し、外部originへの追加リクエストとWebSocketは0件だった。
+ルート、operator、display、device-test、healthzの5経路が外部HTTPSからHTTP 200を返すことを確認した。配信commit、許可ファイル一覧、HTMLマーカー、JS/CSSのSHA-256も一致した。公開HTTPSを実ブラウザで5テスト完走し、外部originへの追加リクエストとWebSocketは0件だった。
 
 この公開物はページ内メモリだけで動く表示レビュー用であり、研究参加、同意、研究用ID、Googleフォーム、ログ、API、WebSocket、装置アダプタを持たない。本番実験へ転用しない。
 
@@ -111,7 +115,7 @@ Playwrightで次の9状態を1366×768と1920×1080の両方で生成し、計18
 
 - 内部条件A〜Dと固定対応を16件検出
 - 「3種類」という旧説明を15件検出
-- screen版の必須説明5点はすべて0件
+- screen版の必須説明6点はすべて0件
 - 各提示直後に回答させる旧説明を5件検出
 - 無題の回答入力項目を1件検出
 - 11評価質問は存在し、第1〜第4提示、7件法、任意回答で統一

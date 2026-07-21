@@ -55,6 +55,7 @@ function approvedFormPayload(): { readonly html: string; readonly sha256: string
     "この実験では、心拍その他の生体データを取得しません。",
     "状態は画面上のフグのふくらみで表します。",
     "アンケート回答は、Googleフォームの送信時にGoogleへ送信・保存されます。",
+    "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存することはありません。",
     "4つの提示をすべて見終え、サマリーが表示された後、このフォームへ戻ってください。",
     "各提示の直後には回答せず、4つの提示がすべて終了してから回答してください。",
     "第1提示から第4提示までを、11問でそれぞれ評価してください。",
@@ -215,6 +216,7 @@ async function createManifestFixture(): Promise<{
   const root = await newTemporaryRoot("sechack-manifest-");
   await writeRelative(root, "app.txt", "alpha");
   await writeRelative(root, "nested/config.txt", "bravo");
+  await writeRelative(root, "package.json", JSON.stringify({ version: "9.8.7" }));
   const configBytes = JSON.stringify(configSource());
   const parsedConfig = parseExperimentConfig(JSON.parse(configBytes) as unknown);
   await writeRelative(root, "config/experiment.json", configBytes);
@@ -377,6 +379,7 @@ describe("deployment manifest verification", () => {
       "app.txt",
       "config/experiment.json",
       "nested/config.txt",
+      "package.json",
     ]);
     expect(manifest.files[0]).toEqual({
       path: "app.txt",
@@ -399,6 +402,12 @@ describe("deployment manifest verification", () => {
       manifestSha256: expectedManifestSha256,
       sourceCommit: SYNTHETIC_SOURCE_COMMIT,
       sourceRepository: SYNTHETIC_SOURCE_REPOSITORY,
+      manifest: {
+        appVersion: manifest.appVersion,
+        protocolVersion: manifest.protocolVersion,
+        configHash: manifest.configHash,
+        configFileHash: manifest.configFileHash,
+      },
     });
 
     const output: string[] = [];
@@ -428,6 +437,7 @@ describe("deployment manifest verification", () => {
     const verification = await verifyReleaseDirectoryDetailed(root);
     expect(verification.errors).toEqual(["Deployment manifest has an invalid structure."]);
     expect(verification.sourceCommit).toBeNull();
+    expect(verification.manifest).toBeNull();
     expect(verification.manifestSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
@@ -482,6 +492,18 @@ describe("deployment manifest verification", () => {
     );
     await expect(verifyReleaseDirectory(protocolFixture.root)).resolves.toContain(
       `Config protocolVersion mismatch: expected different-protocol-v1, got ${SCREEN_PROTOCOL_VERSION}`,
+    );
+  });
+
+  it("binds manifest appVersion to the controlled package.json", async () => {
+    const { root, manifest } = await createManifestFixture();
+    await writeFile(
+      join(root, RELEASE_MANIFEST_NAME),
+      `${JSON.stringify({ ...manifest, appVersion: "8.8.8" }, null, 2)}\n`,
+      "utf8",
+    );
+    await expect(verifyReleaseDirectory(root)).resolves.toContain(
+      "Package appVersion mismatch: expected 8.8.8, got 9.8.7.",
     );
   });
 

@@ -25,6 +25,7 @@ const SCREEN_PROTOCOL_COPY_PATTERNS = Object.freeze([
   /心拍(?:など|その他)の生体データを取得しません/gu,
   /画面上のフグ/gu,
   /アンケート回答は[^。！？]{0,80}Googleフォーム[^。！？]{0,80}(?:送信|保存)/gu,
+  /この実験用Webアプリから、固定模擬身体データを外部へ送信・保存することはありません。/gu,
 ]);
 
 export interface PublicFormAuditFinding {
@@ -289,8 +290,8 @@ export function inspectPublicFormPayload(
         "screen-protocol-copy",
         screenProtocolCopyComplete ? "pass" : "fail",
         screenProtocolCopyComplete
-          ? "固定模擬データ、本人非測定、生体データ非取得、画面上のフグ、Googleフォーム送信先の説明を確認しました。"
-          : `screen版の必須説明5点の出現数は${screenProtocolCopyMatches.join("/")}です。`,
+          ? "固定模擬データ、本人非測定、生体データ非取得、画面上のフグ、Googleフォーム回答の送信先、実験アプリによる固定模擬データの外部非送信・非保存の説明を確認しました。"
+          : `screen版の必須説明6点の出現数は${screenProtocolCopyMatches.join("/")}です。`,
       ),
       finding(
         "answer-timing",

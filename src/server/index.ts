@@ -5,7 +5,10 @@ import { basename, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { verifyReleaseDirectoryDetailed } from "../../scripts/release-manifest.js";
-import { loadExperimentConfig } from "../shared/config-loader.js";
+import {
+  loadExperimentConfig,
+  type LoadedExperimentConfig,
+} from "../shared/config-loader.js";
 import { createApplication } from "./app.js";
 import {
   MockPufferDevice,
@@ -31,8 +34,14 @@ export interface StartServerOptions {
   readonly rootDirectory?: string;
   readonly configPath?: string;
   readonly mode?: ServerMode;
-  /** Test-only: audit built static assets while retaining the fast Mock adapter. */
+  /** Test-only: audit built static assets inside the isolated nonparticipant runtime. */
   readonly serveBuiltAssets?: boolean;
+}
+
+interface InternalStartServerOptions extends StartServerOptions {
+  readonly productionReleaseCapability?: symbol;
+  readonly verifiedProductionConfig?: LoadedExperimentConfig;
+  readonly verifiedAppVersion?: string;
 }
 
 export type ServerMode = "development" | "production" | "rehearsal" | "test";
@@ -53,15 +62,36 @@ export interface ProductionReleaseCliOptions {
   };
   /** Test seam; the real CLI always verifies the packaged deployment manifest. */
   readonly verifyRelease?: typeof verifyReleaseDirectoryDetailed;
-  /** Test seam; the real CLI always starts through startServer. */
-  readonly start?: (options: StartServerOptions) => Promise<RunningExperimentServer>;
+  /** Test seam; the real CLI always loads the fixed packaged config once. */
+  readonly loadConfig?: typeof loadExperimentConfig;
+  /** Test seam; the real CLI starts only from the verified config snapshot. */
+  readonly start?: (options: VerifiedProductionStartOptions) => Promise<RunningExperimentServer>;
+}
+
+export interface VerifiedProductionStartOptions {
+  readonly rootDirectory: string;
+  readonly loadedConfig: LoadedExperimentConfig;
+  readonly appVersion: string;
 }
 
 const REHEARSAL_LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const REHEARSAL_RESEARCH_ID_PATTERN = "^DEMO-[0-9]{3}$";
+const DEVELOPMENT_RESEARCH_ID_PATTERN = "^DEV-[0-9]{3}$";
+const DEVELOPMENT_LOG_DIRECTORY = "./data/dev-sessions";
+const TEST_RESEARCH_ID_PATTERNS = new Set([
+  REHEARSAL_RESEARCH_ID_PATTERN,
+  "^TEST-[0-9]{3}$",
+]);
+const TEST_FORM_URL = "https://docs.google.com/forms/d/e/TEST_FORM_ID/viewform";
+const TEST_LOG_DIRECTORIES = new Set([
+  "./data/test",
+  "./data/e2e-sessions",
+  "./data/mock-sessions",
+]);
 const PRODUCTION_CONFIG_PATH = "config/experiment.json";
 const PRODUCTION_SERVER_DIRECTORY = "dist-server";
 const PRODUCTION_SERVER_ENTRY = "index.js";
+const VERIFIED_PRODUCTION_RELEASE = Symbol("verified-production-release");
 
 function isInside(parent: string, candidate: string): boolean {
   const pathFromParent = relative(parent, candidate);
@@ -95,13 +125,14 @@ function createDevice(
 
 export function inferServerMode(
   modulePath = fileURLToPath(import.meta.url),
-  nodeEnvironment = process.env.NODE_ENV,
 ): Extract<ServerMode, "development" | "production"> {
   // A compiled CLI entry is always production, even if a inherited shell
   // variable says NODE_ENV=test. Tests select test mode explicitly through
   // startServer({ mode: "test" }).
   if (modulePath.includes(`${sep}dist-server${sep}`)) return "production";
-  if (nodeEnvironment === "production") return "production";
+  // Source entrypoints are development-only even when a parent shell sets
+  // NODE_ENV=production. Formal production is selected only by the verified,
+  // packaged dist-server/index.js entry below.
   return "development";
 }
 
@@ -113,6 +144,24 @@ function assertDevelopmentConfig(
       "Development mode requires the Mock device adapter. "
         + "Formal screen sessions must start through the production audit gate.",
     );
+  }
+  if (config.network.allowLan || !REHEARSAL_LOOPBACK_HOSTS.has(config.bindHost)) {
+    throw new Error("Development mode must bind to a loopback host and prohibits LAN access.");
+  }
+  if (config.network.allowExternalRuntimeRequests) {
+    throw new Error("Development mode prohibits external runtime requests.");
+  }
+  if (config.formUrl !== "") {
+    throw new Error("Development mode prohibits a Google Form destination.");
+  }
+  if (config.formAudit?.status === "GO") {
+    throw new Error("Development mode prohibits GO form-audit evidence.");
+  }
+  if (config.researchIdPattern !== DEVELOPMENT_RESEARCH_ID_PATTERN) {
+    throw new Error("Development mode requires the DEV-001 research ID format.");
+  }
+  if (config.logging.directory !== DEVELOPMENT_LOG_DIRECTORY) {
+    throw new Error("Development mode requires the isolated data/dev-sessions log directory.");
   }
 }
 
@@ -142,35 +191,95 @@ function assertRehearsalConfig(
   }
 }
 
-export async function startServer(
-  options: StartServerOptions = {},
+function assertTestConfig(
+  config: Awaited<ReturnType<typeof loadExperimentConfig>>["config"],
+): void {
+  if (config.network.allowLan || !REHEARSAL_LOOPBACK_HOSTS.has(config.bindHost)) {
+    throw new Error("Test mode must bind to a loopback host and prohibits LAN access.");
+  }
+  if (config.network.allowExternalRuntimeRequests) {
+    throw new Error("Test mode prohibits external runtime requests.");
+  }
+  if (config.device.mode === "serial") {
+    throw new Error("Test mode prohibits the Serial device adapter.");
+  }
+  if (config.formUrl !== "" && config.formUrl !== TEST_FORM_URL) {
+    throw new Error("Test mode prohibits a real Google Form destination.");
+  }
+  if (config.formAudit?.status === "GO") {
+    throw new Error("Test mode prohibits GO form-audit evidence.");
+  }
+  if (!TEST_RESEARCH_ID_PATTERNS.has(config.researchIdPattern)) {
+    throw new Error("Test mode requires the TEST-001 or DEMO-001 research ID format.");
+  }
+  if (!TEST_LOG_DIRECTORIES.has(config.logging.directory)) {
+    throw new Error("Test mode requires an isolated test log directory.");
+  }
+}
+
+async function startServerInternal(
+  options: InternalStartServerOptions = {},
 ): Promise<RunningExperimentServer> {
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
   const mode = options.mode ?? inferServerMode();
+  if (
+    mode === "production"
+    && (
+      options.productionReleaseCapability !== VERIFIED_PRODUCTION_RELEASE
+      || options.verifiedProductionConfig === undefined
+      || options.verifiedAppVersion === undefined
+    )
+  ) {
+    throw new Error(
+      "Production mode can start only from a verified sealed release CLI.",
+    );
+  }
   if (options.serveBuiltAssets === true && mode !== "test") {
     throw new Error("serveBuiltAssets is available only in explicit test mode.");
   }
-  const loaded = await loadExperimentConfig(
-    options.configPath ?? process.env.EXPERIMENT_CONFIG_PATH ?? "config/experiment.json",
-    {
-      rootDirectory,
-      production: mode === "production",
-    },
-  );
+  if (
+    mode !== "production"
+    && (options.verifiedProductionConfig !== undefined || options.verifiedAppVersion !== undefined)
+  ) {
+    throw new Error("Verified production release values cannot be used outside production mode.");
+  }
+  const loaded = options.verifiedProductionConfig ?? await loadExperimentConfig(
+      options.configPath ?? process.env.EXPERIMENT_CONFIG_PATH ?? "config/experiment.json",
+      { rootDirectory },
+    );
   const { config } = loaded;
   if (mode === "development") assertDevelopmentConfig(config);
   if (mode === "rehearsal") assertRehearsalConfig(config);
-  const appVersion = process.env.npm_package_version ?? "1.0.0";
+  if (mode === "test") assertTestConfig(config);
+  const appVersion = mode === "production"
+    ? options.verifiedAppVersion as string
+    : process.env.npm_package_version ?? "1.0.0";
   const dataDirectory = resolve(rootDirectory, "data");
   const configuredLogDirectory = resolve(
     rootDirectory,
-    process.env.DATA_DIRECTORY ?? config.logging.directory,
+    mode === "production"
+      ? config.logging.directory
+      : process.env.DATA_DIRECTORY ?? config.logging.directory,
   );
   if (
     mode === "rehearsal" &&
     configuredLogDirectory !== resolve(rootDirectory, "data", "mock-sessions")
   ) {
     throw new Error("Rehearsal mode prohibits overriding its isolated mock log directory.");
+  }
+  if (
+    mode === "development"
+    && !isInside(resolve(rootDirectory, DEVELOPMENT_LOG_DIRECTORY), configuredLogDirectory)
+  ) {
+    throw new Error("Development mode prohibits overriding its isolated development log directory.");
+  }
+  if (
+    mode === "test"
+    && ![...TEST_LOG_DIRECTORIES].some(
+      (directory) => isInside(resolve(rootDirectory, directory), configuredLogDirectory),
+    )
+  ) {
+    throw new Error("Test mode prohibits overriding its isolated test log directory.");
   }
   if (!isInside(dataDirectory, configuredLogDirectory)) {
     throw new Error(
@@ -221,7 +330,7 @@ export async function startServer(
       config,
       configHash: loaded.configHash,
       appVersion,
-      rehearsal: mode === "rehearsal",
+      rehearsal: mode !== "production",
       device,
       logger,
     });
@@ -386,6 +495,12 @@ export async function startServer(
   }
 }
 
+export async function startServer(
+  options: StartServerOptions = {},
+): Promise<RunningExperimentServer> {
+  return startServerInternal(options);
+}
+
 /**
  * Starts the compiled production CLI only from a complete, verified release.
  *
@@ -426,12 +541,51 @@ export async function startProductionReleaseCli(
       `Production release verification failed: ${verification.errors.join("; ")}`,
     );
   }
+  if (verification.manifest === null) {
+    throw new Error("Production release verification returned no manifest binding.");
+  }
 
-  const start = options.start ?? startServer;
+  const loadConfig = options.loadConfig ?? loadExperimentConfig;
+  const loadedConfig = await loadConfig(PRODUCTION_CONFIG_PATH, {
+    rootDirectory: releaseDirectory,
+    production: true,
+  });
+  const bindingMismatches = [
+    loadedConfig.configFileHash === verification.manifest.configFileHash
+      ? null
+      : "configFileHash",
+    loadedConfig.configHash === verification.manifest.configHash ? null : "configHash",
+    loadedConfig.config.protocolVersion === verification.manifest.protocolVersion
+      ? null
+      : "protocolVersion",
+  ].filter((name): name is string => name !== null);
+  if (bindingMismatches.length > 0) {
+    throw new Error(
+      `Production config does not match the verified release manifest: ${bindingMismatches.join(", ")}.`,
+    );
+  }
+  if (
+    options.start === undefined
+    && (options.verifyRelease !== undefined || options.loadConfig !== undefined)
+  ) {
+    throw new Error(
+      "Production verification and config-loader overrides are test-only and require a custom start seam.",
+    );
+  }
+
+  const start = options.start ?? ((input: VerifiedProductionStartOptions) =>
+    startServerInternal({
+      rootDirectory: input.rootDirectory,
+      configPath: PRODUCTION_CONFIG_PATH,
+      mode: "production",
+      productionReleaseCapability: VERIFIED_PRODUCTION_RELEASE,
+      verifiedProductionConfig: input.loadedConfig,
+      verifiedAppVersion: input.appVersion,
+    }));
   return start({
     rootDirectory: releaseDirectory,
-    configPath: PRODUCTION_CONFIG_PATH,
-    mode: "production",
+    loadedConfig,
+    appVersion: verification.manifest.appVersion,
   });
 }
 
