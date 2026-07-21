@@ -255,6 +255,9 @@ describe("release argument validation", () => {
 describe("deployment manifest verification", () => {
   it("creates a sorted manifest and verifies an unchanged release", async () => {
     const { root, manifest } = await createManifestFixture();
+    expect(manifest.schemaVersion).toBe(2);
+    expect(manifest.sourceCommit).toBe(SYNTHETIC_SOURCE_COMMIT);
+    expect(manifest.sourceRepository).toBe(SYNTHETIC_SOURCE_REPOSITORY);
     expect(manifest.files.map((file) => file.path)).toEqual(["app.txt", "nested/config.txt"]);
     expect(manifest.files[0]).toEqual({
       path: "app.txt",
@@ -268,6 +271,16 @@ describe("deployment manifest verification", () => {
     });
     expect(Number.isNaN(Date.parse(manifest.createdAt))).toBe(false);
     await expect(verifyReleaseDirectory(root)).resolves.toEqual([]);
+    const manifestSource = await readFile(join(root, RELEASE_MANIFEST_NAME));
+    const expectedManifestSha256 = createHash("sha256").update(manifestSource).digest("hex");
+    await expect(sha256ReleaseManifest(root)).resolves.toBe(expectedManifestSha256);
+    await expect(sha256ReleaseManifest(root)).resolves.toBe(expectedManifestSha256);
+    await expect(verifyReleaseDirectoryDetailed(root)).resolves.toEqual({
+      errors: [],
+      manifestSha256: expectedManifestSha256,
+      sourceCommit: SYNTHETIC_SOURCE_COMMIT,
+      sourceRepository: SYNTHETIC_SOURCE_REPOSITORY,
+    });
 
     const output: string[] = [];
     await expect(
@@ -276,8 +289,31 @@ describe("deployment manifest verification", () => {
         writeLine: (line) => output.push(line),
       }),
     ).resolves.toBe(0);
-    expect(output).toEqual([expect.stringContaining("結果: PASS")]);
+    expect(output).toContain(`Deployment manifest SHA-256: ${expectedManifestSha256}`);
+    expect(output).toContain(`Source commit: ${SYNTHETIC_SOURCE_COMMIT}`);
+    expect(output).toContain(`Source repository: ${SYNTHETIC_SOURCE_REPOSITORY}`);
+    expect(output).toContainEqual(expect.stringContaining("結果: PASS"));
   });
+
+  it.each(["missing", "invalid"] as const)(
+    "rejects a %s source commit",
+    async (variant) => {
+      const { root } = await createManifestFixture();
+      const manifestPath = join(root, RELEASE_MANIFEST_NAME);
+      const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+      if (variant === "missing") {
+        delete parsed.sourceCommit;
+      } else {
+        parsed.sourceCommit = "not-a-full-git-commit";
+      }
+      await writeFile(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+
+      const verification = await verifyReleaseDirectoryDetailed(root);
+      expect(verification.errors).toEqual(["Deployment manifest has an invalid structure."]);
+      expect(verification.sourceCommit).toBeNull();
+      expect(verification.manifestSha256).toMatch(/^[a-f0-9]{64}$/u);
+    },
+  );
 
   it("detects controlled file modification even when its byte length is unchanged", async () => {
     const { root } = await createManifestFixture();

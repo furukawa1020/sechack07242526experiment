@@ -66,13 +66,17 @@ function DemoFooter(): React.JSX.Element {
 
 function IntroScene(): React.JSX.Element {
   return (
-    <main className="public-demo-intro" data-scene="intro">
-      <section className="public-demo-intro-content">
-        <h1>{PUBLIC_DEMO_COPY.intro.title}</h1>
+    <section
+      aria-labelledby="public-demo-intro-title"
+      className="public-demo-intro"
+      data-scene="intro"
+    >
+      <div className="public-demo-intro-content">
+        <h1 id="public-demo-intro-title">{PUBLIC_DEMO_COPY.intro.title}</h1>
         <p>{PUBLIC_DEMO_COPY.intro.body}</p>
         <aside>{PUBLIC_DEMO_COPY.intro.scenario}</aside>
-      </section>
-    </main>
+      </div>
+    </section>
   );
 }
 
@@ -172,17 +176,23 @@ function PresentationScene({
   readonly position: number;
 }): React.JSX.Element {
   return (
-    <article className="public-demo-presentation" data-scene="result">
+    <section
+      aria-labelledby={`public-demo-presentation-title-${position}`}
+      className="public-demo-presentation"
+      data-scene="result"
+    >
       <header className="public-demo-presentation-header">
-        <strong>{PUBLIC_DEMO_COPY.presentation.position(position)}</strong>
+        <h1 id={`public-demo-presentation-title-${position}`}>
+          {PUBLIC_DEMO_COPY.presentation.position(position)}
+        </h1>
         <span>{PUBLIC_DEMO_COPY.presentation.sameData}</span>
       </header>
-      <main className="public-demo-comparison">
+      <div className="public-demo-comparison">
         <HandlingPanel processing={condition.processing} />
         <ResultPanel condition={condition} />
-      </main>
+      </div>
       <DemoFooter />
-    </article>
+    </section>
   );
 }
 
@@ -192,11 +202,16 @@ function conditionLabel(condition: PublicDemoCondition): string {
 
 function SummaryScene(): React.JSX.Element {
   return (
-    <main className="public-demo-summary" data-scene="summary" data-testid="public-demo-summary">
-      <section className="public-demo-summary-heading">
-        <h1>{PUBLIC_DEMO_COPY.summary.title}</h1>
+    <section
+      aria-labelledby="public-demo-summary-title"
+      className="public-demo-summary"
+      data-scene="summary"
+      data-testid="public-demo-summary"
+    >
+      <div className="public-demo-summary-heading">
+        <h1 id="public-demo-summary-title">{PUBLIC_DEMO_COPY.summary.title}</h1>
         <p>{PUBLIC_DEMO_COPY.summary.body}</p>
-      </section>
+      </div>
       <ol>
         {PUBLIC_DEMO_CONDITIONS.map((condition, index) => (
           <li key={`${condition.processing}-${condition.presentation}-${index}`}>
@@ -207,7 +222,7 @@ function SummaryScene(): React.JSX.Element {
       </ol>
       <p className="public-demo-summary-note">{PUBLIC_DEMO_COPY.summary.note}</p>
       <DemoFooter />
-    </main>
+    </section>
   );
 }
 
@@ -226,13 +241,13 @@ export function PublicDemoApp(): React.JSX.Element {
   return (
     <div className="public-demo-app" data-testid="public-demo-app">
       <DemoNotice />
-      <section
+      <main
         className="public-demo-stage"
         aria-label="固定模擬データの表示確認"
         aria-live="polite"
       >
         <Scene step={step} />
-      </section>
+      </main>
       <nav className="public-demo-controls" aria-label="公開デモの画面操作">
         <button
           type="button"
