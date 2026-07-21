@@ -6,12 +6,15 @@ export type RealtimeStatus = "connecting" | "open" | "closed";
 interface RealtimeOptions {
   readonly query: string;
   readonly enabled?: boolean;
-  readonly onMessage: (type: string, payload: unknown) => void;
+  /** Returning false rejects a message at the client boundary. */
+  readonly onMessage: (type: string, payload: unknown) => boolean | void;
   readonly announceDisplay?: boolean;
 }
 
 interface RealtimeChannel {
   readonly status: RealtimeStatus;
+  /** True only after this socket lease has received its post-ready snapshot. */
+  readonly synchronized: boolean;
   readonly send: (type: string, payload?: Readonly<Record<string, unknown>>) => boolean;
 }
 
@@ -22,7 +25,9 @@ function socketUrl(query: string): string {
 
 export function useRealtime({ query, enabled = true, onMessage, announceDisplay = false }: RealtimeOptions): RealtimeChannel {
   const [status, setStatus] = useState<RealtimeStatus>(enabled ? "connecting" : "closed");
+  const [synchronized, setSynchronized] = useState(!announceDisplay);
   const socketRef = useRef<WebSocket | null>(null);
+  const synchronizedRef = useRef(!announceDisplay);
   const handlerRef = useRef(onMessage);
 
   useEffect(() => {
@@ -38,6 +43,7 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
 
   useEffect(() => {
     if (!enabled) {
+      synchronizedRef.current = !announceDisplay;
       return undefined;
     }
 
@@ -48,7 +54,10 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
 
     const connect = (): void => {
       if (disposed) return;
+      let displaySynchronized = false;
       setStatus("connecting");
+      synchronizedRef.current = !announceDisplay;
+      setSynchronized(!announceDisplay);
       const socket = new WebSocket(socketUrl(query));
       socketRef.current = socket;
 
@@ -57,15 +66,6 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
         setStatus("open");
         if (announceDisplay) {
           socket.send(JSON.stringify({ type: "display.ready" }));
-          socket.send(JSON.stringify({
-            type: "display.fullscreenState",
-            payload: { fullscreen: document.fullscreenElement !== null },
-          }));
-          heartbeatTimer = window.setInterval(() => {
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({ type: "display.heartbeat" }));
-            }
-          }, 1_000);
         }
       });
 
@@ -73,7 +73,28 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
         if (typeof event.data !== "string") return;
         try {
           const message = payloadFromSocketMessage(JSON.parse(event.data) as unknown);
-          if (message !== null) handlerRef.current(message.type, message.payload);
+          if (message !== null) {
+            const accepted = handlerRef.current(message.type, message.payload);
+            if (
+              announceDisplay
+              && message.type === "session.snapshot"
+              && accepted !== false
+              && !displaySynchronized
+            ) {
+              displaySynchronized = true;
+              synchronizedRef.current = true;
+              setSynchronized(true);
+              socket.send(JSON.stringify({
+                type: "display.fullscreenState",
+                payload: { fullscreen: document.fullscreenElement !== null },
+              }));
+              heartbeatTimer = window.setInterval(() => {
+                if (socket.readyState === WebSocket.OPEN && displaySynchronized) {
+                  socket.send(JSON.stringify({ type: "display.heartbeat" }));
+                }
+              }, 1_000);
+            }
+          }
         } catch {
           // Invalid messages are ignored; a valid server snapshot remains authoritative.
         }
@@ -83,6 +104,9 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
         if (heartbeatTimer !== undefined) window.clearInterval(heartbeatTimer);
         socketRef.current = null;
         if (disposed) return;
+        displaySynchronized = false;
+        synchronizedRef.current = !announceDisplay;
+        setSynchronized(!announceDisplay);
         setStatus("closed");
         const retryDelay = Math.min(1_000 * (2 ** retryCount), 8_000);
         retryCount += 1;
@@ -94,7 +118,11 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
 
     const onFullscreenChange = (): void => {
       const socket = socketRef.current;
-      if (!announceDisplay || socket?.readyState !== WebSocket.OPEN) return;
+      if (
+        !announceDisplay
+        || !synchronizedRef.current
+        || socket?.readyState !== WebSocket.OPEN
+      ) return;
       socket.send(JSON.stringify({
         type: "display.fullscreenState",
         payload: { fullscreen: document.fullscreenElement !== null },
@@ -113,7 +141,11 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
     };
   }, [announceDisplay, enabled, query]);
 
-  return { status, send };
+  return {
+    status: enabled ? status : "closed",
+    synchronized: enabled ? synchronized : !announceDisplay,
+    send,
+  };
 }
 
 export function useRemainingSeconds(phaseEndsAt: string | null, serverNow: string | null): number | null {

@@ -11,23 +11,33 @@ import {
   runHealthcheck,
 } from "../../../scripts/healthcheck.js";
 import { hashExperimentConfig } from "../../../src/shared/config-loader.js";
-import { parseExperimentConfig } from "../../../src/shared/schemas.js";
+import { STUDY_FORM_URL } from "../../../src/shared/form-audit.js";
+import {
+  parseExperimentConfig,
+  SCREEN_PROTOCOL_VERSION,
+} from "../../../src/shared/schemas.js";
 
 interface ConfigOverrides {
   readonly bindHost?: string;
   readonly allowLan?: boolean;
-  readonly deviceMode?: "mock" | "serial";
+  readonly deviceMode?: "mock" | "serial" | "screen";
   readonly protocolVersion?: string;
 }
 
+const TODAY_IN_JAPAN = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+
 function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
+  const deviceMode = overrides.deviceMode ?? "screen";
+  const protocolVersion = overrides.protocolVersion
+    ?? (deviceMode === "screen" ? SCREEN_PROTOCOL_VERSION : "health-test-v1");
+  const formUrl = deviceMode === "mock" ? "" : STUDY_FORM_URL;
   return {
     schemaVersion: 1,
-    protocolVersion: overrides.protocolVersion ?? "health-test-v1",
+    protocolVersion,
     studyTitle: "ヘルスチェック合成設定",
     bindHost: overrides.bindHost ?? "127.0.0.1",
     port: 4173,
-    researchIdPattern: "^TEST-[0-9]{3}$",
+    researchIdPattern: deviceMode === "screen" ? "^SH26-[0-9]{3}$" : "^TEST-[0-9]{3}$",
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
     timingMs: {
@@ -39,13 +49,21 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
       deflateRamp: 6_000,
     },
     device: {
-      mode: overrides.deviceMode ?? "serial",
-      serialPath: overrides.deviceMode === "mock" ? "" : "COM3",
+      mode: deviceMode,
+      serialPath: deviceMode === "serial" ? "COM3" : "",
       baudRate: 115_200,
       ackTimeout: 1_000,
       allowMockInProduction: false,
     },
-    formUrl: "https://docs.google.com/forms/d/example/viewform",
+    formUrl,
+    formAudit: {
+      status: deviceMode === "mock" ? "NO-GO" : "GO",
+      protocolVersion,
+      formUrl,
+      auditedOn: TODAY_IN_JAPAN,
+      contentSha256: "a".repeat(64),
+      twoPersonVerified: deviceMode !== "mock",
+    },
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -63,9 +81,9 @@ function validHealthPayload(
   return {
     status: "ok",
     appVersion: "9.8.7",
-    protocolVersion: "health-test-v1",
+    protocolVersion: SCREEN_PROTOCOL_VERSION,
     configHash: hashExperimentConfig(parseExperimentConfig(configSource())),
-    deviceMode: "serial",
+    deviceMode: "screen",
     ...overrides,
   };
 }
@@ -104,15 +122,18 @@ describe("healthcheck argument validation", () => {
   it("uses safe defaults and accepts both option forms", () => {
     expect(parseHealthcheckArguments([])).toEqual({
       help: false,
+      mockRehearsal: false,
       timeoutMs: 5_000,
     });
     expect(parseHealthcheckArguments(["--config", "config/site.json", "--timeout=1250"])).toEqual({
       help: false,
+      mockRehearsal: false,
       timeoutMs: 1_250,
       configPath: "config/site.json",
     });
     expect(parseHealthcheckArguments(["--config=config/site.json", "--timeout", "60000"])).toEqual({
       help: false,
+      mockRehearsal: false,
       timeoutMs: 60_000,
       configPath: "config/site.json",
     });
@@ -129,6 +150,11 @@ describe("healthcheck argument validation", () => {
     expect(() => parseHealthcheckArguments(["--timeout=100.5"])).toThrow("integer");
     expect(() => parseHealthcheckArguments(["--timeout=not-a-number"])).toThrow("integer");
     expect(() => parseHealthcheckArguments(["--unknown"])).toThrow("Unknown option");
+    expect(() => parseHealthcheckArguments(["--mock-rehearsal", "--mock-rehearsal"]))
+      .toThrow("only be specified once");
+    expect(parseHealthcheckArguments(["--mock-rehearsal"])).toMatchObject({
+      mockRehearsal: true,
+    });
   });
 });
 
@@ -165,15 +191,85 @@ describe("health payload validation", () => {
     ).resolves.toEqual({
       url: "http://127.0.0.1:4173/healthz",
       appVersion: "9.8.7",
-      protocolVersion: "health-test-v1",
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
       configHash: hashExperimentConfig(parseExperimentConfig(configSource())),
-      deviceMode: "serial",
+      deviceMode: "screen",
     });
     expect(requestedUrl).toBe("http://127.0.0.1:4173/healthz");
     expect(requestedInit?.cache).toBe("no-store");
     expect(requestedInit?.redirect).toBe("error");
     expect(requestedInit?.signal).toBeInstanceOf(AbortSignal);
   });
+
+  it("accepts a matching screen device health payload", async () => {
+    const source = configSource({ deviceMode: "screen" });
+    const root = await createConfigRoot({ deviceMode: "screen" });
+    await expect(checkHealth({
+      configPath: "config/experiment.json",
+      rootDirectory: root,
+      timeoutMs: 500,
+      fetchImplementation: healthResponse({
+        status: "ok",
+        appVersion: "9.8.7",
+        protocolVersion: SCREEN_PROTOCOL_VERSION,
+        configHash: hashExperimentConfig(parseExperimentConfig(source)),
+        deviceMode: "screen",
+      }),
+    })).resolves.toMatchObject({
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      deviceMode: "screen",
+    });
+  });
+
+  it("rejects Serial and Mock configs unless Mock rehearsal is explicitly selected", async () => {
+    const serialRoot = await createConfigRoot({ deviceMode: "serial" });
+    let serialFetchCalled = false;
+    await expect(checkHealth({
+      configPath: "config/experiment.json",
+      rootDirectory: serialRoot,
+      timeoutMs: 500,
+      fetchImplementation: (async () => {
+        serialFetchCalled = true;
+        return new Response();
+      }) as typeof fetch,
+    })).rejects.toThrow(/serial-device-not-allowed|production-protocol-version-not-screen/iu);
+    expect(serialFetchCalled).toBe(false);
+
+    const mockRoot = await createConfigRoot({ deviceMode: "mock" });
+    await expect(checkHealth({
+      configPath: "config/experiment.json",
+      rootDirectory: mockRoot,
+      timeoutMs: 500,
+      fetchImplementation: healthResponse({}),
+    })).rejects.toThrow(/Mock device mode/iu);
+
+    const mockSource = configSource({ deviceMode: "mock" });
+    await expect(checkHealth({
+      configPath: "config/experiment.json",
+      rootDirectory: mockRoot,
+      timeoutMs: 500,
+      mockRehearsal: true,
+      fetchImplementation: healthResponse({
+        status: "ok",
+        appVersion: "9.8.7",
+        protocolVersion: "health-test-v1",
+        configHash: hashExperimentConfig(parseExperimentConfig(mockSource)),
+        deviceMode: "mock",
+      }),
+    })).resolves.toMatchObject({ deviceMode: "mock" });
+  });
+
+  it("does not let --mock-rehearsal weaken a formal screen healthcheck", async () => {
+    const root = await createConfigRoot();
+    await expect(checkHealth({
+      configPath: "config/experiment.json",
+      rootDirectory: root,
+      timeoutMs: 500,
+      mockRehearsal: true,
+      fetchImplementation: healthResponse({}),
+    })).rejects.toThrow(/device\.mode/iu);
+  });
+
 
   it.each([
     [null, "invalid response"],

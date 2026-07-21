@@ -4,8 +4,28 @@ import { pathToFileURL } from "node:url";
 import { isApprovedGoogleFormsUrl } from "./preflight.js";
 
 const DEFAULT_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
+const EXPECTED_FORM_ID = "1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q";
+const EXPECTED_STUDY_TITLE = "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+const EVALUATION_QUESTION_COUNT = 11;
+const EVALUATION_ROW_LABELS = Object.freeze(["第1提示", "第2提示", "第3提示", "第4提示"]);
+const EVALUATION_SCALE_LABELS = Object.freeze([
+  "1全くそう思わない",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7非常にそう思う",
+]);
+const SCREEN_PROTOCOL_COPY_PATTERNS = Object.freeze([
+  /同じ固定模擬データを、?4つの方法で提示/gu,
+  /表示される値は、?あなた自身を測定したものではありません/gu,
+  /心拍(?:など|その他)の生体データを取得しません/gu,
+  /画面上のフグ/gu,
+  /アンケート回答は[^。！？]{0,80}Googleフォーム[^。！？]{0,80}(?:送信|保存)/gu,
+]);
 
 export interface PublicFormAuditFinding {
   readonly id: string;
@@ -94,6 +114,86 @@ function occurrences(source: string, pattern: RegExp): number {
   return [...source.matchAll(pattern)].length;
 }
 
+function arrayValue(value: unknown): readonly unknown[] | null {
+  return Array.isArray(value) ? value : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function parsePublicFormItems(publicPayload: string | null): readonly (readonly unknown[])[] | null {
+  if (publicPayload === null) return null;
+  try {
+    const root = arrayValue(JSON.parse(publicPayload) as unknown);
+    const form = arrayValue(root?.[1]);
+    const rawItems = arrayValue(form?.[1]);
+    if (rawItems === null || !rawItems.every((item) => Array.isArray(item))) return null;
+    return rawItems as readonly (readonly unknown[])[];
+  } catch {
+    return null;
+  }
+}
+
+function expectedCanonicalFormUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:"
+      && url.hostname === "docs.google.com"
+      && url.pathname === `/forms/d/e/${EXPECTED_FORM_ID}/viewform`;
+  } catch {
+    return false;
+  }
+}
+
+function entryLabel(entry: readonly unknown[]): string | null {
+  return stringValue(arrayValue(entry[3])?.[0]);
+}
+
+function entryScale(entry: readonly unknown[]): readonly (string | null)[] | null {
+  const rawChoices = arrayValue(entry[1]);
+  if (rawChoices === null) return null;
+  return rawChoices.map((choice) => stringValue(arrayValue(choice)?.[0]));
+}
+
+function evaluationQuestionStructureIsValid(item: readonly unknown[]): boolean {
+  if (item[3] !== 7 || stringValue(item[1]) === null) return false;
+  const entries = arrayValue(item[4]);
+  if (entries === null || entries.length !== EVALUATION_ROW_LABELS.length) return false;
+  return entries.every((rawEntry, index) => {
+    const entry = arrayValue(rawEntry);
+    if (entry === null || entry[2] !== 0) return false;
+    const scale = entryScale(entry);
+    return entryLabel(entry) === EVALUATION_ROW_LABELS[index]
+      && scale !== null
+      && scale.length === EVALUATION_SCALE_LABELS.length
+      && scale.every((label, scaleIndex) => label === EVALUATION_SCALE_LABELS[scaleIndex]);
+  });
+}
+
+function immediateAnswerInstructions(source: string): number {
+  return [...source.matchAll(/各提示の直後[^。！？]{0,80}/gu)].filter((match) => {
+    const context = match[0];
+    return !(
+      /各提示の直後ではなく/gu.test(context)
+      || /各提示の直後(?:に|には|では)?回答(?:せず|しない|しません|する必要はありません)/gu
+        .test(context)
+    );
+  }).length;
+}
+
+function afterAllFourInstructions(source: string): number {
+  const patterns = [
+    /4種類すべての提示を体験した後/gu,
+    /4つの提示をすべて体験した後/gu,
+    /4つの提示をすべて見終え[^。！？]{0,60}後/gu,
+    /4つの提示がすべて終了してから[^。！？]{0,60}(?:回答|フォームへ戻)/gu,
+    /回答は[^。！？]{0,60}4つの提示がすべて終了してから/gu,
+    /4提示(?:を)?すべて(?:体験|見終え|確認)[^。！？]{0,60}(?:後|してから)/gu,
+  ] as const;
+  return patterns.reduce((total, pattern) => total + occurrences(source, pattern), 0);
+}
+
 function finding(
   id: string,
   status: PublicFormAuditFinding["status"],
@@ -109,6 +209,7 @@ export function inspectPublicFormPayload(
 ): PublicFormAuditReport {
   const decoded = decodePublicFormPayload(source);
   const publicPayload = /FB_PUBLIC_LOAD_DATA_\s*=\s*(.*?);\s*<\/script>/su.exec(source)?.[1] ?? null;
+  const formItems = parsePublicFormItems(publicPayload);
   const contentSha256 = publicPayload === null
     ? ""
     : createHash("sha256").update(publicPayload, "utf8").digest("hex");
@@ -120,13 +221,21 @@ export function inspectPublicFormPayload(
     /D[：:=＝]\s*クラウド/gu,
   ].reduce((total, pattern) => total + occurrences(decoded, pattern), 0);
   const legacyThree = occurrences(decoded, /3種類/gu);
-  const currentFour = occurrences(decoded, /4種類/gu);
-  const immediateAnswer = occurrences(decoded, /各提示の直後/gu);
-  const afterAllFour = occurrences(
-    decoded,
-    /4種類すべての提示を体験した後|4つの提示をすべて体験した後/gu,
+  const currentFour = occurrences(decoded, /4種類|4つの提示|4提示/gu);
+  const immediateAnswer = immediateAnswerInstructions(decoded);
+  const afterAllFour = afterAllFourInstructions(decoded);
+  const screenProtocolCopyMatches = SCREEN_PROTOCOL_COPY_PATTERNS.map(
+    (pattern) => occurrences(decoded, pattern),
   );
-  const elevenQuestions = occurrences(decoded, /全11問|11項目の質問|11問/gu);
+  const screenProtocolCopyComplete = screenProtocolCopyMatches.every((count) => count > 0);
+  const evaluationQuestions = formItems?.filter((item) => item[3] === 7) ?? [];
+  const evaluationStructureValid = evaluationQuestions.length === EVALUATION_QUESTION_COUNT
+    && evaluationQuestions.every(evaluationQuestionStructureIsValid);
+  const untitledInputs = formItems?.filter((item) => {
+    const type = item[3];
+    return typeof type === "number" && ![6, 8].includes(type) && stringValue(item[1]) === null;
+  }).length ?? 0;
+  const fileUploads = formItems?.filter((item) => item[3] === 13).length ?? 0;
 
   return Object.freeze({
     requestedUrl,
@@ -136,10 +245,24 @@ export function inspectPublicFormPayload(
     findings: Object.freeze([
       finding(
         "canonical-public-payload",
-        publicPayload === null ? "fail" : "pass",
-        publicPayload === null
-          ? "安定した公開内容payloadを抽出できませんでした。"
+        formItems === null ? "fail" : "pass",
+        formItems === null
+          ? "安定した公開内容payloadを抽出・解析できませんでした。"
           : `公開内容payloadのSHA-256は${contentSha256}です。`,
+      ),
+      finding(
+        "canonical-form",
+        expectedCanonicalFormUrl(finalUrl) ? "pass" : "fail",
+        expectedCanonicalFormUrl(finalUrl)
+          ? "指定された研究フォームIDへ到達しました。"
+          : "指定された研究フォームIDへ到達していません。",
+      ),
+      finding(
+        "study-title",
+        title.startsWith(EXPECTED_STUDY_TITLE) ? "pass" : "fail",
+        title.startsWith(EXPECTED_STUDY_TITLE)
+          ? "研究タイトルを確認しました。"
+          : "研究タイトルが想定値と一致しません。",
       ),
       finding(
         "internal-condition-mapping",
@@ -159,22 +282,50 @@ export function inspectPublicFormPayload(
         "four-presentations",
         currentFour > 0 ? "pass" : "fail",
         currentFour > 0
-          ? `4種類という現行説明を${String(currentFour)}件確認しました。`
-          : "4種類という現行説明を確認できませんでした。",
+          ? `4提示という現行説明を${String(currentFour)}件確認しました。`
+          : "4提示という現行説明を確認できませんでした。",
+      ),
+      finding(
+        "screen-protocol-copy",
+        screenProtocolCopyComplete ? "pass" : "fail",
+        screenProtocolCopyComplete
+          ? "固定模擬データ、本人非測定、生体データ非取得、画面上のフグ、Googleフォーム送信先の説明を確認しました。"
+          : `screen版の必須説明5点の出現数は${screenProtocolCopyMatches.join("/")}です。`,
       ),
       finding(
         "answer-timing",
         immediateAnswer === 0 && afterAllFour > 0 ? "pass" : "fail",
         immediateAnswer === 0 && afterAllFour > 0
           ? "4提示後にまとめて回答する説明だけを確認しました。"
-          : `旧説明「各提示の直後」=${String(immediateAnswer)}件、4提示後の説明=${String(afterAllFour)}件です。`,
+          : `各提示直後に回答させる旧説明=${String(immediateAnswer)}件、4提示後の説明=${String(afterAllFour)}件です。`,
       ),
       finding(
         "eleven-questions",
-        elevenQuestions > 0 ? "pass" : "fail",
-        elevenQuestions > 0
-          ? `11問／11項目の説明を${String(elevenQuestions)}件確認しました。`
-          : "11問／11項目の説明を確認できませんでした。",
+        evaluationQuestions.length === EVALUATION_QUESTION_COUNT ? "pass" : "fail",
+        evaluationQuestions.length === EVALUATION_QUESTION_COUNT
+          ? "公開フォーム構造に11件の評価質問を確認しました。"
+          : `公開フォーム構造の評価質問は${String(evaluationQuestions.length)}件です。`,
+      ),
+      finding(
+        "evaluation-structure",
+        evaluationStructureValid ? "pass" : "fail",
+        evaluationStructureValid
+          ? "11評価質問は第1〜第4提示、7件法、任意回答で統一されています。"
+          : "11評価質問の提示行、7件法、任意回答設定が承認候補構造と一致しません。",
+      ),
+      finding(
+        "untitled-inputs",
+        untitledInputs === 0 ? "pass" : "fail",
+        untitledInputs === 0
+          ? "無題の回答入力項目はありません。"
+          : `無題の回答入力項目を${String(untitledInputs)}件検出しました。`,
+      ),
+      finding(
+        "file-uploads",
+        fileUploads === 0 && !/ファイル(?:を)?アップロード/gu.test(decoded) ? "pass" : "fail",
+        fileUploads === 0 && !/ファイル(?:を)?アップロード/gu.test(decoded)
+          ? "ファイルアップロード項目はありません。"
+          : "ファイルアップロード項目を検出しました。",
       ),
       finding(
         "administrator-only-settings",

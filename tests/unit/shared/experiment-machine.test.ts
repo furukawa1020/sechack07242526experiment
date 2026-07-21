@@ -16,6 +16,7 @@ import {
   type SetupPrerequisites,
 } from "../../../src/shared/experiment-machine.js";
 import type { TimingConfig } from "../../../src/shared/schemas.js";
+import { SCREEN_PROTOCOL_VERSION } from "../../../src/shared/schemas.js";
 
 const timing: TimingConfig = Object.freeze({
   handling: 80,
@@ -48,7 +49,7 @@ function newSession(): Session {
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
     deviceMode: "mock",
     configHash: "a".repeat(64),
-    protocolVersion: "R8-010-2x2-mock-v3",
+    protocolVersion: SCREEN_PROTOCOL_VERSION,
     wallClockIso: iso(0),
     monotonicMs: 0,
     consentConfirmed: true,
@@ -209,17 +210,24 @@ describe("experiment state machine", () => {
       phaseEndsMonotonicMs: 100,
       remainingMs: 100,
     };
-    const snapshot = toPublicSnapshot(active, 25, "https://example.test/form");
+    const snapshot = toPublicSnapshot(active, 25, timing, "https://example.test/form", false, iso(25));
     expect(snapshot.current).toEqual({ position: 1, processing: "cloud", presentation: "label" });
     expect(snapshot.formUrl).toBeNull();
     expect(snapshot.remainingMs).toBe(75);
     expect(snapshot.summary).toEqual([]);
+    expect(snapshot.pufferSurface).toBe("screen");
+    expect(snapshot.pufferRamp).toEqual({ inflateMs: 60, deflateMs: 60 });
+    expect(snapshot.serverNow).toBe(iso(25));
     expect(snapshot).not.toHaveProperty("researchId");
     expect(snapshot).not.toHaveProperty("orderCode");
     expect(snapshot).not.toHaveProperty("currentCondition");
 
-    const summary = toPublicSnapshot({ ...active, phase: "summary", currentCondition: null }, 100,
-      "https://example.test/form");
+    const summary = toPublicSnapshot(
+      { ...active, phase: "summary", currentCondition: null },
+      100,
+      timing,
+      "https://example.test/form",
+    );
     expect(summary.summary).toEqual([
       { position: 1, processing: "cloud", presentation: "label" },
       { position: 2, processing: "local", presentation: "label" },
@@ -227,6 +235,8 @@ describe("experiment state machine", () => {
       { position: 4, processing: "local", presentation: "puffer" },
     ]);
     expect(summary.formUrl).toBe("https://example.test/form");
+    expect(toPublicSnapshot({ ...active, deviceMode: "serial" }, 25, timing).pufferSurface)
+      .toBe("physical");
     expect(getRemainingMs(newSession(), 10)).toBeNull();
   });
 

@@ -12,6 +12,7 @@ import {
   ExperimentConfigSchema,
   formatConfigError,
   isResearchIdValid,
+  SCREEN_PROTOCOL_VERSION,
   parseExperimentConfig,
   STUDY_FORM_URL,
 } from "../../../src/shared/schemas.js";
@@ -91,6 +92,29 @@ describe("experiment config schema", () => {
       ...validConfig(),
       device: { ...(validConfig()["device"] as object), mode: "serial", serialPath: "" },
     })).toThrow(/serialPath/iu);
+    expect(parseExperimentConfig({
+      ...validConfig(),
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      device: { ...(validConfig()["device"] as object), mode: "screen", serialPath: "" },
+    }).device.mode).toBe("screen");
+    expect(() => parseExperimentConfig({
+      ...validConfig(),
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      device: { ...(validConfig()["device"] as object), mode: "screen", serialPath: "COM3" },
+    })).toThrow(/serialPath must be empty/iu);
+    expect(() => parseExperimentConfig({
+      ...validConfig(),
+      device: { ...(validConfig()["device"] as object), mode: "screen", serialPath: "" },
+    })).toThrow(/screen mode requires protocolVersion/iu);
+    expect(parseExperimentConfig({
+      ...validConfig(),
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+    }).device.mode).toBe("mock");
+    expect(() => parseExperimentConfig({
+      ...validConfig(),
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      device: { ...(validConfig()["device"] as object), mode: "serial", serialPath: "COM3" },
+    })).toThrow(/requires screen or mock device mode/iu);
     expect(() => parseExperimentConfig({
       ...validConfig(),
       timingMs: { ...(validConfig()["timingMs"] as object), reset: 1_000 },
@@ -182,7 +206,7 @@ describe("experiment config schema", () => {
 describe("config file loading", () => {
   it("loads the repository config and returns a stable SHA-256", async () => {
     const loaded = await loadExperimentConfig();
-    expect(loaded.config.protocolVersion).toBe("R8-010-2x2-mock-v3");
+    expect(loaded.config.protocolVersion).toBe(SCREEN_PROTOCOL_VERSION);
     expect(loaded.configHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(hashExperimentConfig(loaded.config)).toBe(loaded.configHash);
   });
@@ -199,15 +223,16 @@ describe("config file loading", () => {
     await mkdir(configDirectory);
     const source = {
       ...validConfig(),
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
       formUrl: STUDY_FORM_URL,
       device: {
         ...(validConfig()["device"] as Record<string, unknown>),
-        mode: "serial",
-        serialPath: "COM3",
+        mode: "screen",
+        serialPath: "",
       },
       formAudit: {
         status: "NO-GO",
-        protocolVersion: "R8-010-2x2-mock-v3",
+        protocolVersion: SCREEN_PROTOCOL_VERSION,
         formUrl: STUDY_FORM_URL,
         auditedOn: "2026-07-21",
         contentSha256: AUDIT_CONTENT_SHA256,
@@ -235,7 +260,9 @@ describe("config file loading", () => {
       rootDirectory: root,
       production: true,
       currentDate: new Date("2026-07-21T12:00:00Z"),
-    })).resolves.toMatchObject({ config: { protocolVersion: "R8-010-2x2-mock-v3" } });
+    })).resolves.toMatchObject({
+      config: { protocolVersion: SCREEN_PROTOCOL_VERSION, device: { mode: "screen" } },
+    });
 
     const withoutAudit: Record<string, unknown> = { ...source };
     Reflect.deleteProperty(withoutAudit, "formAudit");
@@ -245,6 +272,93 @@ describe("config file loading", () => {
       production: true,
       currentDate: new Date("2026-07-21T12:00:00Z"),
     })).rejects.toThrow(/missing/iu);
+  });
+
+  it("applies the same production device policy during direct config loading", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sechack-production-device-policy-"));
+    const configDirectory = join(root, "config");
+    await mkdir(configDirectory);
+    const approvedScreenAudit = {
+      status: "GO",
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      formUrl: STUDY_FORM_URL,
+      auditedOn: "2026-07-21",
+      contentSha256: AUDIT_CONTENT_SHA256,
+      twoPersonVerified: true,
+    };
+    const screenBase = {
+      ...validConfig(),
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      formUrl: STUDY_FORM_URL,
+      formAudit: approvedScreenAudit,
+    };
+    const configPath = join(configDirectory, "production.json");
+
+    await writeFile(configPath, JSON.stringify({
+      ...screenBase,
+      device: {
+        ...(validConfig()["device"] as Record<string, unknown>),
+        mode: "screen",
+        serialPath: "",
+      },
+    }), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).resolves.toMatchObject({ config: { device: { mode: "screen", serialPath: "" } } });
+
+    await writeFile(configPath, JSON.stringify({
+      ...screenBase,
+      fixedState: {
+        ...(validConfig()["fixedState"] as Record<string, unknown>),
+        score: 71,
+      },
+      device: {
+        ...(validConfig()["device"] as Record<string, unknown>),
+        mode: "screen",
+        serialPath: "",
+      },
+    }), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).rejects.toThrow(/screen-fixed-state-mismatch/iu);
+
+    await writeFile(configPath, JSON.stringify({
+      ...validConfig(),
+      formUrl: STUDY_FORM_URL,
+      formAudit: {
+        ...approvedScreenAudit,
+        protocolVersion: "R8-010-2x2-mock-v3",
+      },
+      device: {
+        ...(validConfig()["device"] as Record<string, unknown>),
+        mode: "serial",
+        serialPath: "COM0",
+      },
+    }), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).rejects.toThrow(/serial-device-not-allowed/iu);
+
+    await writeFile(configPath, JSON.stringify({
+      ...screenBase,
+      device: {
+        ...(validConfig()["device"] as Record<string, unknown>),
+        mode: "screen",
+        serialPath: "",
+        allowMockInProduction: true,
+      },
+    }), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).rejects.toThrow(/allow-mock-in-production-enabled/iu);
   });
 
   it("reports malformed JSON from an allowed temporary config directory", async () => {

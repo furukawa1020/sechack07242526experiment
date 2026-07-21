@@ -28,8 +28,12 @@ function snapshot(
     sequenceIndex: 0,
     condition: { processing, presentation },
     fixedState: { score: 72, label: "高ストレス" },
+    pufferSurface: "physical",
+    pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+    phaseStartedAt: "2026-07-19T12:00:00.000Z",
     phaseEndsAt: "2026-07-19T12:00:15.000Z",
     serverNow: "2026-07-19T12:00:00.000Z",
+    remainingMs: 15_000,
     summary: [],
     formUrl: null,
     ...overrides,
@@ -84,6 +88,100 @@ describe("participant presentation invariants", () => {
 
   it("renders the puffer result with byte-for-byte identical right DOM for cloud and local", () => {
     expect(resultMarkup("cloud", "puffer")).toBe(resultMarkup("local", "puffer"));
+  });
+
+  it("renders the screen puffer result with identical C/D DOM and server-synchronised linear motion", () => {
+    const screenMotion = {
+      pufferSurface: "screen" as const,
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      phaseStartedAt: "2026-07-19T12:00:00.000Z",
+      serverNow: "2026-07-19T11:59:00.000Z",
+      remainingMs: 12_000,
+    };
+    const cloud = render(<ParticipantView snapshot={snapshot("cloud", "puffer", screenMotion)} />);
+    const cloudResult = within(cloud.container).getByTestId("result-panel");
+    const cloudMarkup = cloudResult.outerHTML;
+    const visual = within(cloudResult).getByTestId("screen-puffer-visual");
+    const body = visual.querySelector<HTMLElement>(".screen-puffer-body");
+    expect(body).not.toBeNull();
+    expect(body?.style.animationName).toBe("screen-puffer-inflate");
+    expect(body?.style.animationDuration).toBe("6000ms");
+    expect(body?.style.animationDelay).toBe("-3000ms");
+    expect(body?.style.animationTimingFunction).toBe("linear");
+    expect(body?.style.getPropertyValue("--screen-puffer-expanded-scale")).toBe("1");
+    expect(visual).toHaveAttribute("data-puffer-motion", "inflating");
+    expect(visual).toHaveAttribute("data-motion-duration-ms", "6000");
+    expect(cloudResult).toHaveTextContent(UI_COPY.result.pufferScreen.replace("\n", " "));
+    expect(cloudResult).not.toHaveTextContent(UI_COPY.result.pufferPhysical.replace("\n", " "));
+    expect(cloudResult).not.toHaveTextContent("0.6");
+    cloud.unmount();
+
+    const local = render(<ParticipantView snapshot={snapshot("local", "puffer", screenMotion)} />);
+    expect(within(local.container).getByTestId("result-panel").outerHTML).toBe(cloudMarkup);
+  });
+
+  it("uses the same screen puffer to contract during reset", () => {
+    render(<ParticipantView snapshot={snapshot("local", "puffer", {
+      phase: "reset",
+      pufferSurface: "screen",
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      phaseStartedAt: "2026-07-19T12:00:15.000Z",
+      phaseEndsAt: "2026-07-19T12:00:22.000Z",
+      serverNow: "2026-07-19T12:05:00.000Z",
+      remainingMs: 4_500,
+    })} />);
+
+    const visual = screen.getByTestId("screen-puffer-visual");
+    const body = visual.querySelector<HTMLElement>(".screen-puffer-body");
+    expect(body?.style.animationName).toBe("screen-puffer-deflate");
+    expect(body?.style.animationDuration).toBe("6000ms");
+    expect(body?.style.animationDelay).toBe("-2500ms");
+    expect(visual).toHaveAttribute("data-puffer-motion", "deflating");
+    expect(screen.getByRole("heading", { name: UI_COPY.reset.title })).toBeInTheDocument();
+    expect(screen.getByText(UI_COPY.reset.waiting)).toBeInTheDocument();
+  });
+
+  it("derives puffer progress from monotonic remaining time despite wall-clock correction", () => {
+    const duringRamp = snapshot("cloud", "puffer", {
+      pufferSurface: "screen",
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      phaseStartedAt: "2026-07-19T12:00:00.000Z",
+      serverNow: "2026-07-19T12:20:00.000Z",
+      remainingMs: 10_500,
+    });
+    const firstLoad = render(<ParticipantView snapshot={duringRamp} />);
+    const firstVisual = within(firstLoad.container).getByTestId("screen-puffer-visual");
+    expect(firstVisual).toHaveAttribute("data-puffer-motion", "inflating");
+    expect(firstVisual.querySelector<HTMLElement>(".screen-puffer-body")?.style.animationDelay)
+      .toBe("-4500ms");
+    firstLoad.unmount();
+
+    const reload = render(<ParticipantView snapshot={{
+      ...duringRamp,
+      serverNow: "2026-07-19T11:40:00.000Z",
+      remainingMs: 8_000,
+    }} />);
+    const reloadedVisual = within(reload.container).getByTestId("screen-puffer-visual");
+    expect(reloadedVisual).toHaveAttribute("data-puffer-motion", "holding");
+    expect(reloadedVisual.querySelector<HTMLElement>(".screen-puffer-body")?.style.animationDelay)
+      .toBe("-6000ms");
+  });
+
+  it("removes the inflated screen puffer immediately for interruption and error phases", () => {
+    const interrupted = snapshot("local", "puffer", {
+      pufferSurface: "screen",
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      serverNow: "2026-07-19T12:00:08.000Z",
+      phase: "aborted",
+    });
+    const view = render(<ParticipantView snapshot={interrupted} />);
+    expect(screen.queryByTestId("screen-puffer-visual")).not.toBeInTheDocument();
+
+    view.rerender(<ParticipantView snapshot={{ ...interrupted, phase: "error" }} />);
+    expect(screen.queryByTestId("screen-puffer-visual")).not.toBeInTheDocument();
+
+    view.rerender(<ParticipantView snapshot={{ ...interrupted, phase: "recovery" }} />);
+    expect(screen.queryByTestId("screen-puffer-visual")).not.toBeInTheDocument();
   });
 
   it("changes only handling values between cloud and local", () => {
@@ -159,15 +257,20 @@ describe("participant presentation invariants", () => {
   it("keeps the puffer result valid without exposing label-only fixed state", () => {
     render(<ParticipantView snapshot={snapshot("cloud", "puffer", { fixedState: null })} />);
     expect(screen.getByTestId("result-panel")).toHaveTextContent(
-      UI_COPY.result.puffer.replace("\n", " "),
+      UI_COPY.result.pufferPhysical.replace("\n", " "),
     );
     expect(screen.queryByRole("heading", { name: UI_COPY.error.title })).not.toBeInTheDocument();
   });
 
   it("uses fixed copy for the intro, result and footer", () => {
-    const { rerender } = render(<ParticipantView snapshot={snapshot("local", "label", { phase: "intro" })} />);
+    const { rerender } = render(<ParticipantView snapshot={snapshot("local", "label", {
+      phase: "intro",
+      pufferSurface: "screen",
+    })} />);
     expect(screen.getByRole("heading", { name: UI_COPY.intro.title })).toBeInTheDocument();
-    expect(document.querySelector(".scenario-note")).toHaveTextContent(UI_COPY.intro.scenario.replace("\n", " "));
+    expect(document.querySelector(".scenario-note")).toHaveTextContent(
+      UI_COPY.intro.scenario.replace(/\s+/gu, " "),
+    );
     const footer = document.querySelector(".participant-footer");
     expect(footer).not.toBeNull();
     expect(within(footer as HTMLElement).getByText(UI_COPY.footer.scenario)).toBeInTheDocument();
@@ -224,6 +327,32 @@ describe("participant presentation invariants", () => {
     ]);
   });
 
+  it("names the screen-puffer medium accurately in the summary", () => {
+    const summary = [
+      { processing: "local", presentation: "puffer" },
+      { processing: "cloud", presentation: "label" },
+      { processing: "cloud", presentation: "puffer" },
+      { processing: "local", presentation: "label" },
+    ] as const;
+    render(<ParticipantView snapshot={snapshot("local", "label", {
+      phase: "summary",
+      pufferSurface: "screen",
+      summary,
+    })} />);
+
+    const cards = screen.getAllByRole("listitem");
+    expect(cards.map((card) => card.textContent)).toEqual([
+      `${UI_COPY.summary.cards[0]}${UI_COPY.summary.screenPufferLabels.local}`,
+      `${UI_COPY.summary.cards[1]}${UI_COPY.summary.conditionLabels.cloud.label}`,
+      `${UI_COPY.summary.cards[2]}${UI_COPY.summary.screenPufferLabels.cloud}`,
+      `${UI_COPY.summary.cards[3]}${UI_COPY.summary.conditionLabels.local.label}`,
+    ]);
+    expect(document.body).not.toHaveTextContent("A");
+    expect(document.body).not.toHaveTextContent("B");
+    expect(document.body).not.toHaveTextContent("C");
+    expect(document.body).not.toHaveTextContent("D");
+  });
+
   it("uses the configured form URL verbatim only for the explicit link and local QR generation", async () => {
     const formUrl = "https://forms.gle/BeShY7cY5zMjunto9";
     const qrSpy = vi.spyOn(QRCode, "toDataURL");
@@ -263,12 +392,12 @@ describe("participant presentation invariants", () => {
       rehearsal: true,
       phase: "summary",
       summary,
-      formUrl: null,
+      formUrl: "https://forms.gle/BeShY7cY5zMjunto9",
     })} />);
     expect(view.container.querySelector(".summary-heading")).toHaveTextContent(
       UI_COPY.rehearsal.summary.replace("\n", " "),
     );
-    expect(view.container).not.toHaveTextContent("お手元のGoogleフォームへ戻り");
+    expect(view.container).not.toHaveTextContent("下のボタンからGoogleフォームを開き");
     expect(view.container).not.toHaveTextContent("同じ数字を複数の提示に選んでも構いません");
     expect(view.container).not.toHaveTextContent("答えたくない項目は空欄のままにできます");
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
@@ -289,8 +418,13 @@ describe("participant snapshot boundary", () => {
       phase: "result",
       current: { position: 3, processing: "cloud", presentation: "label" },
       fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
+      pufferSurface: "physical",
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      phaseStartedAt: "2026-07-19T12:00:00.000Z",
       recoveryRequired: false,
       phaseEndsAt: null,
+      serverNow: null,
+      remainingMs: null,
       summary: [],
       formUrl: null,
       conditionCode: "A",
@@ -314,8 +448,13 @@ describe("participant snapshot boundary", () => {
       rehearsal: true,
       phase: "intro",
       current: null,
+      pufferSurface: "physical",
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      phaseStartedAt: null,
       recoveryRequired: false,
       phaseEndsAt: null,
+      serverNow: null,
+      remainingMs: null,
       summary: [],
       formUrl: null,
     });
@@ -327,8 +466,13 @@ describe("participant snapshot boundary", () => {
       phase: "result",
       current: { position: 1, processing: "local", presentation: "puffer" },
       fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
+      pufferSurface: "physical",
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      phaseStartedAt: "2026-07-19T12:00:00.000Z",
       recoveryRequired: true,
       phaseEndsAt: null,
+      serverNow: null,
+      remainingMs: null,
       summary: [],
       formUrl: null,
     });

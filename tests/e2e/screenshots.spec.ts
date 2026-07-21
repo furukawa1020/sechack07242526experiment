@@ -222,7 +222,27 @@ async function openStableParticipantPhase(
         }, 0);
       }
 
-      send(): void {}
+      send(data: string): void {
+        let message: unknown;
+        try {
+          message = JSON.parse(data) as unknown;
+        } catch {
+          return;
+        }
+        if (
+          typeof message === "object"
+          && message !== null
+          && (message as Readonly<Record<string, unknown>>)["type"] === "display.ready"
+        ) {
+          void fetch("/api/display/layout-fixture")
+            .then(async (response) => response.json() as Promise<unknown>)
+            .then((payload) => {
+              this.dispatchEvent(new MessageEvent("message", {
+                data: JSON.stringify({ type: "session.snapshot", payload }),
+              }));
+            });
+        }
+      }
 
       close(): void {
         if (this.readyState === StableDisplaySocket.CLOSED) return;
@@ -244,9 +264,13 @@ async function openStableParticipantPhase(
         phase,
         current: { position: 1, processing, presentation: "label" },
         fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
+        pufferSurface: "screen",
+        pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
         recoveryRequired: false,
+        phaseStartedAt: null,
         phaseEndsAt: null,
         serverNow: null,
+        remainingMs: null,
         summary: [],
         formUrl: null,
       },
@@ -345,7 +369,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await processingPage.setViewportSize({ width: viewport.width, height: viewport.height });
     await openStableParticipantPhase(processingPage, "processing", "cloud");
     await expect(processingPage.locator(".processing-content > p")).toHaveText(
-      "身体データを処理しています…",
+      "固定模擬データを処理しています…",
     );
     await expectParticipantSurfaceFillsViewport(processingPage);
     await expectChildrenCenteredWithin(
@@ -371,7 +395,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await capture(operatorPage, `operator-session-${viewport.label}`);
     await operatorPage.getByRole("button", { name: "共通導入を表示" }).click();
 
-    const introHeading = page.getByRole("heading", { name: "同じ身体データを、4つの方法で提示します" });
+    const introHeading = page.getByRole("heading", { name: "同じ固定模擬データを、4つの方法で提示します" });
     await expect(introHeading).toBeVisible();
     await expect(page.locator(".message-eyebrow")).toHaveCount(0);
     await expectRenderedLineCount(introHeading, 1);
@@ -412,11 +436,16 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await expect(pufferOperatorPage.getByRole("heading", { name: "進行状況" })).toBeVisible();
     await pufferOperatorPage.getByRole("checkbox", { name: /全画面表示し、目視確認済み/u }).check();
     await pufferOperatorPage.getByRole("button", { name: "共通導入を表示" }).click();
-    await expect(page.getByRole("heading", { name: "同じ身体データを、4つの方法で提示します" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "同じ固定模擬データを、4つの方法で提示します" })).toBeVisible();
     await sessionAction(request, pufferSession.id, "start");
     await expect(page.getByTestId("participant-app")).toHaveAttribute("data-phase", "result", {
       timeout: 5_000,
     });
+    await expect(page.getByTestId("screen-puffer-visual")).toBeVisible();
+    await expect(page.getByTestId("screen-puffer-visual")).toHaveAttribute(
+      "data-motion-duration-ms",
+      "50",
+    );
     await expectRenderedLineCount(page.locator(".puffer-result > p"), 2);
     await expectParticipantSurfaceFillsViewport(page);
     await expectChildrenCenteredWithin(page.locator(".puffer-result"), ":scope > *");

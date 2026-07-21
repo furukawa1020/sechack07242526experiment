@@ -5,11 +5,15 @@ import { pathToFileURL } from "node:url";
 
 import { loadExperimentConfig } from "../src/shared/config-loader.js";
 import {
-  assessFormAudit,
   STUDY_FORM_URL,
 } from "../src/shared/form-audit.js";
 import {
+  assessProductionPolicy,
+  isWindowsComPath,
+} from "../src/shared/production-policy.js";
+import {
   formatConfigError,
+  SCREEN_PROTOCOL_VERSION,
   type ExperimentConfig,
 } from "../src/shared/schemas.js";
 import { ExperimentLogger } from "../src/server/logging/experiment-log.js";
@@ -162,9 +166,7 @@ export function isApprovedGoogleFormsUrl(value: string): boolean {
   }
 }
 
-export function isWindowsComPath(value: string): boolean {
-  return /^(?:COM[1-9][0-9]*|\\\\\.\\COM[1-9][0-9]*)$/iu.test(value.trim());
-}
+export { isWindowsComPath };
 
 export function evaluatePreflightGates(
   config: ExperimentConfig,
@@ -173,40 +175,69 @@ export function evaluatePreflightGates(
 ): readonly GateCheck[] {
   const checks: GateCheck[] = [];
   const production = !allowMock;
+  const productionPolicy = assessProductionPolicy(config, now);
 
   if (production) {
     checks.push({
       name: "device.mode",
-      status: config.device.mode === "serial" ? "pass" : "fail",
-      detail: config.device.mode === "serial"
-        ? "Serial実機モードです。"
-        : "本番ではSerial実機モードが必須です。",
+      status: config.device.mode === "screen" ? "pass" : "fail",
+      detail: config.device.mode === "screen"
+        ? "正式MVPの実機を使用しない画面内フグモードです。"
+        : "正式MVPはdevice.mode=screenだけを許可します。MockとSerialは本番で使用できません。",
     });
   } else {
     checks.push({
       name: "device.mode",
-      status: config.device.mode === "mock" ? "warning" : "pass",
+      status: config.device.mode === "mock" ? "warning" : "fail",
       detail: config.device.mode === "mock"
         ? "開発用Mock確認です。本番承認には使用できません。"
-        : "Serial実機モードを開発ゲートで確認しています。",
+        : "--allow-mockはdevice.mode=mockの明示的な開発・模擬リハーサル専用です。",
     });
   }
 
-  if (config.device.mode === "serial" || production) {
+  if (config.device.mode === "screen") {
     checks.push({
       name: "device.serialPath",
-      status: isWindowsComPath(config.device.serialPath) ? "pass" : "fail",
-      detail: isWindowsComPath(config.device.serialPath)
-        ? "Windows COMポート形式です。"
-        : "本番のserialPathにはCOM1以上（または \\\\.\\COM10 形式）が必要です。",
+      status: config.device.serialPath === "" ? "pass" : "fail",
+      detail: config.device.serialPath === ""
+        ? "画面内フグモードではSerialポートを使用しません。"
+        : "画面内フグモードのserialPathは空でなければなりません。",
+    });
+  } else if (production) {
+    checks.push({
+      name: "device.serialPath",
+      status: "fail",
+      detail: "正式MVPではscreenモードかつ空のserialPathだけを許可します。",
     });
   } else {
     checks.push({
       name: "device.serialPath",
-      status: "warning",
-      detail: "MockモードのためCOMポート確認を省略しました。",
+      status: config.device.mode === "mock" && config.device.serialPath === ""
+        ? "warning"
+        : "fail",
+      detail: config.device.mode === "mock" && config.device.serialPath === ""
+        ? "明示的なMock確認のためSerialポートを使用しません。"
+        : "Mock確認ではdevice.mode=mockかつ空のserialPathが必要です。",
     });
   }
+
+  checks.push({
+    name: "protocolVersion",
+    status: config.protocolVersion === SCREEN_PROTOCOL_VERSION
+      ? "pass"
+      : production
+        ? "fail"
+        : config.device.mode === "mock"
+          ? "warning"
+          : "fail",
+    detail: config.protocolVersion === SCREEN_PROTOCOL_VERSION
+      ? production
+        ? `正式MVPプロトコル${SCREEN_PROTOCOL_VERSION}です。`
+        : `${SCREEN_PROTOCOL_VERSION}の内容を明示的なMockとして確認しています。本番承認ではありません。`
+      : production
+        ? `正式MVPはprotocolVersion=${SCREEN_PROTOCOL_VERSION}だけを許可します。`
+        : "Mock専用プロトコルを開発・模擬リハーサルとして確認しています。",
+  });
 
   checks.push({
     name: "device.allowMockInProduction",
@@ -214,6 +245,20 @@ export function evaluatePreflightGates(
     detail: config.device.allowMockInProduction
       ? "allowMockInProductionはfalseでなければなりません。"
       : "本番Mock許可は無効です。",
+  });
+
+  checks.push({
+    name: "protocol.fixedParameters",
+    status: productionPolicy.protocolIssues.length === 0
+      ? "pass"
+      : production
+        ? "fail"
+        : "warning",
+    detail: productionPolicy.protocolIssues.length === 0
+      ? "screen-v1の固定状態、提示時間、膨張時間、収縮時間、提示順、ID形式が正式値と一致しています。"
+      : production
+        ? `screen-v1の固定パラメータが正式値と一致しません（${productionPolicy.protocolIssues.join(", ")}）。`
+        : "開発用Mockでは短縮時間を許可しますが、本番screen-v1には使用できません。",
   });
 
   const approvedFormUrl = isApprovedGoogleFormsUrl(config.formUrl);
@@ -228,7 +273,7 @@ export function evaluatePreflightGates(
         : "開発確認のため、指定フォームURLとの不一致または未設定を警告扱いにしました。",
   });
 
-  const formAudit = assessFormAudit(config, now);
+  const formAudit = productionPolicy.formAudit;
   checks.push({
     name: "formAudit",
     status: formAudit.approved ? "pass" : production ? "fail" : "warning",

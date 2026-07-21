@@ -4,6 +4,8 @@ import { ORDER_CODES } from "./conditions.js";
 
 export { STUDY_FORM_URL } from "./form-audit.js";
 
+export const SCREEN_PROTOCOL_VERSION = "R8-010-2x2-screen-v1";
+
 const singleLineText = z.string().min(1).max(200).refine(
   (value) => !/[\r\n]/u.test(value),
   "Line breaks are not allowed.",
@@ -60,7 +62,7 @@ export const TimingSchema = z.object({
 });
 
 export const DeviceConfigSchema = z.object({
-  mode: z.enum(["mock", "serial"]),
+  mode: z.enum(["mock", "serial", "screen"]),
   serialPath: z.string().max(240).refine((value) => !/[\0\r\n]/u.test(value)),
   baudRate: z.number().int().min(1_200).max(4_000_000),
   ackTimeout: z.number().int().min(50).max(60_000),
@@ -71,6 +73,13 @@ export const DeviceConfigSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["serialPath"],
       message: "serialPath is required in serial mode.",
+    });
+  }
+  if (device.mode === "screen" && device.serialPath !== "") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["serialPath"],
+      message: "serialPath must be empty in screen mode.",
     });
   }
 });
@@ -171,6 +180,26 @@ export const ExperimentConfigSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["network", "allowExternalRuntimeRequests"],
       message: "External runtime requests are prohibited by the experiment protocol.",
+    });
+  }
+  if (
+    config.device.mode === "screen"
+    && config.protocolVersion !== SCREEN_PROTOCOL_VERSION
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["protocolVersion"],
+      message: `screen mode requires protocolVersion ${SCREEN_PROTOCOL_VERSION}.`,
+    });
+  }
+  if (
+    config.protocolVersion === SCREEN_PROTOCOL_VERSION
+    && config.device.mode === "serial"
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["device", "mode"],
+      message: `${SCREEN_PROTOCOL_VERSION} requires screen or mock device mode.`,
     });
   }
 });

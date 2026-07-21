@@ -1,0 +1,73 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const apiMocks = vi.hoisted(() => ({
+  getDeviceStatus: vi.fn(),
+}));
+
+vi.mock("../../../src/client/shared/api.js", () => ({
+  errorMessage: (error: unknown) => error instanceof Error ? error.message : "error",
+  getOperatorToken: () => null,
+  experimentApi: {
+    getOperatorConfig: vi.fn().mockResolvedValue({
+      researchIdPattern: "^SH26-[0-9]{3}$",
+      protocolVersion: "R8-010-2x2-screen-v1",
+    }),
+    getDeviceStatus: apiMocks.getDeviceStatus,
+  },
+}));
+
+vi.mock("../../../src/client/shared/realtime.js", () => ({
+  useRealtime: () => ({ status: "open", send: () => true }),
+  useRemainingSeconds: () => null,
+}));
+
+import { OperatorScreen } from "../../../src/client/operator/OperatorScreen.js";
+
+describe("operator screen-mode guidance", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    apiMocks.getDeviceStatus.mockResolvedValue({
+      mode: "screen",
+      state: "idle",
+      level: 0,
+      fault: null,
+      connected: true,
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("identifies screen as a formal hardware-free mode and requires pre-presentation consent", async () => {
+    render(<OperatorScreen />);
+
+    expect(await screen.findByText("画面上のフグ・実機なし正式方式")).toBeInTheDocument();
+    expect(screen.getByText("提示開始前に、承認済み手順で研究説明・参加同意を確認済み"))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Googleフォームで事後送信する方式は、責任者承認済みの手順に限ります/u))
+      .toBeInTheDocument();
+    expect(screen.queryByText("実機なし・模擬リハーサル")).not.toBeInTheDocument();
+    expect(screen.queryByText(/本番参加者には使用しないでください/u)).not.toBeInTheDocument();
+  });
+
+  it("retains the explicit rehearsal warning for Mock", async () => {
+    apiMocks.getDeviceStatus.mockResolvedValue({
+      mode: "mock",
+      state: "idle",
+      level: 0,
+      fault: null,
+      connected: true,
+    });
+    render(<OperatorScreen />);
+
+    expect(await screen.findByText("実機なし・模擬リハーサル")).toBeInTheDocument();
+    expect(screen.getByText(/本番参加者には使用しないでください/u)).toBeInTheDocument();
+    expect(screen.getByText("リハーサル開始条件を確認済み")).toBeInTheDocument();
+    expect(screen.queryByText("画面上のフグ・実機なし正式方式")).not.toBeInTheDocument();
+  });
+});

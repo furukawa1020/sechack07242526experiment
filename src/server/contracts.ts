@@ -21,11 +21,12 @@ export interface PublicCondition {
 
 export interface PublicSessionSnapshot extends PublicSnapshot {
   readonly sequenceIndex: 0 | 1 | 2 | 3 | null;
-  readonly serverNow: string;
 }
 
 export interface OperatorSessionSnapshot extends RuntimeSession {
   readonly serverNow: string;
+  readonly pufferSurface: PublicSnapshot["pufferSurface"];
+  readonly pufferRamp: PublicSnapshot["pufferRamp"];
   readonly displayToken: string;
   readonly displayUrl: string;
   readonly current: PublicCondition | null;

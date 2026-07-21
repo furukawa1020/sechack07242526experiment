@@ -117,15 +117,26 @@ export interface PublicFixedState {
   readonly label: string;
 }
 
+export type PublicPufferSurface = "screen" | "physical";
+
+export interface PublicPufferRamp {
+  readonly inflateMs: number;
+  readonly deflateMs: number;
+}
+
 /** Participant-safe state: it deliberately has no research ID, order code or A/B/C/D code. */
 export interface PublicSnapshot {
   readonly rehearsal: boolean;
   readonly phase: ExperimentPhase;
   readonly current: PublicCurrentPresentation | null;
   readonly fixedState: PublicFixedState | null;
+  /** Participant-safe rendering contract; never contains A/B/C/D or a physical pressure. */
+  readonly pufferSurface: PublicPufferSurface;
+  readonly pufferRamp: PublicPufferRamp;
   readonly recoveryRequired: boolean;
   readonly phaseStartedAt: string | null;
   readonly phaseEndsAt: string | null;
+  readonly serverNow: string;
   readonly remainingMs: number | null;
   readonly result: SessionResult;
   readonly summary: readonly PublicPresentationSummary[];
@@ -394,8 +405,10 @@ export function setDeviceSnapshot(
 export function toPublicSnapshot(
   session: Session,
   monotonicMs: number,
+  timingMs: TimingConfig,
   formUrl = "",
   rehearsal = false,
+  serverNow = session.updatedAt,
 ): PublicSnapshot {
   const current = session.currentCondition === null || session.sequenceIndex === null
     ? null
@@ -421,9 +434,15 @@ export function toPublicSnapshot(
     fixedState: showLabelState
       ? Object.freeze({ score: session.fixedState.score, label: session.fixedState.label })
       : null,
+    pufferSurface: session.deviceMode === "serial" ? "physical" : "screen",
+    pufferRamp: Object.freeze({
+      inflateMs: timingMs.inflateRamp,
+      deflateMs: timingMs.deflateRamp,
+    }),
     recoveryRequired: session.recoveryRequired,
     phaseStartedAt: session.phaseStartedAt,
     phaseEndsAt: session.phaseEndsAt,
+    serverNow,
     remainingMs: getRemainingMs(session, monotonicMs),
     result: session.result,
     summary,

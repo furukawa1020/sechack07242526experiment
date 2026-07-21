@@ -10,6 +10,7 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 export interface HealthcheckArguments {
   readonly configPath?: string;
   readonly help: boolean;
+  readonly mockRehearsal: boolean;
   readonly timeoutMs: number;
 }
 
@@ -18,7 +19,7 @@ export interface HealthcheckResult {
   readonly appVersion: string;
   readonly protocolVersion: string;
   readonly configHash: string;
-  readonly deviceMode: "mock" | "serial";
+  readonly deviceMode: "mock" | "serial" | "screen";
 }
 
 export interface RunHealthcheckOptions {
@@ -31,10 +32,11 @@ export interface RunHealthcheckOptions {
 
 function usage(): readonly string[] {
   return Object.freeze([
-    "Usage: npm run healthcheck -- [--config <config path>] [--timeout <milliseconds>]",
+    "Usage: npm run healthcheck -- [--mock-rehearsal] [--config <config path>] [--timeout <milliseconds>]",
     "",
     "Options:",
     "  --config <path>   config/ 内の設定ファイルを指定します。",
+    "  --mock-rehearsal  明示的なMockリハーサルのhealthcheckとして実行します。",
     "  --timeout <ms>    応答待ち時間（100〜60000ms、既定5000ms）。",
     "  --help            このヘルプを表示します。",
   ]);
@@ -52,11 +54,17 @@ export function parseHealthcheckArguments(args: readonly string[]): HealthcheckA
   let configPath: string | undefined;
   let timeoutMs = DEFAULT_TIMEOUT_MS;
   let help = false;
+  let mockRehearsal = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--help" || argument === "-h") {
       help = true;
+      continue;
+    }
+    if (argument === "--mock-rehearsal") {
+      if (mockRehearsal) throw new Error("--mock-rehearsal may only be specified once.");
+      mockRehearsal = true;
       continue;
     }
     if (argument === "--config") {
@@ -88,9 +96,32 @@ export function parseHealthcheckArguments(args: readonly string[]): HealthcheckA
   }
   return Object.freeze({
     help,
+    mockRehearsal,
     timeoutMs,
     ...(configPath === undefined ? {} : { configPath }),
   });
+}
+
+function assertMockRehearsalConfig(
+  config: Awaited<ReturnType<typeof loadExperimentConfig>>["config"],
+): void {
+  const failures: string[] = [];
+  if (config.device.mode !== "mock") failures.push("device.mode");
+  if (config.device.serialPath !== "") failures.push("device.serialPath");
+  if (config.device.allowMockInProduction) failures.push("device.allowMockInProduction");
+  if (!new Set(["127.0.0.1", "localhost", "::1"]).has(config.bindHost)) {
+    failures.push("bindHost");
+  }
+  if (config.network.allowLan) failures.push("network.allowLan");
+  if (config.network.allowExternalRuntimeRequests) {
+    failures.push("network.allowExternalRuntimeRequests");
+  }
+  if (config.formUrl !== "") failures.push("formUrl");
+  if (failures.length > 0) {
+    throw new Error(
+      `Mock healthcheck requires an explicit, loopback-only rehearsal config (${failures.join(", ")}).`,
+    );
+  }
 }
 
 export function healthcheckHost(bindHost: string): string {
@@ -107,7 +138,7 @@ function isHealthPayload(
   appVersion: string;
   protocolVersion: string;
   configHash: string;
-  deviceMode: "mock" | "serial";
+  deviceMode: "mock" | "serial" | "screen";
 } {
   if (payload === null || typeof payload !== "object") return false;
   const candidate = payload as Record<string, unknown>;
@@ -115,19 +146,26 @@ function isHealthPayload(
     && typeof candidate.appVersion === "string"
     && typeof candidate.protocolVersion === "string"
     && typeof candidate.configHash === "string"
-    && (candidate.deviceMode === "mock" || candidate.deviceMode === "serial");
+    && (
+      candidate.deviceMode === "mock"
+      || candidate.deviceMode === "serial"
+      || candidate.deviceMode === "screen"
+    );
 }
 
 export async function checkHealth(options: {
   readonly configPath: string;
   readonly rootDirectory: string;
   readonly timeoutMs: number;
+  readonly mockRehearsal?: boolean;
   readonly fetchImplementation?: typeof fetch;
 }): Promise<HealthcheckResult> {
+  const mockRehearsal = options.mockRehearsal ?? false;
   const loaded = await loadExperimentConfig(options.configPath, {
     rootDirectory: options.rootDirectory,
-    production: false,
+    production: !mockRehearsal,
   });
+  if (mockRehearsal) assertMockRehearsalConfig(loaded.config);
   const url = `http://${healthcheckHost(loaded.config.bindHost)}:${loaded.config.port}/healthz`;
   const fetchImplementation = options.fetchImplementation ?? fetch;
   const response = await fetchImplementation(url, {
@@ -173,6 +211,7 @@ export async function runHealthcheck(options: RunHealthcheckOptions = {}): Promi
       configPath: parsed.configPath ?? environment.EXPERIMENT_CONFIG_PATH ?? DEFAULT_CONFIG_PATH,
       rootDirectory: resolve(options.rootDirectory ?? process.cwd()),
       timeoutMs: parsed.timeoutMs,
+      mockRehearsal: parsed.mockRehearsal,
       ...(options.fetchImplementation === undefined
         ? {}
         : { fetchImplementation: options.fetchImplementation }),

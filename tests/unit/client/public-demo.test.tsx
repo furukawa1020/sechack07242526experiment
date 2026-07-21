@@ -38,6 +38,7 @@ describe("public demo", () => {
     expect(screen.getByText(PUBLIC_DEMO_COPY.notice.data)).toBeInTheDocument();
     expect(screen.getByText(PUBLIC_DEMO_COPY.notice.device)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: PUBLIC_DEMO_COPY.intro.title })).toBeInTheDocument();
+    expect(screen.getByText(/あなた自身を測定したものではありません/u)).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(
@@ -81,8 +82,8 @@ describe("public demo", () => {
     const expected = [
       ["クラウド", "高ストレス"],
       ["この端末内", "高ストレス"],
-      ["クラウド", "状態はフグ型デバイスに 反映されています"],
-      ["この端末内", "状態はフグ型デバイスに 反映されています"],
+      ["クラウド", "状態は画面上のフグの ふくらみで表されています"],
+      ["この端末内", "状態は画面上のフグの ふくらみで表されています"],
     ] as const;
 
     expected.forEach(([processing, result], index) => {

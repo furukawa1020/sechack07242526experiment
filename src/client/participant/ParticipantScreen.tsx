@@ -31,11 +31,12 @@ export function ParticipantScreen({ displayToken }: { readonly displayToken: str
     return () => { current = false; };
   }, [displayToken]);
 
-  const onMessage = useCallback((type: string, payload: unknown): void => {
+  const onMessage = useCallback((type: string, payload: unknown): boolean => {
     if (type === "session.snapshot" || type === "session.phaseChanged") {
       const parsed = parseParticipantSnapshot(payload);
-      if (parsed !== null) setSnapshot(parsed);
-      return;
+      if (parsed === null) return false;
+      setSnapshot(parsed);
+      return true;
     }
     const terminalPhase: Partial<Record<string, ExperimentPhase>> = {
       "session.completed": "completed",
@@ -47,12 +48,17 @@ export function ParticipantScreen({ displayToken }: { readonly displayToken: str
       const parsed = parseParticipantSnapshot(payload);
       setSnapshot((previous) => parsed ?? phaseFallback(previous, phase));
     }
+    return true;
   }, []);
 
   const socketQuery = useMemo(() => `displayToken=${encodeURIComponent(displayToken)}`, [displayToken]);
-  const realtime = useRealtime({ query: socketQuery, onMessage, announceDisplay: true });
-  const terminal = snapshot.phase === "completed" || snapshot.phase === "aborted" || snapshot.phase === "error";
-  const visibleSnapshot = !loaded || (realtime.status !== "open" && !terminal)
+  const realtime = useRealtime({
+    query: socketQuery,
+    enabled: loaded,
+    onMessage,
+    announceDisplay: true,
+  });
+  const visibleSnapshot = !loaded || realtime.status !== "open" || !realtime.synchronized
     ? phaseFallback(snapshot, "recovery")
     : snapshot;
 

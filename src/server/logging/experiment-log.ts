@@ -51,7 +51,7 @@ const experimentLogEventShape = {
   monotonicMs: z.number().finite().nonnegative(),
   fixedScore: z.number().int().min(0).max(100),
   pufferLevel: z.number().min(0).max(1),
-  deviceMode: z.enum(["mock", "serial"]),
+  deviceMode: z.enum(["mock", "serial", "screen"]),
   deviceStatus: z.enum(PUFFER_DEVICE_STATES).optional(),
   result: z.enum(["ok", "aborted", "error"]).optional(),
   errorCode: safeToken("errorCode", 100).optional(),

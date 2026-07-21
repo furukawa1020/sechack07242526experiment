@@ -79,6 +79,12 @@ describe("ExperimentLogEvent allowlist", () => {
       .toHaveProperty("errorCode", "ACK_TIMEOUT");
   });
 
+  it("accepts the formal screen device mode without widening the log allowlist", () => {
+    const screenEvent = event({ deviceMode: "screen" });
+    expect(screenEvent.deviceMode).toBe("screen");
+    expect(() => parseLogEvent({ ...screenEvent, screenAnimationFrame: 42 })).toThrow();
+  });
+
   it("rejects PII/unknown fields and contradictory condition metadata", () => {
     const valid = event({ phase: "result", sequenceIndex: 0, currentCondition: "A" });
     expect(() => parseLogEvent({ ...valid, email: "person@example.test" })).toThrow();

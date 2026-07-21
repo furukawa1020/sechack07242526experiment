@@ -163,7 +163,6 @@ export class WebSocketHub {
         ready: false,
         lastHeartbeatAt: performance.now(),
       };
-      safeSend(socket, { type: "session.snapshot", payload: this.controller.getPublicSnapshot(displayToken) });
     } else if (url.searchParams.get("role") === "operator") {
       if (
         this.operatorToken !== undefined &&
@@ -212,20 +211,42 @@ export class WebSocketHub {
       return;
     }
 
-    client.lastHeartbeatAt = performance.now();
     try {
       switch (parsed.data.type) {
         case "display.ready":
+          if (client.ready) {
+            client.socket.close(1008, "Display is already ready");
+            return;
+          }
           this.controller.markDisplayReady(client.displayToken, client.id);
           client.ready = true;
+          client.lastHeartbeatAt = performance.now();
+          // A display receives its first authoritative snapshot only after the
+          // controller has accepted this exact connection lease. In
+          // particular, a reconnect must never render an active puffer phase
+          // before the previous lease has been failed closed.
+          safeSend(client.socket, {
+            type: "session.snapshot",
+            payload: this.controller.getPublicSnapshot(client.displayToken),
+          });
           break;
         case "display.heartbeat":
+          if (!client.ready) {
+            client.socket.close(1008, "Display ready is required");
+            return;
+          }
           this.controller.noteDisplayHeartbeat(client.displayToken, client.id);
+          client.lastHeartbeatAt = performance.now();
           break;
         case "display.fullscreenState":
+          if (!client.ready) {
+            client.socket.close(1008, "Display ready is required");
+            return;
+          }
           // Fullscreen state is deliberately transient and is not participant research data.
           this.controller.noteDisplayHeartbeat(client.displayToken, client.id);
           this.controller.markDisplayFullscreen(client.displayToken, client.id, parsed.data.payload.fullscreen);
+          client.lastHeartbeatAt = performance.now();
           break;
       }
     } catch {
@@ -278,7 +299,7 @@ export class WebSocketHub {
         } catch {
           // A deliberately deleted setup session has no snapshot to broadcast.
         }
-      } else if (client.sessionId === event.sessionId) {
+      } else if (client.ready && client.sessionId === event.sessionId) {
         safeSend(client.socket, { type: event.type, payload: this.controller.getPublicSnapshot(client.displayToken) });
       }
     }

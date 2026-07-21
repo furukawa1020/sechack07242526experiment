@@ -30,7 +30,7 @@ function testConfig() {
     timingMs: {
       handling: 100,
       processing: 100,
-      result: 100,
+      result: 500,
       reset: 100,
       inflateRamp: 1,
       deflateRamp: 1,
@@ -104,6 +104,17 @@ function waitForClose(socket: WebSocket): Promise<number> {
   return new Promise((resolve) => socket.once("close", (code) => resolve(code)));
 }
 
+async function expectNoMessage(socket: WebSocket, waitMs = 25): Promise<void> {
+  const received: unknown[] = [];
+  const listener = (data: WebSocket.RawData): void => {
+    received.push(JSON.parse(data.toString()) as unknown);
+  };
+  socket.on("message", listener);
+  await new Promise((resolve) => setTimeout(resolve, waitMs));
+  socket.off("message", listener);
+  expect(received).toEqual([]);
+}
+
 describe("WebSocket synchronization", () => {
   const runningServers: RunningWebSocketTestServer[] = [];
 
@@ -115,7 +126,7 @@ describe("WebSocket synchronization", () => {
     }
   });
 
-  it("sends a participant-safe snapshot and rejects participant state changes", async () => {
+  it("sends a participant-safe snapshot only after ready and rejects participant state changes", async () => {
     const running = await start();
     runningServers.push(running);
     const created = await running.controller.create({
@@ -124,13 +135,16 @@ describe("WebSocket synchronization", () => {
       orderCode: "ABDC",
     });
     const socket = new WebSocket(`${running.wsUrl}?displayToken=${encodeURIComponent(created.displayToken)}`);
-    const messagePromise = nextMessage(socket);
     await waitForOpen(socket);
+    await expectNoMessage(socket);
+    expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(false);
+
+    const messagePromise = nextMessage(socket);
+    socket.send(JSON.stringify({ type: "display.ready" }));
     const initial = await messagePromise;
     const serialized = JSON.stringify(initial);
     expect(serialized).not.toMatch(/SH26|ABDC|conditionCode|researchId|sessionId/u);
 
-    socket.send(JSON.stringify({ type: "display.ready" }));
     await vi.waitFor(() => {
       expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(true);
     });
@@ -142,6 +156,69 @@ describe("WebSocket synchronization", () => {
     const closed = waitForClose(socket);
     socket.send(JSON.stringify({ type: "session.start" }));
     await expect(closed).resolves.toBe(1008);
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(false);
+    });
+  });
+
+  it.each([
+    ["heartbeat", { type: "display.heartbeat" }],
+    ["fullscreen", { type: "display.fullscreenState", payload: { fullscreen: true } }],
+  ] as const)("rejects %s before ready without marking the display connected", async (_name, message) => {
+    const running = await start();
+    runningServers.push(running);
+    const created = await running.controller.create({
+      researchId: "SH26-005",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    const socket = new WebSocket(`${running.wsUrl}?displayToken=${encodeURIComponent(created.displayToken)}`);
+    await waitForOpen(socket);
+    await expectNoMessage(socket);
+
+    const closed = waitForClose(socket);
+    socket.send(JSON.stringify(message));
+    await expect(closed).resolves.toBe(1008);
+    expect(running.controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+      displayConnected: false,
+      displayFullscreen: null,
+    });
+  });
+
+  it("does not expose an active puffer snapshot to a duplicate display lease", async () => {
+    const running = await start();
+    runningServers.push(running);
+    const created = await running.controller.create({
+      researchId: "SH26-006",
+      consentConfirmed: true,
+      orderCode: "CDBA",
+    });
+    const primary = new WebSocket(`${running.wsUrl}?displayToken=${encodeURIComponent(created.displayToken)}`);
+    await waitForOpen(primary);
+    const primarySnapshot = nextMessage(primary);
+    primary.send(JSON.stringify({ type: "display.ready" }));
+    await primarySnapshot;
+    await running.controller.prepare(created.snapshot.id);
+    await running.controller.start(created.snapshot.id);
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("result");
+    }, { timeout: 1_000 });
+
+    const duplicate = new WebSocket(`${running.wsUrl}?displayToken=${encodeURIComponent(created.displayToken)}`);
+    await waitForOpen(duplicate);
+    await expectNoMessage(duplicate);
+    const duplicateMessages: unknown[] = [];
+    duplicate.on("message", (data) => duplicateMessages.push(JSON.parse(data.toString()) as unknown));
+    const closed = waitForClose(duplicate);
+    duplicate.send(JSON.stringify({ type: "display.ready" }));
+    await expect(closed).resolves.toBe(1008);
+    expect(duplicateMessages).toEqual([]);
+    expect(running.controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+      phase: "result",
+      displayConnected: true,
+    });
+    await running.controller.abort(created.snapshot.id);
+    primary.close();
   });
 
   it("requires the operator token on protected WebSocket connections", async () => {

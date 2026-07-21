@@ -93,8 +93,9 @@ async function buildAndStartProductionServer(): Promise<RunningBuiltServer> {
       port,
       formUrl: FORM_URL,
       logging: { ...logging, directory: "./data/sessions" },
-      // This temporary deployment is an automated UI audit, never a production approval.
-      device: { ...device, allowMockInProduction: false },
+      // Exercise the formal hardware-free adapter through the compiled server.
+      // This remains an automated UI audit, never a production approval.
+      device: { ...device, mode: "screen", allowMockInProduction: false },
     }, null, 2)}\n`,
     "utf8",
   );
@@ -255,8 +256,8 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   expect(connected.ok()).toBeTruthy();
   await operator.goto(`${baseUrl}/operator`);
   await operator.getByLabel("研究用ID").fill("SH26-950");
-  await operator.getByRole("checkbox", { name: /リハーサル開始条件を確認済み/u }).check();
-  await operator.getByRole("button", { name: "リハーサルを準備" }).click();
+  await operator.getByRole("checkbox", { name: /研究説明・参加同意を確認済み/u }).check();
+  await operator.getByRole("button", { name: "セッションを準備" }).click();
   await expect(operator.getByRole("heading", { name: "進行状況" })).toBeVisible();
   const sessionId = await operator.evaluate(() => window.sessionStorage.getItem("sechack.active-session-id"));
   expect(sessionId).not.toBeNull();
@@ -293,7 +294,7 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   const prepareButton = operator.getByRole("button", { name: "共通導入を表示" });
   await expect(prepareButton).toBeEnabled();
   await prepareButton.click();
-  await expect(display.getByRole("heading", { name: "同じ身体データを、4つの方法で提示します" })).toBeVisible();
+  await expect(display.getByRole("heading", { name: "同じ固定模擬データを、4つの方法で提示します" })).toBeVisible();
   await operator.getByRole("button", { name: "提示を開始" }).click();
 
   await expect(display.getByRole("heading", { name: "4つの提示は終了しました" })).toBeVisible({
@@ -307,7 +308,7 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   expect(publicResponse.ok()).toBeTruthy();
   expect(record(record(await publicResponse.json()).snapshot)["formUrl"]).toBe(FORM_URL);
 
-  const formLink = display.getByRole("link", { name: "Googleフォームに戻って回答する" });
+  const formLink = display.getByRole("link", { name: "Googleフォームを開いて回答する" });
   await expect(formLink).toHaveAttribute("href", FORM_URL);
   await expect(formLink).toHaveAttribute("target", "_blank");
   await expect(formLink).toHaveAttribute("rel", /noreferrer/u);
@@ -330,8 +331,8 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   expect(externalRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
 
-  await operator.getByRole("checkbox", { name: /リハーサルの確認を完了済み/u }).check();
-  await operator.getByRole("button", { name: "確認を完了してリハーサル終了" }).click();
+  await operator.getByRole("checkbox", { name: /Googleフォームの回答完了を確認済み/u }).check();
+  await operator.getByRole("button", { name: "回答完了を確認してセッション完了" }).click();
   await expect(display.getByRole("heading", { name: "ご協力ありがとうございました" })).toBeVisible();
 
   const invalidDisplay = await context.newPage();

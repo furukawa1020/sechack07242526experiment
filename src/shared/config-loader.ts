@@ -6,7 +6,7 @@ import {
   parseExperimentConfig,
   type ExperimentConfig,
 } from "./schemas.js";
-import { assessFormAudit } from "./form-audit.js";
+import { assessProductionPolicy } from "./production-policy.js";
 
 export interface LoadExperimentConfigOptions {
   /** Repository root. Defaults to process.cwd(). */
@@ -86,14 +86,27 @@ export async function loadExperimentConfig(
   }
 
   const config = parseExperimentConfig(parsedJson);
-  if (options.production === true && config.device.mode === "mock") {
-    throw new Error("Mock device mode is unconditionally disabled in production.");
-  }
   if (options.production === true) {
-    const formAudit = assessFormAudit(config, options.currentDate ?? new Date());
-    if (!formAudit.approved) {
+    const productionPolicy = assessProductionPolicy(
+      config,
+      options.currentDate ?? new Date(),
+    );
+    if (productionPolicy.deviceIssues.includes("mock-device-not-allowed")) {
+      throw new Error("Mock device mode is unconditionally disabled in production.");
+    }
+    if (productionPolicy.deviceIssues.length > 0) {
       throw new Error(
-        `Production Google Form audit gate rejected the config (${formAudit.issues.join(", ")}).`,
+        `Production device policy rejected the config (${productionPolicy.deviceIssues.join(", ")}).`,
+      );
+    }
+    if (productionPolicy.protocolIssues.length > 0) {
+      throw new Error(
+        `Production screen protocol policy rejected the config (${productionPolicy.protocolIssues.join(", ")}).`,
+      );
+    }
+    if (!productionPolicy.formUrlMatchesStudy || !productionPolicy.formAudit.approved) {
+      throw new Error(
+        `Production Google Form audit gate rejected the config (${productionPolicy.formAudit.issues.join(", ")}).`,
       );
     }
   }

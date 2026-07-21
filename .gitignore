@@ -13,6 +13,20 @@ artifacts/coverage-*/
 artifacts/playwright-report/
 artifacts/test-results*/
 artifacts/screenshots/
+# Local venue/participant photography must never enter Git or release artifacts.
+photos/
+**/photos/
+*.jpg
+*.jpeg
+*.heic
+*.png
+*.webp
+*.avif
+*.tif
+*.tiff
+*.bmp
+*.dng
+*.raw
 playwright/.cache/
 *.log
 .env

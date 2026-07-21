@@ -70,6 +70,7 @@ export function securityMiddleware(options: SecurityOptions) {
     response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     response.setHeader("Referrer-Policy", "no-referrer");
     response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("X-DNS-Prefetch-Control", "off");
     response.setHeader("X-Frame-Options", "DENY");
     if (request.path.startsWith("/api/") || request.path === "/healthz") {
       response.setHeader("Cache-Control", "no-store");

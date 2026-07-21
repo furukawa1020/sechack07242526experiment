@@ -10,6 +10,10 @@ import {
   startServer,
   type RunningExperimentServer,
 } from "../../../src/server/index.js";
+import {
+  SCREEN_PROTOCOL_VERSION,
+  STUDY_FORM_URL,
+} from "../../../src/shared/schemas.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -43,11 +47,12 @@ async function createRehearsalFixture(overrides: {
   readonly bindHost?: string;
   readonly allowLan?: boolean;
   readonly allowExternalRuntimeRequests?: boolean;
-  readonly deviceMode?: "mock" | "serial";
+  readonly deviceMode?: "mock" | "serial" | "screen";
   readonly allowMockInProduction?: boolean;
   readonly formUrl?: string;
   readonly loggingDirectory?: string;
   readonly researchIdPattern?: string;
+  readonly formAuditGo?: boolean;
 } = {}): Promise<string> {
   const source = record(JSON.parse(
     await readFile(resolve("config", "experiment.e2e.json"), "utf8"),
@@ -68,30 +73,56 @@ async function createRehearsalFixture(overrides: {
     "utf8",
   );
   const deviceMode = overrides.deviceMode ?? "mock";
+  const protocolVersion = deviceMode === "screen"
+    ? SCREEN_PROTOCOL_VERSION
+    : deviceMode === "serial"
+      ? "serial-start-server-test-v1"
+      : source["protocolVersion"];
+  const formUrl = overrides.formUrl ?? "";
+  const formalScreenProduction = deviceMode === "screen" && overrides.formAuditGo === true;
   await writeFile(
     join(root, "config", "rehearsal.json"),
     `${JSON.stringify({
       ...source,
+      protocolVersion,
       researchIdPattern: overrides.researchIdPattern ?? "^DEMO-[0-9]{3}$",
       bindHost: overrides.bindHost ?? "127.0.0.1",
       port: await reservePort(),
-      timingMs: {
-        ...timing,
-        result: 500,
-        reset: 500,
-        inflateRamp: 250,
-        deflateRamp: 250,
-      },
+      timingMs: formalScreenProduction
+        ? {
+            handling: 8_000,
+            processing: 3_000,
+            result: 15_000,
+            reset: 7_000,
+            inflateRamp: 6_000,
+            deflateRamp: 6_000,
+          }
+        : {
+            ...timing,
+            result: 500,
+            reset: 500,
+            inflateRamp: 250,
+            deflateRamp: 250,
+          },
       device: {
         ...device,
         mode: deviceMode,
         serialPath: deviceMode === "serial" ? "COM7" : "",
         allowMockInProduction: overrides.allowMockInProduction ?? false,
       },
-      formUrl: overrides.formUrl ?? "",
+      formUrl,
       // Form-audit evidence is a production-release gate and deliberately
       // optional for this synthetic server-mode fixture.
-      formAudit: undefined,
+      formAudit: overrides.formAuditGo === true
+        ? {
+            status: "GO",
+            protocolVersion,
+            formUrl,
+            auditedOn: "2026-07-21",
+            contentSha256: "a".repeat(64),
+            twoPersonVerified: true,
+          }
+        : undefined,
       logging: {
         ...logging,
         directory: overrides.loggingDirectory ?? "./data/mock-sessions",
@@ -133,18 +164,92 @@ describe("startServer production safeguards", () => {
     })).rejects.toThrow(/unconditionally disabled/iu);
   });
 
-  it("rejects Serial production startup when form-audit GO evidence is missing", async () => {
+  it("rejects Serial production startup before evaluating form-audit evidence", async () => {
     const root = await createRehearsalFixture({ deviceMode: "serial" });
     await expect(startServer({
       rootDirectory: root,
       configPath: "config/rehearsal.json",
       mode: "production",
-    })).rejects.toThrow(/Google Form audit gate.*missing/iu);
+    })).rejects.toThrow(/Production device policy.*serial-device-not-allowed/iu);
+  });
+
+  it("starts formal screen production without Serial hardware and auto-connects safely", async () => {
+    const root = await createRehearsalFixture({
+      deviceMode: "screen",
+      formUrl: STUDY_FORM_URL,
+      formAuditGo: true,
+      loggingDirectory: "./data/sessions",
+      researchIdPattern: "^SH26-[0-9]{3}$",
+    });
+    const server = await startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "production",
+    });
+    runningServers.push(server);
+
+    const health = await fetch(`${server.url}/healthz`);
+    await expect(health.json()).resolves.toMatchObject({
+      status: "ok",
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      deviceMode: "screen",
+    });
+    const deviceStatus = await fetch(`${server.url}/api/device/status`);
+    await expect(deviceStatus.json()).resolves.toMatchObject({
+      status: { connected: true, state: "idle", level: 0, fault: null, mode: "screen" },
+    });
   });
 
   it("treats a compiled entry as production even when NODE_ENV is test", () => {
     expect(inferServerMode(resolve("dist-server", "index.js"), "test")).toBe("production");
-    expect(inferServerMode(resolve("src", "server", "index.ts"), "test")).toBe("test");
+    expect(inferServerMode(resolve("src", "server", "index.ts"), "test"))
+      .toBe("development");
+    expect(inferServerMode(resolve("src", "server", "index.ts"), "production"))
+      .toBe("production");
+  });
+
+  it.each(["screen", "serial"] as const)(
+    "rejects a %s adapter in development before it can bypass production gates",
+    async (deviceMode) => {
+      const root = await createRehearsalFixture({
+        deviceMode,
+        ...(deviceMode === "screen"
+          ? {
+              formUrl: STUDY_FORM_URL,
+              formAuditGo: true,
+              loggingDirectory: "./data/sessions",
+              researchIdPattern: "^SH26-[0-9]{3}$",
+            }
+          : {}),
+      });
+
+      await expect(startServer({
+        rootDirectory: root,
+        configPath: "config/rehearsal.json",
+        mode: "development",
+      })).rejects.toThrow(/Development mode requires the Mock device adapter/iu);
+    },
+  );
+
+  it("does not let NODE_ENV=test turn a direct source start into test mode", async () => {
+    const root = await createRehearsalFixture({
+      deviceMode: "screen",
+      formUrl: STUDY_FORM_URL,
+      formAuditGo: true,
+      loggingDirectory: "./data/sessions",
+      researchIdPattern: "^SH26-[0-9]{3}$",
+    });
+    const previousNodeEnvironment = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+    try {
+      await expect(startServer({
+        rootDirectory: root,
+        configPath: "config/rehearsal.json",
+      })).rejects.toThrow(/Development mode requires the Mock device adapter/iu);
+    } finally {
+      if (previousNodeEnvironment === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnvironment;
+    }
   });
 
   it("shares one safe shutdown operation across repeated close calls", async () => {
@@ -173,6 +278,7 @@ describe("startServer production safeguards", () => {
     const operator = await fetch(`${server.url}/operator`);
     expect(operator.status).toBe(200);
     expect(operator.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    expect(operator.headers.get("x-dns-prefetch-control")).toBe("off");
     await expect(operator.text()).resolves.toContain("built-rehearsal-client");
 
     const initialStatus = await fetch(`${server.url}/api/device/status`);
@@ -203,6 +309,15 @@ describe("startServer production safeguards", () => {
 
     expect(inferServerMode(resolve("dist-server", "index.js"), "development"))
       .toBe("production");
+  });
+
+  it("keeps rehearsal Mock-only when the formal screen adapter is configured", async () => {
+    const root = await createRehearsalFixture({ deviceMode: "screen" });
+    await expect(startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "rehearsal",
+    })).rejects.toThrow(/Rehearsal mode requires the Mock device adapter/iu);
   });
 
   it("rejects LAN and external-runtime configurations in rehearsal", async () => {

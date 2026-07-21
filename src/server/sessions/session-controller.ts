@@ -67,10 +67,8 @@ function errorCode(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function isPufferPhase(session: RuntimeSession): boolean {
-  if (session.currentCondition === null) return false;
-  const condition = CONDITIONS[session.currentCondition];
-  return condition.presentation === "puffer" && (session.phase === "result" || session.phase === "reset");
+function isStimulusCriticalPhase(session: RuntimeSession): boolean {
+  return session.phase === "result" || session.phase === "reset";
 }
 
 function isSafeDeflatedStatus(status: DeviceStatus): boolean {
@@ -285,7 +283,7 @@ export class SessionController {
     return this.activeSessionId === null ? null : this.getOperatorSnapshot(this.activeSessionId);
   }
 
-  public getDeviceMode(): "mock" | "serial" {
+  public getDeviceMode(): ServerExperimentConfig["device"]["mode"] {
     return this.config.device.mode;
   }
 
@@ -493,8 +491,8 @@ export class SessionController {
       this.handleBackgroundFailure(error, "AUDIT_STORAGE_FAILED");
     }));
 
-    if (this.activeSessionId === updated.id && isPufferPhase(updated)) {
-      void this.failSession(updated, "DISPLAY_LOST_DURING_PUFFER").catch((error: unknown) => {
+    if (this.activeSessionId === updated.id && isStimulusCriticalPhase(updated)) {
+      void this.failSession(updated, "DISPLAY_LOST_DURING_STIMULUS").catch((error: unknown) => {
         this.handleBackgroundFailure(error, "DISPLAY_FAILURE_HANDLER_FAILED");
       });
       return;
@@ -527,7 +525,7 @@ export class SessionController {
     const session = this.sessionForToken(displayToken);
     const connections = this.readyDisplayConnections.get(session.id);
     if (connections?.has(connectionId) !== true) {
-      this.markDisplayReady(displayToken, connectionId);
+      throw conflict("参加者画面のready確認が必要です。", "DISPLAY_NOT_READY");
     }
   }
 
@@ -634,6 +632,9 @@ export class SessionController {
         requestId: randomUUID(),
       });
       this.trackBackgroundTask(this.auditActiveDeviceEvent("device.deflate.ack"));
+      if (this.config.device.mode === "screen") {
+        return { status: await this.device.getStatus(), ack };
+      }
       const status = await waitForConfirmedDeflatedStatus(this.device, {
         timeoutMs: this.config.timingMs.deflateRamp + this.config.device.ackTimeout + 1_000,
       });
@@ -942,9 +943,20 @@ export class SessionController {
     this.handlingFailure = true;
     try {
       this.cancelTimer();
+      const protectedSession = this.patchSession(current, {
+        recoveryRequired: true,
+        phaseEndsAt: null,
+        phaseEndsMonotonicMs: null,
+        remainingMs: null,
+      });
+      this.sessions.set(protectedSession.id, protectedSession);
+      this.emit({ type: "session.snapshot", sessionId: protectedSession.id });
+      await this.safeStopAndDeflate();
+
       const monotonic = this.monotonicNow();
       const timestamp = this.now().toISOString();
-      const updated = this.transition(current, "error", {
+      const latest = this.sessions.get(protectedSession.id) ?? protectedSession;
+      const updated = this.transition(latest, "error", {
         result: "error",
         errorCode: failureCode,
         recoveryRequired: false,
@@ -955,9 +967,7 @@ export class SessionController {
         remainingMs: null,
       });
       this.sessions.set(updated.id, updated);
-      const safety = this.safeStopAndDeflate();
       this.emit({ type: "session.error", sessionId: updated.id });
-      await safety;
       try {
         await this.audit(this.get(updated.id), "session.error");
       } catch (error) {
@@ -1021,7 +1031,9 @@ export class SessionController {
   private requireSafetyConfirmed(): void {
     if (this.lastSafetyFailure !== null) {
       throw conflict(
-        "STOPまたはDEFLATEを確認できません。物理安全を確認し、緊急停止を再送してください。",
+        this.config.device.mode === "screen"
+          ? "STOPまたはDEFLATEを確認できません。画面刺激を中止し、サーバーを再起動してください。"
+          : "STOPまたはDEFLATEを確認できません。物理安全を確認し、緊急停止を再送してください。",
         "DEVICE_SAFETY_UNCONFIRMED",
       );
     }
@@ -1140,7 +1152,9 @@ export class SessionController {
     const publicView = this.publicSnapshot(session);
     return {
       ...session,
-      serverNow: this.now().toISOString(),
+      serverNow: publicView.serverNow,
+      pufferSurface: publicView.pufferSurface,
+      pufferRamp: publicView.pufferRamp,
       displayToken: token,
       displayUrl: this.displayUrl(token),
       current: publicView.current,
@@ -1152,6 +1166,8 @@ export class SessionController {
   }
 
   private publicSnapshot(session: RuntimeSession): PublicSessionSnapshot {
+    const monotonicNow = this.monotonicNow();
+    const serverNow = this.now().toISOString();
     const showCondition = session.currentCondition !== null && TIMED_PHASES.has(session.phase);
     const current = showCondition
       ? this.publicCondition(session.currentCondition as ConditionCode, this.requireSequenceIndex(session))
@@ -1173,13 +1189,18 @@ export class SessionController {
       fixedState: showLabelState
         ? { score: session.fixedState.score, label: session.fixedState.label }
         : null,
+      pufferSurface: this.config.device.mode === "serial" ? "physical" : "screen",
+      pufferRamp: {
+        inflateMs: this.config.timingMs.inflateRamp,
+        deflateMs: this.config.timingMs.deflateRamp,
+      },
       phaseStartedAt: session.phaseStartedAt,
       phaseEndsAt: session.phaseEndsAt,
       remainingMs:
         session.phaseEndsMonotonicMs === null
           ? session.remainingMs
-          : Math.max(0, session.phaseEndsMonotonicMs - this.monotonicNow()),
-      serverNow: this.now().toISOString(),
+          : Math.max(0, session.phaseEndsMonotonicMs - monotonicNow),
+      serverNow,
       recoveryRequired: session.recoveryRequired,
       result: session.result,
       summary,

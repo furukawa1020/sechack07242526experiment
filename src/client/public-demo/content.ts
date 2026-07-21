@@ -55,10 +55,10 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
     device: "実機なし",
   },
   intro: {
-    title: "同じ身体データを、4つの方法で提示します",
+    title: "同じ固定模擬データを、4つの方法で提示します",
     body: "変わるのは、「どこで処理するか」と「どう伝えるか」です。\n\nあなたは、少し本調子ではないまま作業を続けている場面を想定してください。\n\nどの方法が正しいかを選ぶ課題ではありません。\nそれぞれを見たときに、どう感じたかを覚えておいてください。",
     scenario:
-      "これから表示されるデータの取扱いは、比較のためのシナリオです。\nこの公開デモで、実際の身体データをクラウドへ送信・保存することはありません。",
+      "これから表示されるデータの取扱いは、比較のためのシナリオです。\n表示される値は、あなた自身を測定したものではありません。\nこの公開デモで、実際の身体データをクラウドへ送信・保存することはありません。",
   },
   presentation: {
     position: (position: number): string => `第${position}提示 / 4`,
@@ -85,8 +85,8 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
   result: {
     title: "現在の状態",
     metric: "状態指標",
-    puffer: "状態はフグ型デバイスに\n反映されています",
-    deviceNote: "公開デモでは実機は接続・動作していません。",
+    puffer: "状態は画面上のフグの\nふくらみで表されています",
+    deviceNote: "画面上だけの表現で、実機は接続・動作していません。",
   },
   footer: {
     scenario: "比較用シナリオ",
@@ -101,11 +101,11 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
     conditionLabels: {
       cloud: {
         label: "クラウド × 状態ラベル",
-        puffer: "クラウド × フグのふくらみ",
+        puffer: "クラウド × 画面上のフグのふくらみ",
       },
       local: {
         label: "この端末内 × 状態ラベル",
-        puffer: "この端末内 × フグのふくらみ",
+        puffer: "この端末内 × 画面上のフグのふくらみ",
       },
     },
   },

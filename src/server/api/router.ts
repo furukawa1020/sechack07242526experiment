@@ -47,7 +47,9 @@ export function createApiRouter(
   testHooks?: ApiTestHooks,
 ): Router {
   const router = Router();
-  const withDeviceMode = <Status extends object>(status: Status): Status & { mode: "mock" | "serial" } => ({
+  const withDeviceMode = <Status extends object>(
+    status: Status,
+  ): Status & { mode: ServerExperimentConfig["device"]["mode"] } => ({
     ...status,
     mode: config.device.mode,
   });

@@ -19,10 +19,12 @@ import {
   type ReleaseManifest,
 } from "../../../scripts/release-manifest.js";
 import { runReleaseVerification } from "../../../scripts/verify-release.js";
+import { SCREEN_PROTOCOL_VERSION } from "../../../src/shared/schemas.js";
 
 interface ConfigOverrides {
   readonly allowLan?: boolean;
-  readonly mode?: "mock" | "serial";
+  readonly mode?: "mock" | "serial" | "screen";
+  readonly protocolVersion?: string;
   readonly serialPath?: string;
   readonly allowMockInProduction?: boolean;
   readonly bindHost?: string;
@@ -39,15 +41,18 @@ const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
 const TODAY_IN_JAPAN = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
 
 function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
-  const mode = overrides.mode ?? "serial";
+  const mode = overrides.mode ?? "screen";
+  const protocolVersion = overrides.protocolVersion
+    ?? (mode === "screen" ? SCREEN_PROTOCOL_VERSION : "release-test-v1");
   const formUrl = overrides.formUrl ?? STUDY_FORM_URL;
   return {
     schemaVersion: 1,
-    protocolVersion: "release-test-v1",
+    protocolVersion,
     studyTitle: "リリース合成設定",
     bindHost: overrides.bindHost ?? "127.0.0.1",
     port: 4173,
-    researchIdPattern: overrides.researchIdPattern ?? "^TEST-[0-9]{3}$",
+    researchIdPattern: overrides.researchIdPattern
+      ?? (mode === "screen" ? "^SH26-[0-9]{3}$" : "^TEST-[0-9]{3}$"),
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
     timingMs: {
@@ -68,7 +73,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     formUrl,
     formAudit: {
       status: formUrl === "" ? "NO-GO" : "GO",
-      protocolVersion: "release-test-v1",
+      protocolVersion,
       formUrl,
       auditedOn: TODAY_IN_JAPAN,
       contentSha256: "c".repeat(64),
@@ -221,6 +226,10 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
     "TEST_REPORT",
     "RELEASE_CHECKLIST",
     "FORM_AUDIT",
+    "FORM_RELEASE_GATE",
+    "FORM_OWNER_FIX_GUIDE",
+    "MOCK_REHEARSAL",
+    "PUBLIC_DEMO",
   ] as const) {
     await writeRelative(root, `docs/${name}.md`, `# ${name}\n`);
   }
@@ -454,6 +463,12 @@ describe("release creation", () => {
 
   it.each([
     ["Mock device", { mode: "mock", serialPath: "" } satisfies ConfigOverrides, "device.mode"],
+    ["Serial device", { mode: "serial", serialPath: "COM3" } satisfies ConfigOverrides, "device.mode"],
+    [
+      "arbitrary protocol",
+      { protocolVersion: "arbitrary-screen-v2" } satisfies ConfigOverrides,
+      "protocolVersion",
+    ],
     [
       "production Mock permission",
       { allowMockInProduction: true } satisfies ConfigOverrides,
@@ -507,7 +522,7 @@ describe("release creation", () => {
         installDependencies: false,
         writeLine: () => undefined,
       }),
-    ).rejects.toThrow("Mock rehearsal release gate failed: device.mode");
+    ).rejects.toThrow("Mock rehearsal preflight failed: device.mode");
     expect(await pathExists(join(root, "release", "not-mock"))).toBe(false);
   });
 
@@ -596,7 +611,7 @@ describe("release creation", () => {
     ) as Record<string, unknown>;
     expect(runtimePackage.scripts).toEqual({
       healthcheck:
-        "node dist-server/healthcheck.js --config config/experiment.mock-rehearsal.json",
+        "node dist-server/healthcheck.js --mock-rehearsal --config config/experiment.mock-rehearsal.json",
       "release:verify": "node dist-server/verify-release.js",
       start:
         "node dist-server/verify-release.js && node dist-server/rehearsal.js --mock-rehearsal",
@@ -610,6 +625,7 @@ describe("release creation", () => {
     expect(launcher).toContain("DATA_DIRECTORY=data\\mock-sessions");
     expect(launcher).toContain("http://127.0.0.1:4173/operator");
     expect(launcher).toContain("dist-server\\healthcheck.js");
+    expect(launcher).toContain("--mock-rehearsal --config");
     expect(launcher).not.toContain("Invoke-WebRequest");
     expect(launcher).toContain("Start-Process $operator");
     expect(launcher).toContain("Press Ctrl+C once");
@@ -659,9 +675,14 @@ describe("release creation", () => {
         "dist-server/preflight.js",
         "dist-server/verify-release.js",
         "docs/DEVICE_PROTOCOL.md",
+        "docs/DEPLOYMENT.md",
         "docs/EXPERIMENT_SPEC.md",
         "docs/FORM_AUDIT.md",
+        "docs/FORM_RELEASE_GATE.md",
+        "docs/FORM_OWNER_FIX_GUIDE.md",
+        "docs/MOCK_REHEARSAL.md",
         "docs/PROTOCOL_CHANGELOG.md",
+        "docs/PUBLIC_DEMO.md",
         "docs/RELEASE_CHECKLIST.md",
         "docs/RUNBOOK.md",
         "docs/TEST_REPORT.md",
@@ -692,7 +713,7 @@ describe("release creation", () => {
       await readFile(join(output, RELEASE_MANIFEST_NAME), "utf8"),
     ) as ReleaseManifest;
     expect(manifest.appVersion).toBe("9.8.7");
-    expect(manifest.protocolVersion).toBe("release-test-v1");
+    expect(manifest.protocolVersion).toBe(SCREEN_PROTOCOL_VERSION);
     expect(manifest.sourceCommit).toBe(sourceCommit);
     expect(manifest.sourceCommit).toMatch(/^[a-f0-9]{40}$/u);
     expect(manifest.sourceRepository).toBe(SYNTHETIC_SOURCE_REPOSITORY);

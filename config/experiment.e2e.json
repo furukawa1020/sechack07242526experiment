@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "protocolVersion": "R8-010-2x2-mock-v3",
+  "protocolVersion": "R8-010-2x2-screen-v1",
   "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
   "bindHost": "127.0.0.1",
   "port": 4173,
@@ -11,7 +11,7 @@
     "handling": 100,
     "processing": 80,
     "result": 500,
-    "reset": 100,
+    "reset": 250,
     "inflateRamp": 50,
     "deflateRamp": 50
   },
@@ -25,7 +25,7 @@
   "formUrl": "https://docs.google.com/forms/d/e/TEST_FORM_ID/viewform",
   "formAudit": {
     "status": "NO-GO",
-    "protocolVersion": "R8-010-2x2-mock-v3",
+    "protocolVersion": "R8-010-2x2-screen-v1",
     "formUrl": "https://docs.google.com/forms/d/e/TEST_FORM_ID/viewform",
     "auditedOn": "2026-07-21",
     "contentSha256": "33762250e42e9cb63900ccd58a64923f4047693086a81a3737cfe7cbb72d9476",

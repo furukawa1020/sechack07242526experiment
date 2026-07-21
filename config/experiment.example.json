@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "protocolVersion": "R8-010-2x2-mock-v3",
+  "protocolVersion": "R8-010-2x2-screen-v1",
   "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
   "bindHost": "127.0.0.1",
   "port": 4173,

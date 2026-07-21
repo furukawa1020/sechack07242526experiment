@@ -14,6 +14,7 @@ import {
   runPreflight,
 } from "../../../scripts/preflight.js";
 import {
+  SCREEN_PROTOCOL_VERSION,
   parseExperimentConfig,
   STUDY_FORM_URL,
   type ExperimentConfig,
@@ -35,7 +36,8 @@ function goFormAudit(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 function configSource(overrides: {
-  readonly mode?: "mock" | "serial";
+  readonly mode?: "mock" | "serial" | "screen";
+  readonly protocolVersion?: string;
   readonly serialPath?: string;
   readonly allowMockInProduction?: boolean;
   readonly formUrl?: string;
@@ -43,13 +45,17 @@ function configSource(overrides: {
   readonly omitFormAudit?: boolean;
 } = {}): Record<string, unknown> {
   const formUrl = overrides.formUrl ?? STUDY_FORM_URL;
+  const mode = overrides.mode ?? "screen";
+  const protocolVersion = overrides.protocolVersion ?? (mode === "screen"
+    ? SCREEN_PROTOCOL_VERSION
+    : "test-protocol-v1");
   const source: Record<string, unknown> = {
     schemaVersion: 1,
-    protocolVersion: "test-protocol-v1",
+    protocolVersion,
     studyTitle: "合成テスト設定",
     bindHost: "127.0.0.1",
     port: 4173,
-    researchIdPattern: "^TEST-[0-9]{3}$",
+    researchIdPattern: mode === "screen" ? "^SH26-[0-9]{3}$" : "^TEST-[0-9]{3}$",
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
     timingMs: {
@@ -61,14 +67,14 @@ function configSource(overrides: {
       deflateRamp: 6_000,
     },
     device: {
-      mode: overrides.mode ?? "serial",
-      serialPath: overrides.serialPath ?? "COM3",
+      mode,
+      serialPath: overrides.serialPath ?? (mode === "screen" ? "" : "COM3"),
       baudRate: 115_200,
       ackTimeout: 1_000,
       allowMockInProduction: overrides.allowMockInProduction ?? false,
     },
     formUrl,
-    formAudit: overrides.formAudit ?? goFormAudit({ formUrl }),
+    formAudit: overrides.formAudit ?? goFormAudit({ formUrl, protocolVersion }),
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -122,10 +128,59 @@ describe("preflight production gates", () => {
     expect(isWindowsComPath("/dev/ttyUSB0")).toBe(false);
   });
 
-  it("passes a complete Serial production configuration", () => {
-    const config = parseExperimentConfig(configSource());
-    expect(evaluatePreflightGates(config, false, AUDIT_NOW).filter((check) => check.status === "fail"))
-      .toEqual([]);
+  it("rejects every Serial production configuration", () => {
+    const config = parseExperimentConfig(configSource({ mode: "serial" }));
+    const failures = evaluatePreflightGates(config, false, AUDIT_NOW)
+      .filter((check) => check.status === "fail")
+      .map((check) => check.name);
+    expect(failures).toEqual(expect.arrayContaining([
+      "device.mode",
+      "device.serialPath",
+      "protocolVersion",
+      "protocol.fixedParameters",
+    ]));
+  });
+
+  it("passes a complete screen production configuration without a Serial path", () => {
+    const config = parseExperimentConfig(configSource({ mode: "screen" }));
+    const deviceChecks = evaluatePreflightGates(config, false, AUDIT_NOW).filter(
+      (check) => check.name.startsWith("device."),
+    );
+    expect(deviceChecks.every((check) => check.status === "pass")).toBe(true);
+    expect(deviceChecks.find((check) => check.name === "device.serialPath")?.detail)
+      .toContain("Serialポートを使用しません");
+    expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
+      (check) => check.name === "protocol.fixedParameters",
+    )?.status).toBe("pass");
+  });
+
+  it("rejects an arbitrary protocolVersion even when the remaining screen metadata is formal", () => {
+    const base = parseExperimentConfig(configSource({ mode: "screen" }));
+    const arbitrary = {
+      ...base,
+      protocolVersion: "arbitrary-screen-v2",
+      formAudit: { ...base.formAudit!, protocolVersion: "arbitrary-screen-v2" },
+    } as ExperimentConfig;
+    expect(evaluatePreflightGates(arbitrary, false, AUDIT_NOW).find(
+      (check) => check.name === "protocolVersion",
+    )).toMatchObject({ status: "fail" });
+  });
+
+  it("fails modified screen-v1 parameters only at the production gate", () => {
+    const base = parseExperimentConfig(configSource({ mode: "screen" }));
+    const modified = {
+      ...base,
+      timingMs: { ...base.timingMs, result: 15_001 },
+    } as ExperimentConfig;
+    expect(evaluatePreflightGates(modified, false, AUDIT_NOW).find(
+      (check) => check.name === "protocol.fixedParameters",
+    )).toMatchObject({
+      status: "fail",
+      detail: expect.stringContaining("screen-timing-mismatch"),
+    });
+    expect(evaluatePreflightGates(modified, true, AUDIT_NOW).find(
+      (check) => check.name === "protocol.fixedParameters",
+    )?.status).toBe("warning");
   });
 
   it("rejects a different Google Forms URL even when its shape and audit are valid", () => {
@@ -183,6 +238,7 @@ describe("preflight production gates", () => {
       .toBe(false);
   });
 
+
   it("always rejects production Mock permission and external runtime requests", () => {
     const allowsMock = parseExperimentConfig(configSource({ allowMockInProduction: true }));
     const externalRequests = {
@@ -197,6 +253,17 @@ describe("preflight production gates", () => {
     )?.status).toBe("fail");
     expect(evaluatePreflightGates(externalRequests, true).find(
       (check) => check.name === "network.allowExternalRuntimeRequests",
+    )?.status).toBe("fail");
+  });
+
+  it("rejects a Serial path on a screen production config", () => {
+    const valid = parseExperimentConfig(configSource({ mode: "screen" }));
+    const invalid = {
+      ...valid,
+      device: { ...valid.device, serialPath: "COM3" },
+    } as ExperimentConfig;
+    expect(evaluatePreflightGates(invalid, false, AUDIT_NOW).find(
+      (check) => check.name === "device.serialPath",
     )?.status).toBe("fail");
   });
 });

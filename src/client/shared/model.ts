@@ -1,3 +1,13 @@
+import {
+  CONDITIONS,
+  type ConditionCode as SharedConditionCode,
+  type ExperimentPhase as ServerExperimentPhase,
+  type FixedState as SharedFixedState,
+  type OrderCode as SharedOrderCode,
+  type PresentationMode as SharedPresentationMode,
+  type ProcessingLocation as SharedProcessingLocation,
+} from "../../shared/index.js";
+
 export const EXPERIMENT_PHASES = [
   "idle",
   "setup",
@@ -19,6 +29,12 @@ export type PresentationMode = SharedPresentationMode;
 export type OrderCode = SharedOrderCode;
 export type ConditionCode = SharedConditionCode;
 export type FixedState = SharedFixedState;
+export type PufferSurface = "screen" | "physical";
+
+export interface PufferRamp {
+  readonly inflateMs: number;
+  readonly deflateMs: number;
+}
 
 export interface PublicCondition {
   readonly processing: ProcessingLocation;
@@ -36,14 +52,19 @@ export interface ParticipantSnapshot {
   readonly sequenceIndex: 0 | 1 | 2 | 3 | null;
   readonly condition: PublicCondition | null;
   readonly fixedState: ParticipantFixedState | null;
+  readonly pufferSurface: PufferSurface;
+  readonly pufferRamp: PufferRamp | null;
+  readonly phaseStartedAt: string | null;
   readonly phaseEndsAt: string | null;
   readonly serverNow: string | null;
+  /** Server-monotonic time remaining in the current phase. */
+  readonly remainingMs: number | null;
   readonly summary: readonly PublicCondition[];
   readonly formUrl: string | null;
 }
 
 export interface DeviceStatus {
-  readonly mode: "mock" | "serial" | "unknown";
+  readonly mode: "mock" | "serial" | "screen" | "unknown";
   readonly state:
     | "disconnected"
     | "connecting"
@@ -121,8 +142,12 @@ export const EMPTY_PARTICIPANT_SNAPSHOT: ParticipantSnapshot = {
   sequenceIndex: null,
   condition: null,
   fixedState: null,
+  pufferSurface: "physical",
+  pufferRamp: null,
+  phaseStartedAt: null,
   phaseEndsAt: null,
   serverNow: null,
+  remainingMs: null,
   summary: [],
   formUrl: null,
 };
@@ -178,6 +203,45 @@ function processingValue(value: unknown): ProcessingLocation | null {
 
 function presentationValue(value: unknown): PresentationMode | null {
   return value === "label" || value === "puffer" ? value : null;
+}
+
+function pufferSurfaceValue(value: unknown): PufferSurface | null {
+  return value === "screen" || value === "physical" ? value : null;
+}
+
+function pufferRampValue(value: unknown): PufferRamp | null {
+  if (!isRecord(value)) return null;
+  const inflateMs = numberValue(value, "inflateMs");
+  const deflateMs = numberValue(value, "deflateMs");
+  if (
+    inflateMs === null
+    || deflateMs === null
+    || !Number.isInteger(inflateMs)
+    || !Number.isInteger(deflateMs)
+    || inflateMs <= 0
+    || deflateMs <= 0
+    || inflateMs > 600_000
+    || deflateMs > 600_000
+  ) return null;
+  return { inflateMs, deflateMs };
+}
+
+const ISO_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
+
+function nullableIsoInstant(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return typeof value === "string"
+    && ISO_INSTANT_PATTERN.test(value)
+    && Number.isFinite(Date.parse(value))
+    ? value
+    : undefined;
+}
+
+function nullableRemainingMs(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 function orderValue(value: unknown): OrderCode | null {
@@ -238,6 +302,22 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot | 
   if (!isRecord(value)) return null;
   const parsedPhase = phaseValue(value["phase"]);
   if (parsedPhase === null) return null;
+  const pufferSurface = pufferSurfaceValue(value["pufferSurface"]);
+  const pufferRamp = pufferRampValue(value["pufferRamp"]);
+  const phaseStartedAt = nullableIsoInstant(value["phaseStartedAt"]);
+  const phaseEndsAt = nullableIsoInstant(value["phaseEndsAt"]);
+  const serverNow = nullableIsoInstant(value["serverNow"]);
+  const remainingMs = nullableRemainingMs(value["remainingMs"]);
+  if (
+    pufferSurface === null
+    || pufferRamp === null
+    || phaseStartedAt === undefined
+    || phaseEndsAt === undefined
+    || serverNow === undefined
+    || remainingMs === undefined
+  ) {
+    return null;
+  }
   const shouldRecover = value["recoveryRequired"] === true
     && parsedPhase !== "completed"
     && parsedPhase !== "aborted"
@@ -259,8 +339,12 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot | 
     sequenceIndex,
     condition: parseCondition(current, value),
     fixedState: parseParticipantFixedState(value),
-    phaseEndsAt: stringValue(value, "phaseEndsAt", "phaseEndAt", "deadlineIso"),
-    serverNow: stringValue(value, "serverNow", "serverNowIso"),
+    pufferSurface,
+    pufferRamp,
+    phaseStartedAt,
+    phaseEndsAt,
+    serverNow,
+    remainingMs,
     summary: parseSummary(value["summary"] ?? value["presentations"]),
     formUrl: safeHttpsUrl(value["formUrl"]),
   };
@@ -284,7 +368,11 @@ export function parseDeviceStatus(value: unknown): DeviceStatus | null {
     ? (stateRaw as DeviceStatus["state"])
     : "unknown";
   const modeRaw = stringValue(value, "mode");
-  const mode: DeviceStatus["mode"] = modeRaw === "mock" || modeRaw === "serial" ? modeRaw : "unknown";
+  const mode: DeviceStatus["mode"] = modeRaw === "mock"
+    || modeRaw === "serial"
+    || modeRaw === "screen"
+    ? modeRaw
+    : "unknown";
   return {
     mode,
     state,
@@ -386,12 +474,3 @@ export function payloadFromSocketMessage(value: unknown): { readonly type: strin
   const type = stringValue(value, "type");
   return type === null ? null : { type, payload: value["payload"] };
 }
-import {
-  CONDITIONS,
-  type ConditionCode as SharedConditionCode,
-  type ExperimentPhase as ServerExperimentPhase,
-  type FixedState as SharedFixedState,
-  type OrderCode as SharedOrderCode,
-  type PresentationMode as SharedPresentationMode,
-  type ProcessingLocation as SharedProcessingLocation,
-} from "../../shared/index.js";

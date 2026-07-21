@@ -92,6 +92,7 @@ describe("server HTTP security", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(response.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    expect(response.headers.get("x-dns-prefetch-control")).toBe("off");
     await expect(response.json()).resolves.toEqual({
       status: "ok",
       appVersion: "1.0.0",

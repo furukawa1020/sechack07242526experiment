@@ -6,7 +6,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { loadExperimentConfig } from "../shared/config-loader.js";
 import { createApplication } from "./app.js";
-import { MockPufferDevice, SerialPufferDevice, type PufferDevice } from "./devices/index.js";
+import {
+  MockPufferDevice,
+  ScreenPufferDevice,
+  SerialPufferDevice,
+  type PufferDevice,
+} from "./devices/index.js";
 import { ExperimentLogger } from "./logging/index.js";
 import { acquireExperimentServerLock } from "./runtime-lock.js";
 import { SessionController } from "./sessions/session-controller.js";
@@ -57,6 +62,11 @@ function createDevice(
       ackTimeoutMs: config.device.ackTimeout,
     });
   }
+  if (config.device.mode === "screen") {
+    return new ScreenPufferDevice({
+      timingMode: mode === "test" ? "fast" : "real-time",
+    });
+  }
   return new SerialPufferDevice({
     path: config.device.serialPath,
     baudRate: config.device.baudRate,
@@ -68,14 +78,24 @@ function createDevice(
 export function inferServerMode(
   modulePath = fileURLToPath(import.meta.url),
   nodeEnvironment = process.env.NODE_ENV,
-): Exclude<ServerMode, "rehearsal"> {
+): Extract<ServerMode, "development" | "production"> {
   // A compiled CLI entry is always production, even if a inherited shell
   // variable says NODE_ENV=test. Tests select test mode explicitly through
   // startServer({ mode: "test" }).
   if (modulePath.includes(`${sep}dist-server${sep}`)) return "production";
-  if (nodeEnvironment === "test") return "test";
   if (nodeEnvironment === "production") return "production";
   return "development";
+}
+
+function assertDevelopmentConfig(
+  config: Awaited<ReturnType<typeof loadExperimentConfig>>["config"],
+): void {
+  if (config.device.mode !== "mock") {
+    throw new Error(
+      "Development mode requires the Mock device adapter. "
+        + "Formal screen sessions must start through the production audit gate.",
+    );
+  }
 }
 
 function assertRehearsalConfig(
@@ -120,6 +140,7 @@ export async function startServer(
     },
   );
   const { config } = loaded;
+  if (mode === "development") assertDevelopmentConfig(config);
   if (mode === "rehearsal") assertRehearsalConfig(config);
   const appVersion = process.env.npm_package_version ?? "1.0.0";
   const dataDirectory = resolve(rootDirectory, "data");
@@ -214,9 +235,10 @@ export async function startServer(
       ...(operatorToken === null ? {} : { operatorToken }),
       allowLan: config.network.allowLan,
     });
+    const autoConnectDevice = mode === "rehearsal" || config.device.mode === "screen";
 
     try {
-      if (mode === "rehearsal") {
+      if (autoConnectDevice) {
         const status = await controller.connectDevice();
         if (
           !status.connected
@@ -224,7 +246,11 @@ export async function startServer(
           || status.level !== 0
           || status.fault !== null
         ) {
-          throw new Error("The rehearsal Mock device did not reach a verified idle state.");
+          throw new Error(
+            mode === "rehearsal"
+              ? "The rehearsal Mock device did not reach a verified idle state."
+              : "The screen puffer device did not reach a verified idle state.",
+          );
         }
       }
       await new Promise<void>((resolveListen, rejectListen) => {
@@ -239,11 +265,11 @@ export async function startServer(
       webSocketHub.close();
       controller.dispose();
       httpServer.closeAllConnections();
-      if (mode === "rehearsal") {
+      if (autoConnectDevice) {
         try {
           await device.disconnect();
         } catch {
-          // Preserve the original startup failure. The Mock adapter owns no physical actuator.
+          // Preserve the original startup failure. Neither adapter owns a physical actuator.
         }
       }
       await Promise.race([
@@ -347,7 +373,7 @@ export function runServerCli(options: ServerCliOptions = {}): void {
   const start = options.start ?? (() => startServer());
   const listeningLabel = options.listeningLabel ?? "SecHack experiment server";
   const stoppedMessage = options.stoppedMessage
-    ?? "Experiment server stopped; verify the physical device is deflated.";
+    ?? "Experiment server stopped after STOP/DEFLATE shutdown.";
   let running: RunningExperimentServer | undefined;
   void start()
     .then((server) => {

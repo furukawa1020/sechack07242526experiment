@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { parseExperimentConfig } from "../../../src/shared/index.js";
+import { parseExperimentConfig, SCREEN_PROTOCOL_VERSION } from "../../../src/shared/index.js";
 import {
   MockPufferDevice,
+  ScreenPufferDevice,
   type DeflateInput,
   type DeviceAck,
   type DeviceStatus,
@@ -20,7 +21,7 @@ const CONFIG_HASH = "0".repeat(64);
 function testConfig(formUrl = "") {
   return parseExperimentConfig({
     schemaVersion: 1,
-    protocolVersion: "test-v1",
+    protocolVersion: SCREEN_PROTOCOL_VERSION,
     studyTitle: "テスト",
     bindHost: "127.0.0.1",
     port: 4173,
@@ -45,6 +46,17 @@ function testConfig(formUrl = "") {
     formUrl,
     logging: { directory: "./data/test", includeAbortedInOrderBalancing: true },
     network: { allowLan: false, allowExternalRuntimeRequests: false },
+  });
+}
+
+function screenDeviceTestConfig() {
+  const base = testConfig();
+  return parseExperimentConfig({
+    ...base,
+    device: {
+      ...base.device,
+      mode: "screen",
+    },
   });
 }
 
@@ -138,7 +150,7 @@ class SummaryLogger extends MemoryLogger {
   public override async listSessionSummaries(): Promise<readonly SessionLogSummary[]> {
     return [{
       schemaVersion: 1,
-      protocolVersion: "test-v1",
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
       appVersion: "1.0.0",
       configHash: CONFIG_HASH,
       sessionId: "prior-session",
@@ -205,12 +217,13 @@ function makeController(
     readonly device?: MockPufferDevice;
     readonly formUrl?: string;
     readonly rehearsal?: boolean;
+    readonly config?: ReturnType<typeof testConfig>;
   } = {},
 ) {
   const device = options.device ?? new MockPufferDevice({ timingMode: "fast", initialConnected: true });
   const logger = options.logger ?? new MemoryLogger();
   const controller = new SessionController({
-    config: testConfig(options.formUrl),
+    config: options.config ?? testConfig(options.formUrl),
     configHash: CONFIG_HASH,
     appVersion: "1.0.0",
     rehearsal: options.rehearsal ?? false,
@@ -270,6 +283,10 @@ describe("SessionController", () => {
     expect(participant.phase).toBe("summary");
     expect(participant.summary).toHaveLength(4);
     expect(participant.fixedState).toBeNull();
+    expect(participant.pufferSurface).toBe("screen");
+    expect(participant.pufferRamp).toEqual({ inflateMs: 1, deflateMs: 1 });
+    expect(participant.phaseStartedAt).not.toBeNull();
+    expect(participant.serverNow).toBe("2026-07-19T00:00:00.170Z");
     expect(JSON.stringify(participant)).not.toMatch(/SH26|ABDC|"A"|conditionCode|researchId|sessionId/u);
     expect(JSON.stringify(participant)).not.toContain("pufferLevel");
     expect(logger.events.filter((event) => event.eventType === "phase.result")).toHaveLength(4);
@@ -324,27 +341,83 @@ describe("SessionController", () => {
     controller.dispose();
   });
 
-  it("uses STOP then DEFLATE and enters error when the display is lost during puffer output", async () => {
-    const { controller, device } = makeController();
-    const created = await preparedSession(controller, "CDBA");
-    await controller.start(created.snapshot.id);
-    await vi.advanceTimersByTimeAsync(21);
-    expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("result");
+  it.each([
+    ["A", "ABDC", "result", 21],
+    ["B", "BCAD", "result", 21],
+    ["C", "CDBA", "result", 21],
+    ["D", "DACB", "result", 21],
+    ["A", "ABDC", "reset", 31],
+    ["B", "BCAD", "reset", 31],
+    ["C", "CDBA", "reset", 31],
+    ["D", "DACB", "reset", 31],
+  ] as const)(
+    "uses STOP then DEFLATE and makes condition %s %s non-resumable after display loss",
+    async (_condition, orderCode, phase, elapsedMs) => {
+      const { controller, device } = makeController(0, { config: screenDeviceTestConfig() });
+      const created = await preparedSession(controller, orderCode);
+      await controller.start(created.snapshot.id);
+      await vi.advanceTimersByTimeAsync(elapsedMs);
+      expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe(phase);
 
-    controller.markDisplayDisconnected(created.displayToken, "display-1");
-    await vi.runAllTicks();
-    await vi.advanceTimersByTimeAsync(0);
+      controller.markDisplayDisconnected(created.displayToken, "display-1");
+      await vi.runAllTicks();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+        phase: "error",
+        result: "error",
+        recoveryRequired: false,
+        errorCode: "DISPLAY_LOST_DURING_STIMULUS",
+      });
+      const safetyCommands = device.commandHistory
+        .map((entry) => entry.command)
+        .filter((command) => command === "stop" || command === "deflate");
+      expect(safetyCommands.slice(-2)).toEqual(["stop", "deflate"]);
+      controller.markDisplayReady(created.displayToken, "display-2");
+      await expect(controller.resume(created.snapshot.id)).rejects.toMatchObject({
+        code: "RECOVERY_NOT_REQUIRED",
+      });
+      controller.dispose();
+    },
+  );
 
-    expect(controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
-      phase: "error",
-      result: "error",
-      errorCode: "DISPLAY_LOST_DURING_PUFFER",
+  it("fails closed with the real ScreenPufferDevice when the result display is lost", async () => {
+    const device = new ScreenPufferDevice({ timingMode: "fast", initialConnected: true });
+    const controller = new SessionController({
+      config: screenDeviceTestConfig(),
+      configHash: CONFIG_HASH,
+      appVersion: "1.0.0",
+      rehearsal: false,
+      device,
+      logger: new MemoryLogger(),
+      monotonicNow: () => Date.now(),
     });
-    const safetyCommands = device.commandHistory
-      .map((entry) => entry.command)
-      .filter((command) => command === "stop" || command === "deflate");
-    expect(safetyCommands.slice(-2)).toEqual(["stop", "deflate"]);
-    controller.dispose();
+    try {
+      const created = await preparedSession(controller, "CDBA");
+      await controller.start(created.snapshot.id);
+      await vi.advanceTimersByTimeAsync(21);
+      expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("result");
+
+      const errorReached = waitForSessionError(controller);
+      controller.markDisplayDisconnected(created.displayToken, "display-1");
+      await errorReached;
+      await vi.runAllTicks();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+        phase: "error",
+        recoveryRequired: false,
+        errorCode: "DISPLAY_LOST_DURING_STIMULUS",
+      });
+      const safetyCommands = device.commandHistory
+        .map((entry) => entry.command)
+        .filter((command) => command === "stop" || command === "deflate");
+      expect(safetyCommands.slice(-2)).toEqual(["stop", "deflate"]);
+      controller.markDisplayReady(created.displayToken, "display-2");
+      await expect(controller.resume(created.snapshot.id)).rejects.toMatchObject({ status: 409 });
+    } finally {
+      controller.dispose();
+      await device.disconnect();
+    }
   });
 
   it("rejects a reused research ID even after a setup session is deleted", async () => {
@@ -499,6 +572,12 @@ describe("SessionController", () => {
     const participant = controller.getPublicSnapshot(created.displayToken);
     const serialized = JSON.stringify(participant);
     expect(participant).toMatchObject({ phase: "result", fixedState: null });
+    expect(participant).toMatchObject({
+      pufferSurface: "screen",
+      pufferRamp: { inflateMs: 1, deflateMs: 1 },
+      phaseStartedAt: "2026-07-19T00:00:00.020Z",
+      serverNow: "2026-07-19T00:00:00.021Z",
+    });
     expect(serialized).not.toContain("score");
     expect(serialized).not.toContain("label");
     expect(serialized).not.toContain("pufferLevel");
@@ -628,6 +707,10 @@ describe("SessionController", () => {
     });
     await expect(controller.prepare(created.snapshot.id)).rejects.toMatchObject({ code: "DISPLAY_NOT_READY" });
 
+    expect(() => controller.noteDisplayHeartbeat(created.displayToken, "display-1"))
+      .toThrow(expect.objectContaining({ code: "DISPLAY_NOT_READY" }));
+    expect(controller.getOperatorSnapshot(created.snapshot.id).displayConnected).toBe(false);
+    controller.markDisplayReady(created.displayToken, "display-1");
     controller.noteDisplayHeartbeat(created.displayToken, "display-1");
     expect(controller.resolveDisplayToken(created.displayToken)).toBe(created.snapshot.id);
     expect(() => controller.markDisplayFullscreen(created.displayToken, "unknown-display", true))
@@ -764,6 +847,39 @@ describe("SessionController", () => {
     controller.dispose();
   });
 
+  it("returns screen deflation immediately so device-test polling can show the full ramp", async () => {
+    let monotonicMs = 0;
+    const device = new ScreenPufferDevice({
+      timingMode: "real-time",
+      initialConnected: true,
+      rampTickMs: 1_000,
+      monotonicNow: () => monotonicMs,
+    });
+    const controller = new SessionController({
+      config: screenDeviceTestConfig(),
+      configHash: CONFIG_HASH,
+      appVersion: "1.0.0",
+      rehearsal: false,
+      device,
+      logger: new MemoryLogger(),
+    });
+
+    await device.inflate({ level: 0.6, rampMs: 0, requestId: "prime-screen-state" });
+    expect(await controller.getDeviceStatus()).toMatchObject({ state: "holding", level: 0.6 });
+    await expect(controller.testDeflate()).resolves.toMatchObject({
+      ack: { ok: true, state: "deflating" },
+      status: { state: "deflating" },
+    });
+    expect(device.commandHistory.at(-2)).toMatchObject({ command: "deflate", rampMs: 1 });
+
+    monotonicMs = 1;
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(controller.getDeviceStatus()).resolves.toMatchObject({ state: "idle", level: 0 });
+
+    controller.dispose();
+    await device.disconnect();
+  });
+
   it("rejects inflation tests unless the device is confirmed idle and deflated", async () => {
     const { controller, device } = makeController();
     await device.inflate({ requestId: "unsafe-precondition", level: 0.2, rampMs: 0 });
@@ -886,6 +1002,7 @@ describe("SessionController", () => {
     await controller.start(created.snapshot.id);
 
     await vi.advanceTimersByTimeAsync(40);
+    await vi.advanceTimersByTimeAsync(2_000);
     await errorReached;
 
     expect(controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { experimentApi, errorMessage } from "../shared/api.js";
 import { EMPTY_DEVICE_STATUS, type DeviceStatus } from "../shared/model.js";
 
@@ -12,6 +12,13 @@ const ACTION_LABELS: Readonly<Record<DeviceAction, string>> = {
   inflate: "膨張テスト",
   deflate: "収縮",
   stop: "STOP",
+};
+
+const DEVICE_MODE_LABELS: Readonly<Record<DeviceStatus["mode"], string>> = {
+  mock: "Mock（本番不可）",
+  serial: "Serial実機",
+  screen: "画面上のフグ・実機なし正式方式",
+  unknown: "未確認",
 };
 
 interface TestEvent {
@@ -44,6 +51,29 @@ export function DeviceTestScreen(): React.JSX.Element {
     return () => { current = false; };
   }, []);
 
+  useEffect(() => {
+    if (device.mode !== "screen" || !device.connected) return undefined;
+    let current = true;
+    let requestPending = false;
+    const refresh = (): void => {
+      if (requestPending) return;
+      requestPending = true;
+      void experimentApi.getDeviceStatus().then((status) => {
+        if (current) setDevice(status);
+      }).catch((error: unknown) => {
+        if (current) setFailure(errorMessage(error));
+      }).finally(() => {
+        requestPending = false;
+      });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 100);
+    return () => {
+      current = false;
+      window.clearInterval(interval);
+    };
+  }, [device.connected, device.mode]);
+
   const perform = async (action: DeviceAction): Promise<void> => {
     setPending(action);
     setFailure(null);
@@ -72,6 +102,12 @@ export function DeviceTestScreen(): React.JSX.Element {
 
   const normalActions: readonly DeviceAction[] = ["connect", "ping", "status", "inflate", "deflate", "disconnect"];
   const deviceIsBusy = pending !== null;
+  const screenPufferScale = device.level === null
+    ? 0.52
+    : Math.min(1, Math.max(0.52, 0.52 + (device.level * 0.8)));
+  const screenPufferStyle = device.mode === "screen"
+    ? ({ "--device-puffer-scale": String(screenPufferScale) } as CSSProperties)
+    : undefined;
 
   const performStop = async (): Promise<void> => {
     setStopPending(true);
@@ -111,8 +147,10 @@ export function DeviceTestScreen(): React.JSX.Element {
     >
       <header className="device-test-header">
         <div>
-          <h1>デバイステスト</h1>
-          <p>本番セッションとは分離された接続・安全動作確認画面です。</p>
+          <h1>{device.mode === "screen" ? "画面刺激テスト" : "デバイステスト"}</h1>
+          <p>{device.mode === "screen"
+            ? "本番セッションとは分離して、画面上のフグの膨張・保持・収縮を確認します。"
+            : "本番セッションとは分離された接続・安全動作確認画面です。"}</p>
         </div>
         <a className="secondary-button" href="/operator">実験進行コンソールへ戻る</a>
       </header>
@@ -122,13 +160,18 @@ export function DeviceTestScreen(): React.JSX.Element {
       <main className="device-test-layout">
         <section className="device-status-hero" aria-labelledby="device-state-title">
           <div className="device-illustration" aria-hidden="true">
-            <span className={`device-puffer state-${device.state}`} />
+            <span
+              className={`device-puffer state-${device.state}${device.mode === "screen" ? " is-screen" : ""}`}
+              style={screenPufferStyle}
+              data-device-motion={device.state}
+              data-device-level={device.level === null ? "unknown" : device.level.toFixed(3)}
+            />
             <i /><i /><i />
           </div>
           <div>
             <div className="device-state-heading">
               <h2 id="device-state-title">{device.state}</h2>
-              <p className="device-mode-badge">装置モード: {device.mode === "mock" ? "Mock" : "Serial"}</p>
+              <p className="device-mode-badge">提示モード: {DEVICE_MODE_LABELS[device.mode]}</p>
             </div>
             <dl className="device-hero-details">
               <div><dt>接続</dt><dd>{device.connected ? "接続済み" : "未接続"}</dd></div>
@@ -140,7 +183,12 @@ export function DeviceTestScreen(): React.JSX.Element {
 
         <section className="device-command-card" aria-labelledby="command-title">
           <div className="card-heading compact-heading"><div><h2 id="command-title">動作確認</h2></div></div>
-          <p className="command-note">膨張テストはサーバー設定の正規化レベルと安全上限を使用します。物理圧力は指定できません。</p>
+          <p className="command-note">{device.mode === "screen"
+            ? "膨張テストは本番と同じ正規化レベル・時間で画面表示だけを動かします。物理装置への命令は送信しません。"
+            : "膨張テストはサーバー設定の正規化レベルと安全上限を使用します。物理圧力は指定できません。"}</p>
+          {device.mode === "screen" ? (
+            <p className="device-timing-note">膨張 6秒 → 保持 ／ 収縮 6秒（サーバ時刻同期）</p>
+          ) : null}
           <div className="device-command-grid">
             {normalActions.map((action) => (
               <button

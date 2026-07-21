@@ -1,13 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import QRCode from "qrcode";
 import { UI_COPY, formatPresentationPosition } from "../../shared/copy.js";
 import type {
   ParticipantFixedState,
   ParticipantSnapshot,
+  PufferSurface,
   PresentationMode,
   ProcessingLocation,
   PublicCondition,
 } from "../shared/model.js";
+
+const SCREEN_PUFFER_CONTRACTED_SCALE = 0.52;
+const SCREEN_PUFFER_EXPANDED_SCALE = 1;
+
+type ScreenPufferPhase = "result" | "reset";
+
+interface ScreenPufferMotion {
+  readonly rampMs: number;
+  readonly elapsedMs: number;
+}
+
+type PufferAnimationStyle = CSSProperties & Readonly<{
+  "--screen-puffer-contracted-scale": string;
+  "--screen-puffer-expanded-scale": string;
+}>;
 
 interface ParticipantViewProps {
   readonly snapshot: ParticipantSnapshot;
@@ -49,14 +65,16 @@ function CenteredMessage({
   );
 }
 
-function Intro(): React.JSX.Element {
+function Intro({ pufferSurface }: { readonly pufferSurface: PufferSurface }): React.JSX.Element {
   return (
     <main className="participant-intro">
       <section className="intro-card">
         <h1>{UI_COPY.intro.title}</h1>
         <p className="intro-body multiline-copy">{UI_COPY.intro.body}</p>
         <aside className="scenario-note">
-          <p className="multiline-copy">{UI_COPY.intro.scenario}</p>
+          <p className="multiline-copy">
+            {pufferSurface === "screen" ? UI_COPY.intro.scenario : UI_COPY.intro.physicalScenario}
+          </p>
         </aside>
         <p className="waiting-copy">{UI_COPY.intro.waiting}</p>
       </section>
@@ -141,9 +159,13 @@ export function HandlingPanel({ processing }: { readonly processing: ProcessingL
 export function ResultPanel({
   presentation,
   fixedState,
+  pufferSurface,
+  screenPufferMotion,
 }: {
   readonly presentation: PresentationMode;
   readonly fixedState: ParticipantFixedState | null;
+  readonly pufferSurface: PufferSurface;
+  readonly screenPufferMotion: ScreenPufferMotion | null;
 }): React.JSX.Element {
   return (
     <section className="condition-panel result-panel" data-testid="result-panel" aria-labelledby="result-title">
@@ -156,16 +178,100 @@ export function ResultPanel({
           </p>
           <p className="state-label">{fixedState.label}</p>
         </div>
+      ) : presentation === "puffer" && pufferSurface === "screen" && screenPufferMotion !== null ? (
+        <div className="puffer-result screen-puffer-result">
+          <ScreenPufferVisual phase="result" motion={screenPufferMotion} />
+          <p className="multiline-copy">{UI_COPY.result.pufferScreen}</p>
+        </div>
       ) : presentation === "puffer" ? (
         <div className="puffer-result">
           <div className="puffer-symbol" aria-hidden="true">
             <span className="puffer-body" />
             <span className="puffer-arrow">→</span>
           </div>
-          <p className="multiline-copy">{UI_COPY.result.puffer}</p>
+          <p className="multiline-copy">{UI_COPY.result.pufferPhysical}</p>
         </div>
       ) : <p className="multiline-copy">{UI_COPY.intro.waiting}</p>}
     </section>
+  );
+}
+
+function screenPufferMotion(snapshot: ParticipantSnapshot): ScreenPufferMotion | null {
+  if (
+    snapshot.pufferRamp === null
+    || snapshot.phaseStartedAt === null
+    || snapshot.phaseEndsAt === null
+    || snapshot.serverNow === null
+    || snapshot.remainingMs === null
+    || !Number.isFinite(Date.parse(snapshot.phaseStartedAt))
+    || !Number.isFinite(Date.parse(snapshot.phaseEndsAt))
+    || !Number.isFinite(Date.parse(snapshot.serverNow))
+  ) {
+    return null;
+  }
+  const rampMs = snapshot.phase === "reset"
+    ? snapshot.pufferRamp.deflateMs
+    : snapshot.pufferRamp.inflateMs;
+  const phaseDurationMs = Math.max(
+    0,
+    Date.parse(snapshot.phaseEndsAt) - Date.parse(snapshot.phaseStartedAt),
+  );
+  return {
+    rampMs,
+    // remainingMs is derived from the server's monotonic clock. Wall-clock
+    // correction may move serverNow, but must never rewind the stimulus.
+    elapsedMs: Math.max(0, phaseDurationMs - snapshot.remainingMs),
+  };
+}
+
+function pufferAnimationStyle(
+  phase: ScreenPufferPhase,
+  motion: ScreenPufferMotion,
+): PufferAnimationStyle {
+  const elapsedMs = Math.min(
+    motion.rampMs,
+    motion.elapsedMs,
+  );
+  return {
+    "--screen-puffer-contracted-scale": String(SCREEN_PUFFER_CONTRACTED_SCALE),
+    "--screen-puffer-expanded-scale": String(SCREEN_PUFFER_EXPANDED_SCALE),
+    animationName: phase === "result" ? "screen-puffer-inflate" : "screen-puffer-deflate",
+    animationDuration: `${motion.rampMs}ms`,
+    animationDelay: `-${elapsedMs}ms`,
+    animationTimingFunction: "linear",
+    animationFillMode: "both",
+    animationIterationCount: 1,
+  };
+}
+
+function ScreenPufferVisual({
+  phase,
+  motion,
+}: {
+  readonly phase: ScreenPufferPhase;
+  readonly motion: ScreenPufferMotion;
+}): React.JSX.Element {
+  const elapsedMs = Math.min(
+    motion.rampMs,
+    motion.elapsedMs,
+  );
+  const motionState = phase === "result"
+    ? elapsedMs < motion.rampMs ? "inflating" : "holding"
+    : elapsedMs < motion.rampMs ? "deflating" : "resting";
+  return (
+    <div
+      className="screen-puffer-visual"
+      aria-hidden="true"
+      data-testid="screen-puffer-visual"
+      data-puffer-motion={motionState}
+      data-motion-duration-ms={motion.rampMs}
+    >
+      <span className="screen-puffer-body" style={pufferAnimationStyle(phase, motion)}>
+        <span className="screen-puffer-eye" />
+        <span className="screen-puffer-mouth" />
+        <span className="screen-puffer-fin" />
+      </span>
+    </div>
   );
 }
 
@@ -189,12 +295,17 @@ function ProcessingPanel(): React.JSX.Element {
 }
 
 function ConditionStage({ snapshot }: { readonly snapshot: ParticipantSnapshot }): React.JSX.Element {
+  const motion = screenPufferMotion(snapshot);
   if (
     snapshot.condition === null
     || snapshot.sequenceIndex === null
     || (snapshot.phase === "result"
       && snapshot.condition.presentation === "label"
       && snapshot.fixedState === null)
+    || (snapshot.phase === "result"
+      && snapshot.condition?.presentation === "puffer"
+      && snapshot.pufferSurface === "screen"
+      && motion === null)
   ) {
     return <CenteredMessage title={UI_COPY.error.title} body={UI_COPY.error.waiting} />;
   }
@@ -207,14 +318,38 @@ function ConditionStage({ snapshot }: { readonly snapshot: ParticipantSnapshot }
         {snapshot.phase === "handling" ? <AwaitingPanel /> : null}
         {snapshot.phase === "processing" ? <ProcessingPanel /> : null}
         {snapshot.phase === "result" ? (
-          <ResultPanel presentation={condition.presentation} fixedState={snapshot.fixedState} />
+          <ResultPanel
+            presentation={condition.presentation}
+            fixedState={snapshot.fixedState}
+            pufferSurface={snapshot.pufferSurface}
+            screenPufferMotion={motion}
+          />
         ) : null}
       </main>
     </div>
   );
 }
 
-function conditionLabel(condition: PublicCondition): string {
+function ScreenPufferReset({ snapshot }: { readonly snapshot: ParticipantSnapshot }): React.JSX.Element {
+  const motion = screenPufferMotion(snapshot);
+  if (motion === null) {
+    return <CenteredMessage title={UI_COPY.error.title} body={UI_COPY.error.waiting} />;
+  }
+  return (
+    <main className="participant-centered screen-puffer-reset" aria-live="polite">
+      <section className="participant-message-card screen-puffer-reset-card">
+        <h1>{UI_COPY.reset.title}</h1>
+        <ScreenPufferVisual phase="reset" motion={motion} />
+        <p>{UI_COPY.reset.waiting}</p>
+      </section>
+    </main>
+  );
+}
+
+function conditionLabel(condition: PublicCondition, pufferSurface: PufferSurface): string {
+  if (pufferSurface === "screen" && condition.presentation === "puffer") {
+    return UI_COPY.summary.screenPufferLabels[condition.processing];
+  }
   return UI_COPY.summary.conditionLabels[condition.processing][condition.presentation];
 }
 
@@ -243,7 +378,7 @@ function FormQr({ url }: { readonly url: string }): React.JSX.Element {
       </a>
       <div className="form-qr">
         {dataUrl === null ? <span className="qr-placeholder" aria-hidden="true" /> : (
-          <img src={dataUrl} width="104" height="104" alt="Googleフォームを開くQRコード" />
+          <img src={dataUrl} width="104" height="104" alt={UI_COPY.summary.qrAlt} />
         )}
         <p>{UI_COPY.summary.qrHelp}</p>
       </div>
@@ -260,16 +395,16 @@ function Summary({ snapshot }: { readonly snapshot: ParticipantSnapshot }): Reac
           {snapshot.rehearsal ? UI_COPY.rehearsal.summary : UI_COPY.summary.body}
         </p>
       </section>
-      <ol className="summary-grid" aria-label="提示の一覧">
+      <ol className="summary-grid" aria-label={UI_COPY.summary.listLabel}>
         {snapshot.summary.slice(0, 4).map((condition, index) => (
           <li key={`${condition.processing}-${condition.presentation}-${index}`}>
             <span>{UI_COPY.summary.cards[index]}</span>
-            <strong>{conditionLabel(condition)}</strong>
+            <strong>{conditionLabel(condition, snapshot.pufferSurface)}</strong>
           </li>
         ))}
       </ol>
       {snapshot.rehearsal ? null : <p className="summary-note">{UI_COPY.summary.note}</p>}
-      {snapshot.formUrl === null ? null : <FormQr url={snapshot.formUrl} />}
+      {snapshot.rehearsal || snapshot.formUrl === null ? null : <FormQr url={snapshot.formUrl} />}
     </main>
   );
 }
@@ -279,12 +414,18 @@ function phaseContent(snapshot: ParticipantSnapshot): React.JSX.Element {
     case "idle":
     case "setup":
     case "intro":
-      return <Intro />;
+      return <Intro pufferSurface={snapshot.pufferSurface} />;
     case "handling":
     case "processing":
     case "result":
       return <ConditionStage snapshot={snapshot} />;
     case "reset":
+      if (
+        snapshot.pufferSurface === "screen"
+        && snapshot.condition?.presentation === "puffer"
+      ) {
+        return <ScreenPufferReset snapshot={snapshot} />;
+      }
       return <CenteredMessage title={UI_COPY.reset.title} body={UI_COPY.reset.waiting} />;
     case "summary":
       return <Summary snapshot={snapshot} />;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assessFormAudit,
   FORM_AUDIT_MAX_AGE_DAYS,
+  KNOWN_BLOCKED_FORM_CONTENT_SHA256,
   STUDY_FORM_URL,
   type FormAuditRecord,
 } from "../../../src/shared/form-audit.js";
@@ -64,6 +65,18 @@ describe("form audit evidence gate", () => {
       "two-person-not-verified",
       "invalid-content-sha256",
     ]);
+  });
+
+  it("rejects a previously observed NO-GO payload even if flags are manually flipped", () => {
+    const assessment = assessFormAudit({
+      protocolVersion: PROTOCOL_VERSION,
+      formUrl: STUDY_FORM_URL,
+      formAudit: approvedRecord({
+        contentSha256: KNOWN_BLOCKED_FORM_CONTENT_SHA256[0] ?? "",
+      }),
+    }, TODAY);
+    expect(assessment.approved).toBe(false);
+    expect(assessment.issues).toContain("known-blocked-content");
   });
 
   it.each([

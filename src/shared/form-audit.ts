@@ -1,5 +1,8 @@
 export const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
 export const FORM_AUDIT_MAX_AGE_DAYS = 7;
+export const KNOWN_BLOCKED_FORM_CONTENT_SHA256 = Object.freeze([
+  "33762250e42e9cb63900ccd58a64923f4047693086a81a3737cfe7cbb72d9476",
+]);
 
 const DAY_MS = 86_400_000;
 const JST_OFFSET_MS = 9 * 60 * 60 * 1_000;
@@ -28,6 +31,7 @@ export type FormAuditIssueCode =
   | "protocol-version-mismatch"
   | "form-url-mismatch"
   | "two-person-not-verified"
+  | "known-blocked-content"
   | "invalid-audit-date"
   | "audit-date-in-future"
   | "stale-audit"
@@ -78,6 +82,9 @@ export function assessFormAudit(
   if (record.formUrl !== subject.formUrl) issues.push("form-url-mismatch");
   if (!record.twoPersonVerified) issues.push("two-person-not-verified");
   if (!SHA_256_PATTERN.test(record.contentSha256)) issues.push("invalid-content-sha256");
+  if (KNOWN_BLOCKED_FORM_CONTENT_SHA256.includes(record.contentSha256)) {
+    issues.push("known-blocked-content");
+  }
 
   const auditDay = calendarDateToUtcMs(record.auditedOn);
   const nowDay = calendarDateToUtcMs(japanCalendarDate(now));

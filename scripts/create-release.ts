@@ -21,8 +21,18 @@ import {
   verifyReleaseDirectoryDetailed,
   writeReleaseManifest,
 } from "./release-manifest.js";
+import {
+  renderReleaseFormVerification,
+  verifyReleaseForm,
+} from "./verify-release-form.js";
+import { loadExperimentConfig } from "../src/shared/config-loader.js";
+import {
+  SCREEN_PRODUCTION_FIXED_STATE,
+  SCREEN_PRODUCTION_RESEARCH_ID_PATTERN,
+} from "../src/shared/production-policy.js";
+import { SCREEN_PROTOCOL_VERSION } from "../src/shared/schemas.js";
 
-const DEFAULT_CONFIG_PATH = "config/experiment.json";
+const DEFAULT_CONFIG_PATH = "config/experiment.production.json";
 const DEFAULT_MOCK_REHEARSAL_CONFIG_PATH = "config/experiment.mock-rehearsal.json";
 const MAX_GIT_OUTPUT_BYTES = 1024 * 1024;
 
@@ -57,11 +67,17 @@ export interface CreateReleaseOptions {
   readonly writeLine?: (line: string) => void;
 }
 
+export interface RunCreateReleaseDependencies {
+  readonly verifyReleaseForm?: typeof verifyReleaseForm;
+  readonly createRelease?: typeof createRelease;
+}
+
 function usage(): readonly string[] {
   return Object.freeze([
     "Usage: npm run release:create -- [--mock-rehearsal] [--config <config path>] [--output <release path>]",
     "",
     "Without --mock-rehearsal, the config must pass every production preflight gate.",
+    "Production default: config/experiment.production.json.",
     "--mock-rehearsal creates a separately named, loopback-only sealed Mock review package.",
     "Existing output is never overwritten.",
   ]);
@@ -285,7 +301,8 @@ async function runtimePackageJson(
             "node dist-server/verify-release.js && node dist-server/preflight.js && node dist-server/index.js",
         }
       : {
-          healthcheck: "node dist-server/healthcheck.js --config config/experiment.mock-rehearsal.json",
+          healthcheck:
+            "node dist-server/healthcheck.js --mock-rehearsal --config config/experiment.mock-rehearsal.json",
           "release:verify": "node dist-server/verify-release.js",
           start:
             "node dist-server/verify-release.js && node dist-server/rehearsal.js --mock-rehearsal",
@@ -349,7 +366,7 @@ function mockRehearsalWindowsLaunchers(
       "node dist-server\\verify-release.js",
       "if errorlevel 1 exit /b 1",
       'if not exist "data\\mock-sessions" mkdir "data\\mock-sessions"',
-      `start "" /b powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "$operator='${operatorUrl}'; 1..60 | ForEach-Object { & node 'dist-server\\healthcheck.js' --config 'config\\experiment.mock-rehearsal.json' *> $null; if ($LASTEXITCODE -eq 0) { Start-Process $operator; exit 0 }; Start-Sleep -Milliseconds 500 }; exit 1"`,
+      `start "" /b powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "$operator='${operatorUrl}'; 1..60 | ForEach-Object { & node 'dist-server\\healthcheck.js' --mock-rehearsal --config 'config\\experiment.mock-rehearsal.json' *> $null; if ($LASTEXITCODE -eq 0) { Start-Process $operator; exit 0 }; Start-Sleep -Milliseconds 500 }; exit 1"`,
       "echo Mock rehearsal starts without a physical device. Keep this window open.",
       "echo Press Ctrl+C once here to run the safe STOP/DEFLATE shutdown path.",
       "node dist-server\\rehearsal.js --mock-rehearsal",
@@ -359,7 +376,7 @@ function mockRehearsalWindowsLaunchers(
       "@echo off",
       "setlocal",
       'cd /d "%~dp0"',
-      "node dist-server\\healthcheck.js --config config\\experiment.mock-rehearsal.json",
+      "node dist-server\\healthcheck.js --mock-rehearsal --config config\\experiment.mock-rehearsal.json",
     ],
     "VERIFY_MOCK_RELEASE.cmd": [
       "@echo off",
@@ -391,6 +408,26 @@ function assertMockRehearsalReleaseConfig(report: PreflightReport, rootDirectory
   }
   if (failures.length > 0) {
     throw new Error(`Mock rehearsal release gate failed: ${failures.join(", ")}`);
+  }
+}
+
+function assertProductionReleaseMetadata(report: PreflightReport): void {
+  const failures: string[] = [];
+  if (report.mode !== "production") failures.push("release.mode");
+  if (report.protocolVersion !== SCREEN_PROTOCOL_VERSION) failures.push("protocolVersion");
+  if (report.deviceMode !== "screen") failures.push("device.mode");
+  if (report.serialPath !== "") failures.push("device.serialPath");
+  if (report.allowMockInProduction) failures.push("device.allowMockInProduction");
+  if (report.fixedScore !== SCREEN_PRODUCTION_FIXED_STATE.score) failures.push("fixedState.score");
+  if (report.fixedLabel !== SCREEN_PRODUCTION_FIXED_STATE.label) failures.push("fixedState.label");
+  if (report.pufferLevel !== SCREEN_PRODUCTION_FIXED_STATE.pufferLevel) {
+    failures.push("fixedState.pufferLevel");
+  }
+  if (report.researchIdPattern !== SCREEN_PRODUCTION_RESEARCH_ID_PATTERN) {
+    failures.push("researchIdPattern");
+  }
+  if (failures.length > 0) {
+    throw new Error(`Production screen release metadata gate failed: ${failures.join(", ")}`);
   }
 }
 
@@ -489,6 +526,8 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   }
   if (releaseKind === "mock-rehearsal") {
     assertMockRehearsalReleaseConfig(report, rootDirectory);
+  } else {
+    assertProductionReleaseMetadata(report);
   }
 
   if (options.buildArtifacts ?? true) {
@@ -572,6 +611,17 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       releaseKind === "production" ? "experiment.json" : "experiment.mock-rehearsal.json";
     await copyFile(report.configPath, resolve(stagingDirectory, "config", packagedConfigName));
     if (releaseKind === "production") {
+      const packagedConfig = await loadExperimentConfig(
+        `config/${packagedConfigName}`,
+        {
+          rootDirectory: stagingDirectory,
+          allowedDirectory: resolve(stagingDirectory, "config"),
+          production: true,
+        },
+      );
+      if (packagedConfig.configHash !== report.configHash) {
+        throw new Error("Packaged production screen config hash does not match preflight metadata.");
+      }
       await mkdir(resolve(stagingDirectory, "docs"));
       for (const name of [
         "RUNBOOK.md",
@@ -582,15 +632,21 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
         "TEST_REPORT.md",
         "RELEASE_CHECKLIST.md",
         "FORM_AUDIT.md",
+        "FORM_RELEASE_GATE.md",
+        "FORM_OWNER_FIX_GUIDE.md",
+        "DEPLOYMENT.md",
+        "MOCK_REHEARSAL.md",
+        "PUBLIC_DEMO.md",
       ] as const) {
         await copyFile(
           resolve(rootDirectory, "docs", name),
           resolve(stagingDirectory, "docs", name),
         );
       }
-      await copyFile(
-        resolve(rootDirectory, "docs", "DEPLOYMENT.md"),
+      await writeFile(
         resolve(stagingDirectory, "DEPLOYMENT.md"),
+        "# デプロイ手順\n\n正式な手順は[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)を参照してください。\n",
+        "utf8",
       );
     }
     await writeFile(
@@ -687,6 +743,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
 export async function runCreateRelease(
   args: readonly string[] = process.argv.slice(2),
   writeLine: (line: string) => void = console.info,
+  dependencies: RunCreateReleaseDependencies = {},
 ): Promise<number> {
   try {
     const parsed = parseCreateReleaseArguments(args);
@@ -694,8 +751,19 @@ export async function runCreateRelease(
       for (const line of usage()) writeLine(line);
       return 0;
     }
-    await createRelease({
-      ...(parsed.configPath === undefined ? {} : { configPath: parsed.configPath }),
+    const configPath = parsed.configPath
+      ?? (parsed.mockRehearsal ? DEFAULT_MOCK_REHEARSAL_CONFIG_PATH : DEFAULT_CONFIG_PATH);
+    if (!parsed.mockRehearsal) {
+      const formVerification = await (dependencies.verifyReleaseForm ?? verifyReleaseForm)({
+        configPath,
+      });
+      renderReleaseFormVerification(formVerification, writeLine);
+      if (!formVerification.approved) {
+        throw new Error("Production Google Form live verification failed.");
+      }
+    }
+    await (dependencies.createRelease ?? createRelease)({
+      configPath,
       ...(parsed.outputPath === undefined ? {} : { outputPath: parsed.outputPath }),
       releaseKind: parsed.mockRehearsal ? "mock-rehearsal" : "production",
       writeLine,

@@ -52,6 +52,12 @@ export default defineConfig({
           statements: 90,
           branches: 90,
         },
+        "src/server/devices/screen-puffer-device.ts": {
+          lines: 90,
+          functions: 90,
+          statements: 90,
+          branches: 90,
+        },
         "src/server/logging/log-event-allowlist.ts": { 100: true },
       }
     }

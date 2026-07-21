@@ -36,6 +36,7 @@ const PHASE_LABELS: Readonly<Record<ExperimentPhase, string>> = {
 const DEVICE_MODE_LABELS: Readonly<Record<DeviceStatus["mode"], string>> = {
   mock: "模擬装置",
   serial: "実機（シリアル接続）",
+  screen: "画面上のフグ・実機なし正式方式",
   unknown: "未確認",
 };
 
@@ -103,6 +104,16 @@ function connectionLabel(status: RealtimeStatus): string {
 
 function deviceLabel(device: DeviceStatus): string {
   return `${DEVICE_MODE_LABELS[device.mode]} / ${DEVICE_STATE_LABELS[device.state]}`;
+}
+
+function usesScreenStimulus(device: DeviceStatus): boolean {
+  return device.mode !== "serial";
+}
+
+function prepareDeviceLabel(mode: DeviceStatus["mode"]): string {
+  if (mode === "mock") return "模擬装置を準備";
+  if (mode === "screen") return "画面刺激を準備";
+  return "装置を接続";
 }
 
 function eventLabel(type: string): string {
@@ -191,8 +202,12 @@ function SetupForm({
           onChange={(event) => onConsent(event.target.checked)}
         />
         <span>
-          <strong>{isMock ? "リハーサル開始条件を確認済み" : "Googleフォームでの同意を確認済み"}</strong>
-          <small>{isMock ? "実参加者・実回答には使用しません" : "口頭確認だけでは開始しません"}</small>
+          <strong>{isMock
+            ? "リハーサル開始条件を確認済み"
+            : "提示開始前に、承認済み手順で研究説明・参加同意を確認済み"}</strong>
+          <small>{isMock
+            ? "実参加者・実回答には使用しません"
+            : "口頭確認だけでは開始しません。Googleフォームで事後送信する方式は、責任者承認済みの手順に限ります。"}</small>
         </span>
       </label>
 
@@ -261,7 +276,14 @@ function SessionOverview({
         <StatusItem label="内部条件" value={condition ?? "—"} />
         <StatusItem label="条件内容" value={condition === null ? "—" : CONDITION_LABELS[condition]} />
         <StatusItem label="処理場所" value={session.condition === null ? "—" : PROCESSING_LABELS[session.condition.processing]} />
-        <StatusItem label="伝え方" value={session.condition === null ? "—" : PRESENTATION_LABELS[session.condition.presentation]} />
+        <StatusItem
+          label="伝え方"
+          value={session.condition === null
+            ? "—"
+            : session.device.mode === "screen" && session.condition.presentation === "puffer"
+              ? "画面上のフグのふくらみ"
+              : PRESENTATION_LABELS[session.condition.presentation]}
+        />
         <StatusItem label="残り時間" value={remainingSeconds === null ? "—" : `${remainingSeconds} 秒`} emphasis />
         <StatusItem label="固定スコア" value={`${session.fixedState.score} / 100`} />
         <StatusItem label="固定ラベル" value={session.fixedState.label} />
@@ -307,6 +329,7 @@ function ActionPanel({
   readonly onReset: () => void;
 }): React.JSX.Element {
   const canAbort = !["completed", "aborted"].includes(session.phase);
+  const isScreen = usesScreenStimulus(session.device);
   const readyForIntro = session.displayConnected
     && session.device.connected
     && session.device.state === "idle"
@@ -333,17 +356,19 @@ function ActionPanel({
         {session.phase === "error" ? (
           <div className="operator-banner is-failure" role="alert">
             <strong>エラーコード: {session.errorCode ?? "UNKNOWN_ERROR"}</strong><br />
-            自動再開しません。装置の物理状態を確認し、異常があれば物理緊急停止を最優先にしてください。
-            安全な収縮を確認した後、「実験を中止」で中断を確定します。
+            {isScreen
+              ? "自動再開しません。参加者画面でフグ刺激が停止・収縮していることを確認してください。"
+              : "自動再開しません。装置の物理状態を確認し、異常があれば物理緊急停止を最優先にしてください。"}
+            安全な状態を確認した後、「実験を中止」で中断を確定します。
           </div>
         ) : null}
         {session.phase === "setup" ? (
           <div className="prerequisite-block">
             <ul aria-label="開始条件">
               <li data-ready={session.displayConnected}>参加者画面: {session.displayConnected ? "接続済み" : "接続待ち"}</li>
-              <li data-ready={session.device.connected}>装置: {session.device.connected ? "接続済み" : "接続待ち"}</li>
-              <li data-ready={session.device.state === "idle"}>装置状態: {DEVICE_STATE_LABELS[session.device.state]}</li>
-              <li data-ready={(session.device.level ?? 0) === 0}>収縮状態: {(session.device.level ?? 0) === 0 ? "確認済み" : "未完了"}</li>
+              <li data-ready={session.device.connected}>{isScreen ? "画面刺激" : "装置"}: {session.device.connected ? "接続済み" : "接続待ち"}</li>
+              <li data-ready={session.device.state === "idle"}>{isScreen ? "刺激状態" : "装置状態"}: {DEVICE_STATE_LABELS[session.device.state]}</li>
+              <li data-ready={(session.device.level ?? 0) === 0}>初期収縮状態: {(session.device.level ?? 0) === 0 ? "確認済み" : "未完了"}</li>
             </ul>
             <label className="check-row compact-check">
               <input
@@ -403,7 +428,7 @@ function ActionPanel({
           aria-keyshortcuts="Control+Alt+Shift+S"
         >
           <span>{emergencyPending ? "STOP送信中…" : "緊急停止"}</span>
-          <small>装置を直ちにSTOP · Ctrl+Alt+Shift+S</small>
+          <small>{isScreen ? "画面刺激を直ちにSTOP" : "装置を直ちにSTOP"} · Ctrl+Alt+Shift+S</small>
         </button>
       </div>
     </section>
@@ -424,7 +449,9 @@ function DeviceAndEvents({
   return (
     <aside className="operator-side-column">
       <section className="operator-card compact-card" aria-labelledby="device-status-title">
-        <div className="card-heading compact-heading"><div><h2 id="device-status-title">装置状態</h2></div></div>
+        <div className="card-heading compact-heading"><div><h2 id="device-status-title">
+          {device.mode === "screen" ? "画面刺激の状態" : "装置状態"}
+        </h2></div></div>
         <p className="device-mode-badge">装置モード: {DEVICE_MODE_LABELS[device.mode]}</p>
         <dl className="device-details">
           <StatusItem label="接続" value={device.connected ? "接続済み" : "未接続"} />
@@ -433,9 +460,11 @@ function DeviceAndEvents({
           <StatusItem label="異常" value={device.fault ?? "なし"} />
         </dl>
         <button type="button" className="secondary-button full-button" onClick={onConnect} disabled={busy || device.connected}>
-          {device.mode === "mock" ? "模擬装置を準備" : "装置を接続"}
+          {prepareDeviceLabel(device.mode)}
         </button>
-        <a className="text-link" href="/device-test" target="_blank" rel="noreferrer">デバイステストを開く</a>
+        <a className="text-link" href="/device-test" target="_blank" rel="noreferrer">
+          {device.mode === "screen" ? "画面刺激テストを開く" : "デバイステストを開く"}
+        </a>
       </section>
 
       <section className="operator-card compact-card event-card" aria-labelledby="event-title">
@@ -567,7 +596,9 @@ export function OperatorScreen(): React.JSX.Element {
     try {
       const next = await experimentApi.sessionAction(session.sessionId, "emergency-stop");
       if (next !== null) setSession(next);
-      setNotice("緊急停止を送信しました。装置の物理状態を確認してください。");
+      setNotice(usesScreenStimulus(session.device)
+        ? "緊急停止を送信しました。参加者画面で刺激の停止を確認してください。"
+        : "緊急停止を送信しました。装置の物理状態を確認してください。");
     } catch (error) {
       setFailure(errorMessage(error));
     } finally {
@@ -647,6 +678,7 @@ export function OperatorScreen(): React.JSX.Element {
     ? session.device
     : device;
   const isMock = displayedDevice.mode === "mock";
+  const isScreen = displayedDevice.mode === "screen";
   const events = session?.recentEvents ?? [];
   const operatorClass = useMemo(
     () => busy || emergencyPending ? "operator-app is-busy" : "operator-app",
@@ -661,6 +693,7 @@ export function OperatorScreen(): React.JSX.Element {
         </div>
         <div className="operator-header-actions">
           {isMock ? <span className="rehearsal-pill">実機なし・模擬リハーサル</span> : null}
+          {isScreen ? <span className="screen-mode-pill">画面上のフグ・実機なし正式方式</span> : null}
           <span className={`connection-pill status-${realtime.status}`}>同期 {connectionLabel(realtime.status)}</span>
           <button type="button" className="secondary-button" onClick={() => { void exportCsv(); }} disabled={busy}>
             CSVを出力
