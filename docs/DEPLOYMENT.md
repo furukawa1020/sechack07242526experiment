@@ -70,7 +70,7 @@ productionサーバは`device.mode=mock`を無条件に拒否します。`allowM
 npm.cmd run deploy:prepare -- --config config/experiment.production.json
 ```
 
-このコマンドは、Lint、型検査、単体・統合テスト、現行9ケースのE2E、ビルド、本番preflightを順に実行します。その後、Git作業ツリーのクリーン状態を生成開始時とmanifest作成直前の2回確認し、`release/`の新しいディレクトリへ許可ファイルだけをコピーして、lockfileからproduction依存関係を導入します。途中でHEAD、origin、追跡・未追跡ファイルが変わった場合も失敗します。2026-07-21の最終ソフトウェア試験は24ファイル・262テスト、E2E 9テストが成功し、カバレッジはStatements 94.93%、Branches 89.49%、Functions 94.68%、Lines 95.50%でした。公開デモは5画面幅・20テストをskipなしで完走し、`npm audit`と`npm audit --omit=dev`はいずれも既知脆弱性0件でした。実測値は[テスト報告](TEST_REPORT.md)へ記録しています。
+このコマンドは、Lint、型検査、単体・統合テスト、現行9ケースのE2E、ビルド、本番preflightを順に実行します。その後、Git作業ツリーのクリーン状態を生成開始時とmanifest作成直前の2回確認し、`release/`の新しいディレクトリへ許可ファイルだけをコピーして、lockfileからproduction依存関係を導入します。途中でHEAD、origin、追跡・未追跡ファイルが変わった場合も失敗します。2026-07-21の最終ソフトウェア試験は24ファイル・264テスト、E2E 9テストが成功し、カバレッジはStatements 94.94%、Branches 89.52%、Functions 94.68%、Lines 95.50%でした。公開デモは5画面幅・20テストをskipなしで完走し、`npm audit`と`npm audit --omit=dev`はいずれも既知脆弱性0件でした。重要領域のファイル別カバレッジを含む実測値は[テスト報告](TEST_REPORT.md)へ記録しています。
 
 成果物には次が含まれます。
 

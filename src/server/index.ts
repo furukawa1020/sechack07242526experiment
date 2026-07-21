@@ -186,7 +186,9 @@ export async function startServer(
       device,
       logger,
     });
-    const testHooks = mode === "test" && device instanceof MockPufferDevice
+    const testHooks = mode === "test"
+      && options.serveBuiltAssets !== true
+      && device instanceof MockPufferDevice
       ? {
           injectUnexpectedMockDisconnect(command: "status" | "inflate" | "deflate"): void {
             device.inject({ kind: "disconnect", command });

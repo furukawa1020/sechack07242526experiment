@@ -65,6 +65,17 @@ describe("public review routes", () => {
     expect(localStorageSet).not.toHaveBeenCalled();
   });
 
+  it("connects a waiting display when the operator page opens later", () => {
+    const display = render(<PublicDisplayApp />);
+
+    expect(within(display.container).getByText(/接続を待っています/u)).toBeInTheDocument();
+    const operator = render(<PublicOperatorApp />);
+
+    expect(within(display.container).queryByText(/接続を待っています/u)).not.toBeInTheDocument();
+    fireEvent.click(within(operator.container).getByRole("button", { name: "第2提示" }));
+    expect(within(display.container).getByText("第2提示 / 4")).toBeInTheDocument();
+  });
+
   it("keeps the public device page visual and hardware-free", () => {
     const view = render(<PublicDeviceTestApp />);
 

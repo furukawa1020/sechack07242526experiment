@@ -172,6 +172,18 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   expect(builtHtml).not.toContain("/src/client/main.tsx");
   expect(builtHtml).not.toMatch(/https?:\/\//u);
 
+  const unavailableDisconnectHook = await request.post(
+    `${baseUrl}/api/test/mock-device/disconnect`,
+    { data: { command: "inflate" } },
+  );
+  expect(unavailableDisconnectHook.status()).toBe(404);
+  expect(await unavailableDisconnectHook.json()).toMatchObject({ code: "API_NOT_FOUND" });
+  const unavailableCommandHistory = await request.get(
+    `${baseUrl}/api/test/mock-device/commands`,
+  );
+  expect(unavailableCommandHistory.status()).toBe(404);
+  expect(await unavailableCommandHistory.json()).toMatchObject({ code: "API_NOT_FOUND" });
+
   const assetPaths = [...new Set(
     [...builtHtml.matchAll(/\b(?:src|href)="(\/assets\/[^"]+)"/gu)]
       .map((match) => match[1])

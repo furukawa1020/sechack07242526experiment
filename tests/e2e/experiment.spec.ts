@@ -198,6 +198,14 @@ test("結果提示中のMock装置切断ではSTOP・収縮を試行してセッ
   await openReadyDisplay(page, created.displayUrl, request, created.sessionId);
   await action(request, created.sessionId, "prepare");
 
+  const historyBeforeInjectionResponse = await request.get("/api/test/mock-device/commands");
+  expect(historyBeforeInjectionResponse.ok()).toBeTruthy();
+  const historyBeforeInjection = asRecord(await historyBeforeInjectionResponse.json()).commands;
+  if (!Array.isArray(historyBeforeInjection)) {
+    throw new TypeError("Mock device command history must be an array.");
+  }
+  const commandBaseline = historyBeforeInjection.length;
+
   const injected = await request.post("/api/test/mock-device/disconnect", {
     data: { command: "inflate" },
   });
@@ -219,10 +227,11 @@ test("結果提示中のMock装置切断ではSTOP・収縮を試行してセッ
   if (!Array.isArray(commands)) {
     throw new TypeError("Mock device command history must be an array.");
   }
-  expect(commands).toEqual(expect.arrayContaining(["inflate", "stop", "deflate"]));
-  const inflateIndex = commands.lastIndexOf("inflate");
-  const stopIndex = commands.indexOf("stop", inflateIndex + 1);
-  const deflateIndex = commands.indexOf("deflate", inflateIndex + 1);
+  const commandsAfterInjection = commands.slice(commandBaseline);
+  expect(commandsAfterInjection).toEqual(expect.arrayContaining(["inflate", "stop", "deflate"]));
+  const inflateIndex = commandsAfterInjection.indexOf("inflate");
+  const stopIndex = commandsAfterInjection.indexOf("stop", inflateIndex + 1);
+  const deflateIndex = commandsAfterInjection.indexOf("deflate", stopIndex + 1);
   expect(stopIndex).toBeGreaterThan(inflateIndex);
   expect(deflateIndex).toBeGreaterThan(stopIndex);
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse, resolve } from "node:path";
 
@@ -202,6 +202,23 @@ describe("ExperimentLogger", () => {
     await expect(logger.append(event())).rejects.toThrow(/symbolic link|junction/iu);
     await expect(logger.listEvents()).rejects.toThrow(/symbolic link|junction/iu);
     expect(await readdir(outsideDirectory)).toEqual([]);
+  });
+
+  it("rejects a session log hard-linked to a file outside the logging root", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "sechack-hardlinked-logs-"));
+    const directory = join(parent, "sessions");
+    const dateDirectory = join(directory, "2026-07-19");
+    const outsideFile = join(parent, "outside.jsonl");
+    const logPath = join(dateDirectory, `SH26-001_${SESSION_ID}.jsonl`);
+    const original = `${JSON.stringify(event())}\n`;
+    await mkdir(dateDirectory, { recursive: true });
+    await writeFile(outsideFile, original, "utf8");
+    await link(outsideFile, logPath);
+    const logger = new ExperimentLogger({ directory });
+
+    await expect(logger.append(event({}, { monotonicMs: 2 }))).rejects.toThrow(/hard links/iu);
+    await expect(logger.listEvents()).rejects.toThrow(/hard links/iu);
+    await expect(readFile(outsideFile, "utf8")).resolves.toBe(original);
   });
 });
 

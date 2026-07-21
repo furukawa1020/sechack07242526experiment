@@ -415,6 +415,9 @@ export class ExperimentLogger {
     if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
       throw new Error("A session log must not be a symbolic link or junction.");
     }
+    if (pathStat.nlink !== 1) {
+      throw new Error("A session log must not have multiple hard links.");
+    }
     const realFile = await realpath(path);
     this.assertInsideDirectory(realLogDirectory, realFile);
   }
@@ -429,6 +432,8 @@ export class ExperimentLogger {
     if (
       pathStat.isSymbolicLink()
       || !pathStat.isFile()
+      || pathStat.nlink !== 1
+      || handleStat.nlink !== 1
       || handleStat.dev !== pathStat.dev
       || handleStat.ino !== pathStat.ino
     ) {
