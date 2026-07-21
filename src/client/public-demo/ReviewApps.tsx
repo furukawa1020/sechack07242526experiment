@@ -123,10 +123,10 @@ export function PublicOperatorApp(): React.JSX.Element {
         </section>
 
         <nav className="public-review-links" aria-label="公開レビュー画面">
-          <a href="/display/demo/" rel="noopener" target="_blank">
+          <a href="/display/demo/index.html" rel="noopener" target="_blank">
             {PUBLIC_DEMO_COPY.review.operator.displayLink}
           </a>
-          <a href="/device-test/">{PUBLIC_DEMO_COPY.review.operator.deviceLink}</a>
+          <a href="/device-test/index.html">{PUBLIC_DEMO_COPY.review.operator.deviceLink}</a>
         </nav>
       </main>
     </ReviewShell>
@@ -207,7 +207,7 @@ export function PublicDeviceTestApp(): React.JSX.Element {
             {copy.stop}
           </button>
         </div>
-        <a className="public-review-back-link" href="/operator/">
+        <a className="public-review-back-link" href="/operator/index.html">
           {copy.operatorLink}
         </a>
       </main>
@@ -225,7 +225,7 @@ export function PublicHealthApp(): React.JSX.Element {
         </span>
         <h1>{copy.title}</h1>
         <p>{copy.description}</p>
-        <a href="/operator/">{copy.operatorLink}</a>
+        <a href="/operator/index.html">{copy.operatorLink}</a>
       </main>
     </ReviewShell>
   );

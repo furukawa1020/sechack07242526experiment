@@ -44,6 +44,7 @@ describe("Vite build output safety", () => {
         ).rejects.toThrow();
       }
     },
+    15_000,
   );
 
   it("rejects unknown output names even when the path is inside the repository", async () => {

@@ -60,6 +60,6 @@ npm.cmd run deploy:prepare:rehearsal
 
 ## 公開版との違い
 
-[公開デモ（模擬表示）](PUBLIC_DEMO.md)は外部URLで見た目を確認する静的サイトです。API、WebSocket、ログ、正式な参加者tokenはなく、`/operator/`と`/display/demo/`の同期も同一ブラウザ内だけです。
+[公開デモ（模擬表示）](PUBLIC_DEMO.md)は外部URLで見た目を確認する静的サイトです。API、WebSocket、ログ、正式な参加者tokenはなく、`/operator/index.html`と`/display/demo/index.html`の同期も同一ブラウザ内だけです。
 
 この模擬リハーサルはローカルNodeサーバ、正式な状態機械、読み取り専用参加者token、WebSocket同期、MockDevice、隔離された模擬ログを使用します。外部インターネットへデプロイせず、`127.0.0.1`でだけ動かします。
