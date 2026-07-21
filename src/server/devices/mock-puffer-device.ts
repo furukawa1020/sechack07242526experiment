@@ -125,15 +125,34 @@ export class MockPufferDevice implements PufferDevice {
     if (!this.connected) {
       return;
     }
+    const shutdownErrors: Error[] = [];
     try {
-      await this.stop({ requestId: randomUUID() });
-      await this.deflate({ requestId: randomUUID(), rampMs: 0 });
+      try {
+        await this.stop({ requestId: randomUUID() });
+      } catch (error) {
+        shutdownErrors.push(
+          error instanceof Error ? error : new Error("Unknown Mock STOP failure."),
+        );
+      }
+      try {
+        await this.deflate({ requestId: randomUUID(), rampMs: 0 });
+      } catch (error) {
+        shutdownErrors.push(
+          error instanceof Error ? error : new Error("Unknown Mock DEFLATE failure."),
+        );
+      }
     } finally {
       this.cancelMotion();
       this.cancelPending("stop");
       this.connected = false;
       this.state = "disconnected";
       this.emitStatus();
+    }
+    if (shutdownErrors.length > 0) {
+      throw new AggregateError(
+        shutdownErrors,
+        "Mock device disconnect did not complete every STOP/DEFLATE safety step.",
+      );
     }
   }
 

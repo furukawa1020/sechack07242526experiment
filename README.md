@@ -27,6 +27,14 @@ npm run preflight -- --allow-mock
 npm run dev
 ```
 
+実機・Googleフォーム・実参加者データを使わず、正式画面と自動進行を確認する場合は、次の1コマンドで模擬リハーサルを起動します。
+
+```bash
+npm run rehearsal
+```
+
+このモードは`config/experiment.mock-rehearsal.json`を使い、`127.0.0.1`だけで待ち受け、MockDeviceを自動準備します。フォームURLは空で、ログは`data/mock-sessions/`へ分離されます。本番参加者には使用できません。
+
 USBシリアル実機を設定した本番運用では、ビルド後に次で起動します。
 
 ```bash
@@ -34,7 +42,7 @@ npm run preflight
 npm run start
 ```
 
-`npm run preflight`は既定で本番ゲートです。Serial実機モード、Windows COMポート、`allowMockInProduction=false`、指定済みGoogle Forms URL形式、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。`npm run start`も本番モードで、Mock設定では安全のため起動を拒否します。
+`npm run preflight`は既定で本番ゲートです。Serial実機モード、Windows COMポート、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内の二名監査GO、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。`npm run start`も同じフォーム監査ゲートを再検証し、監査記録の欠落・NO-GO・設定との不一致・期限切れ、またはMock設定があれば安全のため起動を拒否します。
 
 会場へ配置する本番成果物は、ソースディレクトリをそのままコピーせず、次のコマンドで生成します。
 
@@ -53,14 +61,37 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 
 ## MockDeviceでのデモ
 
+通常は、上記の`npm run rehearsal`を使用してください。ビルド後にスタッフ画面`http://127.0.0.1:4173/operator`を開けば、実機なしで4提示を完走できます。
+
+模擬リハーサルでは次の手順だけを使用します。
+
+1. `npm run rehearsal`を実行し、スタッフ画面を開きます。
+2. 装置モードが「模擬装置」、状態が「待機中」であることを確認します。
+3. 模擬ID（例: `DEMO-001`）を入力し、「リハーサル開始条件を確認済み」にチェックします。
+4. 提示順を割り付け、読み取り専用の参加者画面を別ウィンドウで開きます。
+5. 全画面表示と接続を確認し、4提示を開始します。
+6. サマリーで「リハーサルの確認を完了済み」にチェックして終了します。
+
+この経路にはGoogleフォームへのリンクや回答確認はありません。`SH26-001`形式の研究用ID、実参加者、実回答、実機は使用しないでください。詳しい安全境界は[実機なし模擬リハーサル](docs/MOCK_REHEARSAL.md)にまとめています。
+
+ソース変更中に開発サーバを使う場合だけ、以下の手順を使用します。
+
 1. `config/experiment.json`の`device.mode`が`mock`であることを確認し、`npm run dev`で起動します。
 2. スタッフ画面を開き、装置表示がMockであることを確認して「装置を接続」を押します。
-3. 研究用ID（例: `SH26-001`）を入力し、同意確認済みにチェックします。
+3. 開発用ID（例: `DEV-001`）を入力し、リハーサル開始条件を確認します。
 4. 自動割付または提示順を選び、セッションを作成します。
 5. 表示された参加者画面URLを別ウィンドウで開き、F11またはkioskで全画面表示します。
 6. 接続と全画面を目視確認してスタッフ画面の確認欄へチェックし、共通導入を表示して4提示を開始します。
-7. サマリー後、Googleフォームでの回答完了を確認してセッションを完了します。
+7. サマリー後、リハーサルの確認を完了してセッションを終了します。
 8. 必要ならCSVを出力します。
+
+会場へ持ち運べる実機なしの封印済みリハーサルパッケージは、変更をcommitして作業ツリーをクリーンにした後、次で生成します。
+
+```powershell
+npm.cmd run deploy:prepare:rehearsal
+```
+
+生成物は`sechack-mock-rehearsal-*`という別名になり、`START_MOCK_DEMO.cmd`から起動します。本番リリースへ転用できません。
 
 参加者画面には内部コードA/B/C/Dを表示しません。スタッフ画面では監査と進行確認のためだけに表示します。
 デバイステスト画面ではINFLATE・DEFLATE・STOPの実ACKと`requestId`を表示します。最後のスタッフ画面接続が実行中に失われた場合は、無人進行を防ぐためSTOP/DEFLATEとerror遷移を行います。
@@ -83,7 +114,9 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 
 本番前に`/device-test`でPING、STATUS、上限以下の膨張、収縮、STOPを確認してください。詳細は[運用手順](docs/RUNBOOK.md)と[装置通信仕様](docs/DEVICE_PROTOCOL.md)を参照してください。
 
-新しい本番設定は`config/experiment.production.example.json`から作成します。例には提供済みフォームURL`https://forms.gle/BeShY7cY5zMjunto9`が反映されています。意図的に無効な値は`COM0`だけであり、実機の確定COMポートへ置換するまで本番ゲートを通過しません。URLが設定済みでもフォーム内容の承認を意味しません。[Googleフォーム公開内容監査](docs/FORM_AUDIT.md)のNO-GO所見を解消し、二名照合を完了する必要があります。
+新しい本番設定は`config/experiment.production.example.json`から作成します。例には提供済みフォームURL`https://forms.gle/BeShY7cY5zMjunto9`が反映されています。意図的な本番ブロッカーは`COM0`と`formAudit.status=NO-GO`の2つです。実機の確定COMポートへ置換し、[Googleフォーム公開内容監査](docs/FORM_AUDIT.md)の所見を0件にしたうえで二名照合を完了するまで、本番ゲートを通過しません。
+
+`formAudit`には監査対象の`protocolVersion`、`formUrl`、`auditedOn`、公開応答内の安定した`FB_PUBLIC_LOAD_DATA_` payloadの`contentSha256`、非個人識別の`twoPersonVerified`だけを記録します。確認者の氏名、メールアドレス、フォーム回答は設定へ保存しません。現在の記録は2026-07-21の再監査結果を`NO-GO`として明示しています。
 
 ## 本番前点検
 
@@ -95,7 +128,7 @@ npm run build
 npm run start
 ```
 
-点検結果には、解決済み設定パスとSHA-256、`protocolVersion`、装置モード・COM・baud・ACK timeout、固定状態、Google Forms URL、bind/LAN設定、ログ保存先と空き容量が表示されます。機密の操作トークンや環境変数全体は表示しません。別設定は`npm run preflight -- --config config/会場用設定.json`で指定できます。
+点検結果には、解決済み設定パスとSHA-256、`protocolVersion`、装置モード・COM・baud・ACK timeout、固定状態、Google Forms URL、フォーム監査の状態・対象・日付・公開内容SHA-256・二名確認、bind/LAN設定、ログ保存先と空き容量が表示されます。確認者名、機密の操作トークン、環境変数全体は表示しません。別設定は`npm run preflight -- --config config/会場用設定.json`で指定できます。
 
 `--allow-mock`は開発用Mock確認だけを通す例外で、本番承認の代わりにはなりません。終了コードが1、または`FAIL`が1件でもあれば本番を開始しないでください。
 
@@ -134,6 +167,8 @@ E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認
 - [参加者向け固定文言](docs/UI_COPY.md)
 - [装置通信仕様](docs/DEVICE_PROTOCOL.md)
 - [運用手順](docs/RUNBOOK.md)
+- [実機なし模擬リハーサル](docs/MOCK_REHEARSAL.md)
+- [公開デモ（模擬表示）](docs/PUBLIC_DEMO.md)
 - [Windowsローカル本番デプロイ](docs/DEPLOYMENT.md)
 - [本番リリース二名照合票](docs/RELEASE_CHECKLIST.md)
 - [テスト報告](docs/TEST_REPORT.md)

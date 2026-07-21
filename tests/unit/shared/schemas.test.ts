@@ -16,6 +16,8 @@ import {
   STUDY_FORM_URL,
 } from "../../../src/shared/schemas.js";
 
+const AUDIT_CONTENT_SHA256 = "087a88918e51f152e237a823b51a64e23e91e6f9fc328ac9796fe9475cdc1800";
+
 function validConfig(): Record<string, unknown> {
   return {
     schemaVersion: 1,
@@ -43,10 +45,12 @@ function validConfig(): Record<string, unknown> {
     },
     formUrl: "",
     formAudit: {
-      status: "pending",
-      reviewedUrl: "",
-      reviewedAt: null,
-      reviewerCount: 0,
+      status: "NO-GO",
+      protocolVersion: "R8-010-2x2-mock-v3",
+      formUrl: "",
+      auditedOn: "2026-07-21",
+      contentSha256: AUDIT_CONTENT_SHA256,
+      twoPersonVerified: false,
     },
     logging: {
       directory: "./data/sessions",
@@ -113,48 +117,55 @@ describe("experiment config schema", () => {
       .toThrow(/regular expression/iu);
   });
 
-  it("accepts only internally consistent pending or two-person approved form audits", () => {
-    const approved = parseExperimentConfig({
+  it("validates the machine-readable form audit evidence shape", () => {
+    const go = parseExperimentConfig({
       ...validConfig(),
       formUrl: STUDY_FORM_URL,
       formAudit: {
-        status: "approved",
-        reviewedUrl: STUDY_FORM_URL,
-        reviewedAt: "2026-07-21T12:00:00+09:00",
-        reviewerCount: 2,
+        status: "GO",
+        protocolVersion: "R8-010-2x2-mock-v3",
+        formUrl: STUDY_FORM_URL,
+        auditedOn: "2026-07-21",
+        contentSha256: AUDIT_CONTENT_SHA256,
+        twoPersonVerified: true,
       },
     });
-    expect(approved.formAudit.status).toBe("approved");
+    expect(go.formAudit?.status).toBe("GO");
 
     expect(() => parseExperimentConfig({
       ...validConfig(),
       formAudit: {
-        status: "pending",
-        reviewedUrl: "",
-        reviewedAt: null,
-        reviewerCount: 2,
+        status: "NO-GO",
+        protocolVersion: "R8-010-2x2-mock-v3",
+        formUrl: "",
+        auditedOn: "2026-02-30",
+        contentSha256: AUDIT_CONTENT_SHA256,
+        twoPersonVerified: false,
       },
-    })).toThrow(/reviewerCount/iu);
+    })).toThrow(/valid calendar date/iu);
     expect(() => parseExperimentConfig({
       ...validConfig(),
-      formUrl: STUDY_FORM_URL,
       formAudit: {
-        status: "approved",
-        reviewedUrl: "https://docs.google.com/forms/d/e/different/viewform",
-        reviewedAt: "2026-07-21T12:00:00+09:00",
-        reviewerCount: 2,
+        status: "NO-GO",
+        protocolVersion: "R8-010-2x2-mock-v3",
+        formUrl: "",
+        auditedOn: "2026-07-21",
+        contentSha256: "not-a-sha256",
+        twoPersonVerified: false,
       },
-    })).toThrow(/exactly match formUrl/iu);
+    })).toThrow(/SHA-256/iu);
     expect(() => parseExperimentConfig({
       ...validConfig(),
-      formUrl: STUDY_FORM_URL,
       formAudit: {
-        status: "approved",
-        reviewedUrl: STUDY_FORM_URL,
-        reviewedAt: "2026-07-21",
-        reviewerCount: 2,
+        status: "NO-GO",
+        protocolVersion: "R8-010-2x2-mock-v3",
+        formUrl: "",
+        auditedOn: "2026-07-21",
+        contentSha256: AUDIT_CONTENT_SHA256,
+        twoPersonVerified: false,
+        reviewerName: "must-not-be-stored",
       },
-    })).toThrow(/formAudit\.reviewedAt/iu);
+    })).toThrow(/unrecognized key/iu);
   });
 
   it("formats validation errors without exposing an exception object", () => {
@@ -180,6 +191,60 @@ describe("config file loading", () => {
     await expect(loadExperimentConfig("../outside.json")).rejects.toThrow(/allowed config directory/iu);
     await expect(loadExperimentConfig("config/experiment.json", { production: true }))
       .rejects.toThrow(/Mock device mode is unconditionally disabled/iu);
+  });
+
+  it("fails production loading closed unless a current, bound two-person GO exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sechack-production-audit-"));
+    const configDirectory = join(root, "config");
+    await mkdir(configDirectory);
+    const source = {
+      ...validConfig(),
+      formUrl: STUDY_FORM_URL,
+      device: {
+        ...(validConfig()["device"] as Record<string, unknown>),
+        mode: "serial",
+        serialPath: "COM3",
+      },
+      formAudit: {
+        status: "NO-GO",
+        protocolVersion: "R8-010-2x2-mock-v3",
+        formUrl: STUDY_FORM_URL,
+        auditedOn: "2026-07-21",
+        contentSha256: AUDIT_CONTENT_SHA256,
+        twoPersonVerified: false,
+      },
+    };
+    const configPath = join(configDirectory, "production.json");
+    await writeFile(configPath, JSON.stringify(source), "utf8");
+
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).rejects.toThrow(/status-not-go/iu);
+
+    await writeFile(configPath, JSON.stringify({
+      ...source,
+      formAudit: {
+        ...(source.formAudit as Record<string, unknown>),
+        status: "GO",
+        twoPersonVerified: true,
+      },
+    }), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).resolves.toMatchObject({ config: { protocolVersion: "R8-010-2x2-mock-v3" } });
+
+    const withoutAudit: Record<string, unknown> = { ...source };
+    Reflect.deleteProperty(withoutAudit, "formAudit");
+    await writeFile(configPath, JSON.stringify(withoutAudit), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).rejects.toThrow(/missing/iu);
   });
 
   it("reports malformed JSON from an allowed temporary config directory", async () => {

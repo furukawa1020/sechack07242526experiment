@@ -119,6 +119,7 @@ export interface PublicFixedState {
 
 /** Participant-safe state: it deliberately has no research ID, order code or A/B/C/D code. */
 export interface PublicSnapshot {
+  readonly rehearsal: boolean;
   readonly phase: ExperimentPhase;
   readonly current: PublicCurrentPresentation | null;
   readonly fixedState: PublicFixedState | null;
@@ -394,6 +395,7 @@ export function toPublicSnapshot(
   session: Session,
   monotonicMs: number,
   formUrl = "",
+  rehearsal = false,
 ): PublicSnapshot {
   const current = session.currentCondition === null || session.sequenceIndex === null
     ? null
@@ -413,6 +415,7 @@ export function toPublicSnapshot(
     : Object.freeze([]);
 
   return Object.freeze({
+    rehearsal,
     phase: session.phase,
     current,
     fixedState: showLabelState

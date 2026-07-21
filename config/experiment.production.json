@@ -28,10 +28,12 @@
   },
   "formUrl": "https://forms.gle/BeShY7cY5zMjunto9",
   "formAudit": {
-    "status": "pending",
-    "reviewedUrl": "",
-    "reviewedAt": null,
-    "reviewerCount": 0
+    "status": "NO-GO",
+    "protocolVersion": "R8-010-2x2-mock-v3",
+    "formUrl": "https://forms.gle/BeShY7cY5zMjunto9",
+    "auditedOn": "2026-07-21",
+    "contentSha256": "33762250e42e9cb63900ccd58a64923f4047693086a81a3737cfe7cbb72d9476",
+    "twoPersonVerified": false
   },
   "logging": {
     "directory": "./data/sessions",

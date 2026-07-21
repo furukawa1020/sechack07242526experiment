@@ -6,6 +6,24 @@ export interface PublicDemoCondition {
   readonly presentation: DemoPresentationMode;
 }
 
+export interface PublicDemoRehearsalTimingMs {
+  readonly handling: number;
+  readonly processing: number;
+  readonly result: number;
+  readonly reset: number;
+  readonly pufferInflate: number;
+  readonly pufferDeflate: number;
+}
+
+export const PUBLIC_DEMO_REHEARSAL_TIMING_MS = Object.freeze({
+  handling: 8_000,
+  processing: 3_000,
+  result: 15_000,
+  reset: 7_000,
+  pufferInflate: 6_000,
+  pufferDeflate: 6_000,
+} as const satisfies PublicDemoRehearsalTimingMs);
+
 /**
  * This public-review sequence is independent from research sessions, forms,
  * logs, network clients, and device adapters. It preserves the public meanings
@@ -39,7 +57,8 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
   intro: {
     title: "同じ身体データを、4つの方法で提示します",
     body: "変わるのは、「どこで処理するか」と「どう伝えるか」です。\n\nあなたは、少し本調子ではないまま作業を続けている場面を想定してください。\n\nどの方法が正しいかを選ぶ課題ではありません。\nそれぞれを見たときに、どう感じたかを覚えておいてください。",
-    scenario: "これから表示されるデータの取扱いは、比較のためのシナリオです。\nこの公開デモで、実際の身体データをクラウドへ送信・保存することはありません。",
+    scenario:
+      "これから表示されるデータの取扱いは、比較のためのシナリオです。\nこの公開デモで、実際の身体データをクラウドへ送信・保存することはありません。",
   },
   presentation: {
     position: (position: number): string => `第${position}提示 / 4`,
@@ -113,8 +132,7 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
       body: "そのままお待ちください。",
       puffer: "画面上のフグを収縮させています。実機は動作していません。",
     },
-    progress: (position: number, phase: string): string =>
-      `第${position}提示 / 4・${phase}`,
+    progress: (position: number, phase: string): string => `第${position}提示 / 4・${phase}`,
   },
   review: {
     operator: {

@@ -243,8 +243,8 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   expect(connected.ok()).toBeTruthy();
   await operator.goto(`${baseUrl}/operator`);
   await operator.getByLabel("研究用ID").fill("SH26-950");
-  await operator.getByRole("checkbox", { name: /Googleフォームでの同意を確認済み/u }).check();
-  await operator.getByRole("button", { name: "セッションを準備" }).click();
+  await operator.getByRole("checkbox", { name: /リハーサル開始条件を確認済み/u }).check();
+  await operator.getByRole("button", { name: "リハーサルを準備" }).click();
   await expect(operator.getByRole("heading", { name: "進行状況" })).toBeVisible();
   const sessionId = await operator.evaluate(() => window.sessionStorage.getItem("sechack.active-session-id"));
   expect(sessionId).not.toBeNull();
@@ -318,8 +318,8 @@ test("built production server keeps direct routes, QR, caching, and runtime requ
   expect(externalRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
 
-  await operator.getByRole("checkbox", { name: /Googleフォームの回答完了を確認済み/u }).check();
-  await operator.getByRole("button", { name: "回答完了を確認してセッション完了" }).click();
+  await operator.getByRole("checkbox", { name: /リハーサルの確認を完了済み/u }).check();
+  await operator.getByRole("button", { name: "確認を完了してリハーサル終了" }).click();
   await expect(display.getByRole("heading", { name: "ご協力ありがとうございました" })).toBeVisible();
 
   const invalidDisplay = await context.newPage();

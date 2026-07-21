@@ -19,12 +19,20 @@ import {
   type ExperimentConfig,
 } from "../../../src/shared/schemas.js";
 
-const PENDING_FORM_AUDIT = Object.freeze({
-  status: "pending" as const,
-  reviewedUrl: "" as const,
-  reviewedAt: null,
-  reviewerCount: 0 as const,
-});
+const AUDIT_CONTENT_SHA256 = "087a88918e51f152e237a823b51a64e23e91e6f9fc328ac9796fe9475cdc1800";
+const AUDIT_NOW = new Date("2026-07-21T12:00:00Z");
+
+function goFormAudit(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    status: "GO",
+    protocolVersion: "test-protocol-v1",
+    formUrl: STUDY_FORM_URL,
+    auditedOn: "2026-07-21",
+    contentSha256: AUDIT_CONTENT_SHA256,
+    twoPersonVerified: true,
+    ...overrides,
+  };
+}
 
 function configSource(overrides: {
   readonly mode?: "mock" | "serial";
@@ -32,9 +40,10 @@ function configSource(overrides: {
   readonly allowMockInProduction?: boolean;
   readonly formUrl?: string;
   readonly formAudit?: Record<string, unknown>;
+  readonly omitFormAudit?: boolean;
 } = {}): Record<string, unknown> {
   const formUrl = overrides.formUrl ?? STUDY_FORM_URL;
-  return {
+  const source: Record<string, unknown> = {
     schemaVersion: 1,
     protocolVersion: "test-protocol-v1",
     studyTitle: "合成テスト設定",
@@ -59,12 +68,7 @@ function configSource(overrides: {
       allowMockInProduction: overrides.allowMockInProduction ?? false,
     },
     formUrl,
-    formAudit: overrides.formAudit ?? {
-      status: "approved",
-      reviewedUrl: formUrl,
-      reviewedAt: "2026-07-21T12:00:00+09:00",
-      reviewerCount: 2,
-    },
+    formAudit: overrides.formAudit ?? goFormAudit({ formUrl }),
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -74,6 +78,8 @@ function configSource(overrides: {
       allowExternalRuntimeRequests: false,
     },
   };
+  if (overrides.omitFormAudit === true) Reflect.deleteProperty(source, "formAudit");
+  return source;
 }
 
 const temporaryRoots: string[] = [];
@@ -118,7 +124,7 @@ describe("preflight production gates", () => {
 
   it("passes a complete Serial production configuration", () => {
     const config = parseExperimentConfig(configSource());
-    expect(evaluatePreflightGates(config, false).filter((check) => check.status === "fail"))
+    expect(evaluatePreflightGates(config, false, AUDIT_NOW).filter((check) => check.status === "fail"))
       .toEqual([]);
   });
 
@@ -126,24 +132,29 @@ describe("preflight production gates", () => {
     const differentUrl = "https://docs.google.com/forms/d/example/viewform";
     const config = parseExperimentConfig(configSource({
       formUrl: differentUrl,
-      formAudit: {
-        status: "approved",
-        reviewedUrl: differentUrl,
-        reviewedAt: "2026-07-21T12:00:00+09:00",
-        reviewerCount: 2,
-      },
+      formAudit: goFormAudit({ formUrl: differentUrl }),
     }));
-    expect(evaluatePreflightGates(config, false).find(
+    expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
       (check) => check.name === "formUrl",
     )?.status).toBe("fail");
   });
 
-  it("requires two-person form audit approval for production only", () => {
-    const config = parseExperimentConfig(configSource({ formAudit: PENDING_FORM_AUDIT }));
-    expect(evaluatePreflightGates(config, false).find(
+  it.each([
+    ["NO-GO", { formAudit: goFormAudit({ status: "NO-GO" }) }],
+    ["protocol mismatch", { formAudit: goFormAudit({ protocolVersion: "other-protocol" }) }],
+    ["form URL mismatch", { formAudit: goFormAudit({ formUrl: "https://forms.gle/different" }) }],
+    ["stale", { formAudit: goFormAudit({ auditedOn: "2026-07-13" }) }],
+    ["missing", { omitFormAudit: true }],
+    ["two-person false", { formAudit: goFormAudit({ twoPersonVerified: false }) }],
+  ] as const)("rejects %s form audit evidence in production but permits Mock development", (
+    _label,
+    overrides,
+  ) => {
+    const config = parseExperimentConfig(configSource(overrides));
+    expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
       (check) => check.name === "formAudit",
     )?.status).toBe("fail");
-    expect(evaluatePreflightGates(config, true).find(
+    expect(evaluatePreflightGates(config, true, AUDIT_NOW).find(
       (check) => check.name === "formAudit",
     )?.status).toBe("warning");
   });
@@ -153,9 +164,13 @@ describe("preflight production gates", () => {
       mode: "mock",
       serialPath: "",
       formUrl: "",
-      formAudit: PENDING_FORM_AUDIT,
+      formAudit: goFormAudit({
+        status: "NO-GO",
+        formUrl: "",
+        twoPersonVerified: false,
+      }),
     }));
-    const productionFailures = evaluatePreflightGates(mock, false)
+    const productionFailures = evaluatePreflightGates(mock, false, AUDIT_NOW)
       .filter((check) => check.status === "fail")
       .map((check) => check.name);
     expect(productionFailures).toEqual(expect.arrayContaining([
@@ -164,7 +179,7 @@ describe("preflight production gates", () => {
       "formUrl",
       "formAudit",
     ]));
-    expect(evaluatePreflightGates(mock, true).some((check) => check.status === "fail"))
+    expect(evaluatePreflightGates(mock, true, AUDIT_NOW).some((check) => check.status === "fail"))
       .toBe(false);
   });
 
@@ -204,7 +219,11 @@ describe("preflight report safety", () => {
         mode: "mock",
         serialPath: "",
         formUrl: "",
-        formAudit: PENDING_FORM_AUDIT,
+        formAudit: goFormAudit({
+          status: "NO-GO",
+          formUrl: "",
+          twoPersonVerified: false,
+        }),
       })),
       "utf8",
     );
@@ -221,7 +240,7 @@ describe("preflight report safety", () => {
     expect(exitCode).toBe(0);
     expect(output.join("\n")).toContain("結果: PASS");
     expect(output.join("\n")).toContain("SHA-256");
-    expect(output.join("\n")).toContain("フォーム監査: pending");
+    expect(output.join("\n")).toContain("フォーム監査: NO-GO");
     expect(output.join("\n")).not.toContain(secret);
   });
 });

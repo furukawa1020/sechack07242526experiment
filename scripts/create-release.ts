@@ -14,7 +14,7 @@ import {
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { collectPreflightReport } from "./preflight.js";
+import { collectPreflightReport, type PreflightReport } from "./preflight.js";
 import {
   createReleaseManifest,
   isCredentialFreeSourceRepository,
@@ -23,7 +23,10 @@ import {
 } from "./release-manifest.js";
 
 const DEFAULT_CONFIG_PATH = "config/experiment.json";
+const DEFAULT_MOCK_REHEARSAL_CONFIG_PATH = "config/experiment.mock-rehearsal.json";
 const MAX_GIT_OUTPUT_BYTES = 1024 * 1024;
+
+export type ReleaseKind = "production" | "mock-rehearsal";
 
 interface SourceProvenance {
   readonly sourceCommit: string;
@@ -38,6 +41,7 @@ interface GitCommandResult {
 export interface CreateReleaseArguments {
   readonly configPath?: string;
   readonly help: boolean;
+  readonly mockRehearsal: boolean;
   readonly outputPath?: string;
 }
 
@@ -45,6 +49,7 @@ export interface CreateReleaseOptions {
   readonly rootDirectory?: string;
   readonly configPath?: string;
   readonly outputPath?: string;
+  readonly releaseKind?: ReleaseKind;
   /** Tests may disable dependency installation; the CLI always installs production dependencies. */
   readonly installDependencies?: boolean;
   readonly writeLine?: (line: string) => void;
@@ -52,9 +57,11 @@ export interface CreateReleaseOptions {
 
 function usage(): readonly string[] {
   return Object.freeze([
-    "Usage: npm run release:create -- [--config <config path>] [--output <release path>]",
+    "Usage: npm run release:create -- [--mock-rehearsal] [--config <config path>] [--output <release path>]",
     "",
-    "The config must pass every production preflight gate. Existing output is never overwritten.",
+    "Without --mock-rehearsal, the config must pass every production preflight gate.",
+    "--mock-rehearsal creates a separately named, loopback-only sealed Mock review package.",
+    "Existing output is never overwritten.",
   ]);
 }
 
@@ -167,10 +174,16 @@ export function parseCreateReleaseArguments(args: readonly string[]): CreateRele
   let configPath: string | undefined;
   let outputPath: string | undefined;
   let help = false;
+  let mockRehearsal = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--help" || argument === "-h") {
       help = true;
+      continue;
+    }
+    if (argument === "--mock-rehearsal") {
+      if (mockRehearsal) throw new Error("--mock-rehearsal may only be specified once.");
+      mockRehearsal = true;
       continue;
     }
     if (argument === "--config") {
@@ -201,6 +214,7 @@ export function parseCreateReleaseArguments(args: readonly string[]): CreateRele
   }
   return Object.freeze({
     help,
+    mockRehearsal,
     ...(configPath === undefined ? {} : { configPath }),
     ...(outputPath === undefined ? {} : { outputPath }),
   });
@@ -248,7 +262,10 @@ function compactTimestamp(date = new Date()): string {
     .replace(/\.\d{3}Z$/u, "Z");
 }
 
-async function runtimePackageJson(rootDirectory: string): Promise<string> {
+async function runtimePackageJson(
+  rootDirectory: string,
+  releaseKind: ReleaseKind,
+): Promise<string> {
   const parsed: unknown = JSON.parse(
     await readFile(resolve(rootDirectory, "package.json"), "utf8"),
   );
@@ -256,20 +273,28 @@ async function runtimePackageJson(rootDirectory: string): Promise<string> {
     throw new Error("package.json has an invalid structure.");
   }
   const source = parsed as Record<string, unknown>;
+  const scripts =
+    releaseKind === "production"
+      ? {
+          preflight: "node dist-server/preflight.js",
+          healthcheck: "node dist-server/healthcheck.js",
+          "release:verify": "node dist-server/verify-release.js",
+          start: "node dist-server/index.js",
+        }
+      : {
+          healthcheck: "node dist-server/healthcheck.js --config config/experiment.mock-rehearsal.json",
+          "release:verify": "node dist-server/verify-release.js",
+          start: "node dist-server/rehearsal.js",
+        };
   const output = {
     ...source,
     private: true,
-    scripts: {
-      preflight: "node dist-server/preflight.js",
-      healthcheck: "node dist-server/healthcheck.js",
-      "release:verify": "node dist-server/verify-release.js",
-      start: "node dist-server/index.js",
-    },
+    scripts,
   };
   return `${JSON.stringify(output, null, 2)}\n`;
 }
 
-const WINDOWS_LAUNCHERS = Object.freeze({
+const PRODUCTION_WINDOWS_LAUNCHERS = Object.freeze({
   "START_PRODUCTION.cmd": [
     "@echo off",
     "setlocal",
@@ -298,6 +323,72 @@ const WINDOWS_LAUNCHERS = Object.freeze({
     "node dist-server\\verify-release.js",
   ],
 });
+
+function browserHost(bindHost: string): string {
+  return bindHost === "::1" ? "[::1]" : bindHost;
+}
+
+function mockRehearsalWindowsLaunchers(
+  report: PreflightReport,
+): Readonly<Record<string, readonly string[]>> {
+  const operatorUrl = `http://${browserHost(report.bindHost)}:${String(report.port)}/operator`;
+  return Object.freeze({
+    "START_MOCK_DEMO.cmd": [
+      "@echo off",
+      "setlocal EnableExtensions",
+      'cd /d "%~dp0"',
+      'set "NODE_ENV="',
+      'set "NODE_OPTIONS="',
+      'set "NODE_PATH="',
+      'set "EXPERIMENT_CONFIG_PATH=config\\experiment.mock-rehearsal.json"',
+      'set "DATA_DIRECTORY=data\\mock-sessions"',
+      "node dist-server\\verify-release.js",
+      "if errorlevel 1 exit /b 1",
+      'if not exist "data\\mock-sessions" mkdir "data\\mock-sessions"',
+      `start "" /b powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "$operator='${operatorUrl}'; 1..60 | ForEach-Object { & node 'dist-server\\healthcheck.js' --config 'config\\experiment.mock-rehearsal.json' *> $null; if ($LASTEXITCODE -eq 0) { Start-Process $operator; exit 0 }; Start-Sleep -Milliseconds 500 }; exit 1"`,
+      "echo Mock rehearsal starts without a physical device. Keep this window open.",
+      "echo Press Ctrl+C once here to run the safe STOP/DEFLATE shutdown path.",
+      "node dist-server\\rehearsal.js",
+      "exit /b %errorlevel%",
+    ],
+    "CHECK_MOCK_HEALTH.cmd": [
+      "@echo off",
+      "setlocal",
+      'cd /d "%~dp0"',
+      "node dist-server\\healthcheck.js --config config\\experiment.mock-rehearsal.json",
+    ],
+    "VERIFY_MOCK_RELEASE.cmd": [
+      "@echo off",
+      "setlocal",
+      'cd /d "%~dp0"',
+      "node dist-server\\verify-release.js",
+    ],
+  });
+}
+
+function assertMockRehearsalReleaseConfig(report: PreflightReport, rootDirectory: string): void {
+  const failures: string[] = [];
+  const loopbackHosts = new Set(["127.0.0.1", "localhost", "::1"]);
+  if (report.mode !== "development-mock") failures.push("release.mode");
+  if (report.deviceMode !== "mock") failures.push("device.mode");
+  if (report.serialPath !== "") failures.push("device.serialPath");
+  if (report.allowMockInProduction) failures.push("device.allowMockInProduction");
+  if (!loopbackHosts.has(report.bindHost)) failures.push("bindHost");
+  if (report.allowLan) failures.push("network.allowLan");
+  if (report.allowExternalRuntimeRequests) {
+    failures.push("network.allowExternalRuntimeRequests");
+  }
+  if (report.formUrl !== "") failures.push("formUrl");
+  if (report.researchIdPattern !== "^DEMO-[0-9]{3}$") {
+    failures.push("researchIdPattern");
+  }
+  if (!samePath(report.logPath, resolve(rootDirectory, "data", "mock-sessions"))) {
+    failures.push("logging.directory");
+  }
+  if (failures.length > 0) {
+    throw new Error(`Mock rehearsal release gate failed: ${failures.join(", ")}`);
+  }
+}
 
 async function installProductionDependencies(directory: string): Promise<void> {
   await new Promise<void>((resolveInstall, rejectInstall) => {
@@ -346,19 +437,25 @@ async function installProductionDependencies(directory: string): Promise<void> {
 export async function createRelease(options: CreateReleaseOptions = {}): Promise<string> {
   const writeLine = options.writeLine ?? console.info;
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
+  const releaseKind = options.releaseKind ?? "production";
   const sourceProvenance = await collectSourceProvenance(rootDirectory);
   const releaseRoot = resolve(rootDirectory, "release");
-  const configPath = options.configPath ?? DEFAULT_CONFIG_PATH;
+  const configPath =
+    options.configPath ??
+    (releaseKind === "mock-rehearsal" ? DEFAULT_MOCK_REHEARSAL_CONFIG_PATH : DEFAULT_CONFIG_PATH);
   const report = await collectPreflightReport({
     rootDirectory,
     configPath,
-    allowMock: false,
+    allowMock: releaseKind === "mock-rehearsal",
   });
   const failures = report.checks.filter((check) => check.status === "fail");
   if (failures.length > 0) {
-    throw new Error(
-      `Production preflight failed: ${failures.map((check) => check.name).join(", ")}`,
-    );
+    const gateName =
+      releaseKind === "production" ? "Production preflight" : "Mock rehearsal preflight";
+    throw new Error(`${gateName} failed: ${failures.map((check) => check.name).join(", ")}`);
+  }
+  if (releaseKind === "mock-rehearsal") {
+    assertMockRehearsalReleaseConfig(report, rootDirectory);
   }
 
   const packageSource = JSON.parse(
@@ -372,21 +469,26 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     throw new Error("package.json must contain a version.");
   }
   const appVersion = (packageSource as Record<string, unknown>).version as string;
-  const defaultName = `sechack-experiment-${appVersion}-${report.configHash.slice(0, 12)}-${compactTimestamp()}`;
-  const outputDirectory = resolve(
-    rootDirectory,
-    options.outputPath ?? resolve("release", defaultName),
-  );
+  const releaseName =
+    releaseKind === "production" ? "sechack-experiment" : "sechack-mock-rehearsal";
+  const defaultName = `${releaseName}-${appVersion}-${report.configHash.slice(0, 12)}-${compactTimestamp()}`;
+  const outputDirectory =
+    options.outputPath === undefined
+      ? resolve(releaseRoot, defaultName)
+      : resolve(rootDirectory, options.outputPath);
   if (!isInside(releaseRoot, outputDirectory)) {
-    throw new Error("Release output must be a child directory of release/.");
+    throw new Error(
+      `Release output must be a child directory of release/ (resolved: ${relative(releaseRoot, outputDirectory)}).`,
+    );
   }
 
+  const serverBuildNames =
+    releaseKind === "production"
+      ? (["index.js", "preflight.js", "healthcheck.js", "verify-release.js"] as const)
+      : (["rehearsal.js", "healthcheck.js", "verify-release.js"] as const);
   const requiredBuildFiles = [
     resolve(rootDirectory, "dist", "index.html"),
-    resolve(rootDirectory, "dist-server", "index.js"),
-    resolve(rootDirectory, "dist-server", "preflight.js"),
-    resolve(rootDirectory, "dist-server", "healthcheck.js"),
-    resolve(rootDirectory, "dist-server", "verify-release.js"),
+    ...serverBuildNames.map((name) => resolve(rootDirectory, "dist-server", name)),
   ];
   for (const path of requiredBuildFiles) await requireRegularFile(path);
 
@@ -400,7 +502,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     throw new Error("release/ must be a normal directory inside the repository root.");
   }
   const stagingDirectory = resolve(releaseRoot, `.staging-${randomUUID()}`);
-  let manifestSha256: string | null = null;
+  let manifestSha256: string;
   await mkdir(stagingDirectory, { recursive: false });
   try {
     await copyDirectoryWithoutMaps(
@@ -408,39 +510,41 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       resolve(stagingDirectory, "dist"),
     );
     await mkdir(resolve(stagingDirectory, "dist-server"));
-    for (const name of [
-      "index.js",
-      "preflight.js",
-      "healthcheck.js",
-      "verify-release.js",
-    ] as const) {
+    for (const name of serverBuildNames) {
       await copyFile(
         resolve(rootDirectory, "dist-server", name),
         resolve(stagingDirectory, "dist-server", name),
       );
     }
     await mkdir(resolve(stagingDirectory, "config"));
-    await copyFile(report.configPath, resolve(stagingDirectory, "config", "experiment.json"));
-    await mkdir(resolve(stagingDirectory, "docs"));
-    for (const name of [
-      "RUNBOOK.md",
-      "DEVICE_PROTOCOL.md",
-      "EXPERIMENT_SPEC.md",
-      "UI_COPY.md",
-      "PROTOCOL_CHANGELOG.md",
-      "TEST_REPORT.md",
-      "RELEASE_CHECKLIST.md",
-      "FORM_AUDIT.md",
-    ] as const) {
-      await copyFile(resolve(rootDirectory, "docs", name), resolve(stagingDirectory, "docs", name));
+    const packagedConfigName =
+      releaseKind === "production" ? "experiment.json" : "experiment.mock-rehearsal.json";
+    await copyFile(report.configPath, resolve(stagingDirectory, "config", packagedConfigName));
+    if (releaseKind === "production") {
+      await mkdir(resolve(stagingDirectory, "docs"));
+      for (const name of [
+        "RUNBOOK.md",
+        "DEVICE_PROTOCOL.md",
+        "EXPERIMENT_SPEC.md",
+        "UI_COPY.md",
+        "PROTOCOL_CHANGELOG.md",
+        "TEST_REPORT.md",
+        "RELEASE_CHECKLIST.md",
+        "FORM_AUDIT.md",
+      ] as const) {
+        await copyFile(
+          resolve(rootDirectory, "docs", name),
+          resolve(stagingDirectory, "docs", name),
+        );
+      }
+      await copyFile(
+        resolve(rootDirectory, "docs", "DEPLOYMENT.md"),
+        resolve(stagingDirectory, "DEPLOYMENT.md"),
+      );
     }
-    await copyFile(
-      resolve(rootDirectory, "docs", "DEPLOYMENT.md"),
-      resolve(stagingDirectory, "DEPLOYMENT.md"),
-    );
     await writeFile(
       resolve(stagingDirectory, "package.json"),
-      await runtimePackageJson(rootDirectory),
+      await runtimePackageJson(rootDirectory, releaseKind),
       "utf8",
     );
     await copyFile(
@@ -452,9 +556,17 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       "audit=false\nfund=false\nupdate-notifier=false\n",
       "utf8",
     );
-    await mkdir(resolve(stagingDirectory, "data"));
-    await writeFile(resolve(stagingDirectory, "data", ".gitkeep"), "", { flag: "wx" });
-    for (const [name, lines] of Object.entries(WINDOWS_LAUNCHERS)) {
+    const packagedDataDirectory =
+      releaseKind === "production"
+        ? resolve(stagingDirectory, "data")
+        : resolve(stagingDirectory, "data", "mock-sessions");
+    await mkdir(packagedDataDirectory, { recursive: true });
+    await writeFile(resolve(packagedDataDirectory, ".gitkeep"), "", { flag: "wx" });
+    const windowsLaunchers =
+      releaseKind === "production"
+        ? PRODUCTION_WINDOWS_LAUNCHERS
+        : mockRehearsalWindowsLaunchers(report);
+    for (const [name, lines] of Object.entries(windowsLaunchers)) {
       await writeFile(resolve(stagingDirectory, name), `${lines.join("\r\n")}\r\n`, "utf8");
     }
 
@@ -483,13 +595,16 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     });
     await writeReleaseManifest(stagingDirectory, manifest);
     const verification = await verifyReleaseDirectoryDetailed(stagingDirectory);
-    manifestSha256 = verification.manifestSha256;
     if (verification.errors.length > 0) {
       throw new Error(`Generated release failed verification: ${verification.errors.join("; ")}`);
     }
-    if (manifestSha256 === null || verification.sourceCommit !== sourceProvenance.sourceCommit) {
+    if (
+      verification.manifestSha256 === null ||
+      verification.sourceCommit !== sourceProvenance.sourceCommit
+    ) {
       throw new Error("Generated release provenance could not be verified.");
     }
+    manifestSha256 = verification.manifestSha256;
     await rename(stagingDirectory, outputDirectory);
   } catch (error) {
     if (
@@ -501,14 +616,20 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     throw error;
   }
 
-  writeLine(`Release created: ${outputDirectory}`);
+  writeLine(
+    `${releaseKind === "production" ? "Production" : "Mock rehearsal"} release created: ${outputDirectory}`,
+  );
   writeLine(`Config SHA-256: ${report.configHash}`);
   writeLine(`Source commit: ${sourceProvenance.sourceCommit}`);
   if (sourceProvenance.sourceRepository !== undefined) {
     writeLine(`Source repository: ${sourceProvenance.sourceRepository}`);
   }
-  writeLine(`Deployment manifest SHA-256: ${String(manifestSha256)}`);
-  writeLine("Next: run VERIFY_RELEASE.cmd, then START_PRODUCTION.cmd.");
+  writeLine(`Deployment manifest SHA-256: ${manifestSha256}`);
+  writeLine(
+    releaseKind === "production"
+      ? "Next: run VERIFY_RELEASE.cmd, then START_PRODUCTION.cmd."
+      : "Next: run VERIFY_MOCK_RELEASE.cmd, then START_MOCK_DEMO.cmd. This is not a production research release.",
+  );
   return outputDirectory;
 }
 
@@ -525,6 +646,7 @@ export async function runCreateRelease(
     await createRelease({
       ...(parsed.configPath === undefined ? {} : { configPath: parsed.configPath }),
       ...(parsed.outputPath === undefined ? {} : { outputPath: parsed.outputPath }),
+      releaseKind: parsed.mockRehearsal ? "mock-rehearsal" : "production",
       writeLine,
     });
     return 0;

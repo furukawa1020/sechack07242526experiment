@@ -63,7 +63,11 @@ function sha256Bytes(source: Uint8Array): string {
 }
 
 export function isCredentialFreeSourceRepository(value: string): boolean {
-  if (value.length === 0 || value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value)) {
+  const hasControlCharacter = [...value].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 31 || codePoint === 127;
+  });
+  if (value.length === 0 || value.trim() !== value || hasControlCharacter) {
     return false;
   }
   if (/^git@[a-z0-9.-]+:[a-z0-9._~/-]+$/iu.test(value)) return true;
@@ -82,7 +86,11 @@ export function isCredentialFreeSourceRepository(value: string): boolean {
   ) {
     return false;
   }
-  if (parsed.protocol === "https:" && parsed.username.length > 0) return false;
+  if (parsed.protocol === "ssh:") {
+    if (parsed.username !== "" && parsed.username !== "git") return false;
+  } else if (parsed.username.length > 0) {
+    return false;
+  }
   return parsed.pathname.length > 1;
 }
 

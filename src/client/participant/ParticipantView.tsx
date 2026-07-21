@@ -23,6 +23,15 @@ function Footer(): React.JSX.Element {
   );
 }
 
+function RehearsalNotice(): React.JSX.Element {
+  return (
+    <aside className="participant-rehearsal-notice" role="note">
+      <strong>{UI_COPY.rehearsal.title}</strong>
+      <span>{UI_COPY.rehearsal.body}</span>
+    </aside>
+  );
+}
+
 function CenteredMessage({
   title,
   body,
@@ -55,8 +64,8 @@ function Intro(): React.JSX.Element {
   );
 }
 
-function ConditionHeader({ sequenceIndex }: { readonly sequenceIndex: 0 | 1 | 2 | 3 | null }): React.JSX.Element {
-  const position = sequenceIndex === null ? 1 : sequenceIndex + 1;
+function ConditionHeader({ sequenceIndex }: { readonly sequenceIndex: 0 | 1 | 2 | 3 }): React.JSX.Element {
+  const position = sequenceIndex + 1;
   return (
     <header className="condition-header">
       <strong>{formatPresentationPosition(position as 1 | 2 | 3 | 4)}</strong>
@@ -118,10 +127,8 @@ export function HandlingPanel({ processing }: { readonly processing: ProcessingL
             key={row.key}
           >
             <span className="field-icon"><FieldIcon kind={row.icon} /></span>
-            <div>
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </div>
+            <dt>{row.label}</dt>
+            <dd>{row.value}</dd>
           </div>
         ))}
       </dl>
@@ -171,23 +178,34 @@ function AwaitingPanel(): React.JSX.Element {
 function ProcessingPanel(): React.JSX.Element {
   return (
     <section className="condition-panel processing-panel" aria-live="polite">
-      <div className="processing-spinner" aria-hidden="true" />
-      <p>{UI_COPY.processing}</p>
+      <div className="processing-content">
+        <div className="processing-spinner" aria-hidden="true" />
+        <p>{UI_COPY.processing}</p>
+      </div>
     </section>
   );
 }
 
 function ConditionStage({ snapshot }: { readonly snapshot: ParticipantSnapshot }): React.JSX.Element {
-  const processing = snapshot.condition?.processing ?? "local";
+  if (
+    snapshot.condition === null
+    || snapshot.sequenceIndex === null
+    || (snapshot.phase === "result"
+      && snapshot.condition.presentation === "label"
+      && snapshot.fixedState === null)
+  ) {
+    return <CenteredMessage title={UI_COPY.error.title} body={UI_COPY.error.waiting} />;
+  }
+  const condition = snapshot.condition;
   return (
     <div className="participant-condition-stage">
       <ConditionHeader sequenceIndex={snapshot.sequenceIndex} />
       <main className="condition-grid">
-        <HandlingPanel processing={processing} />
+        <HandlingPanel processing={condition.processing} />
         {snapshot.phase === "handling" ? <AwaitingPanel /> : null}
         {snapshot.phase === "processing" ? <ProcessingPanel /> : null}
-        {snapshot.phase === "result" && snapshot.condition !== null ? (
-          <ResultPanel presentation={snapshot.condition.presentation} fixedState={snapshot.fixedState} />
+        {snapshot.phase === "result" ? (
+          <ResultPanel presentation={condition.presentation} fixedState={snapshot.fixedState} />
         ) : null}
       </main>
     </div>
@@ -236,7 +254,9 @@ function Summary({ snapshot }: { readonly snapshot: ParticipantSnapshot }): Reac
     <main className="participant-summary">
       <section className="summary-heading">
         <h1>{UI_COPY.summary.title}</h1>
-        <p className="multiline-copy">{UI_COPY.summary.body}</p>
+        <p className="multiline-copy">
+          {snapshot.rehearsal ? UI_COPY.rehearsal.summary : UI_COPY.summary.body}
+        </p>
       </section>
       <ol className="summary-grid" aria-label="提示の一覧">
         {snapshot.summary.slice(0, 4).map((condition, index) => (
@@ -267,7 +287,9 @@ function phaseContent(snapshot: ParticipantSnapshot): React.JSX.Element {
     case "summary":
       return <Summary snapshot={snapshot} />;
     case "completed":
-      return <CenteredMessage title={UI_COPY.completed.title} body={UI_COPY.completed.waiting} />;
+      return snapshot.rehearsal
+        ? <CenteredMessage title={UI_COPY.rehearsal.completedTitle} body={UI_COPY.rehearsal.completedWaiting} />
+        : <CenteredMessage title={UI_COPY.completed.title} body={UI_COPY.completed.waiting} />;
     case "aborted":
       return <CenteredMessage title={UI_COPY.aborted.title} body={UI_COPY.aborted.waiting} />;
     case "error":
@@ -283,8 +305,10 @@ export function ParticipantView({ snapshot }: ParticipantViewProps): React.JSX.E
       className="participant-app"
       data-testid="participant-app"
       data-phase={snapshot.phase}
+      data-rehearsal={snapshot.rehearsal ? "true" : "false"}
       data-surface="participant"
     >
+      {snapshot.rehearsal ? <RehearsalNotice /> : null}
       {phaseContent(snapshot)}
       <Footer />
     </div>

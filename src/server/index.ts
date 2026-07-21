@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import { createServer } from "node:http";
-import { relative, resolve, sep } from "node:path";
+import { basename, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { loadExperimentConfig } from "../shared/config-loader.js";
@@ -24,10 +24,21 @@ export interface RunningExperimentServer {
 export interface StartServerOptions {
   readonly rootDirectory?: string;
   readonly configPath?: string;
-  readonly mode?: "development" | "production" | "test";
+  readonly mode?: ServerMode;
   /** Test-only: audit built static assets while retaining the fast Mock adapter. */
   readonly serveBuiltAssets?: boolean;
 }
+
+export type ServerMode = "development" | "production" | "rehearsal" | "test";
+
+export interface ServerCliOptions {
+  readonly start?: () => Promise<RunningExperimentServer>;
+  readonly listeningLabel?: string;
+  readonly stoppedMessage?: string;
+}
+
+const REHEARSAL_LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+const REHEARSAL_RESEARCH_ID_PATTERN = "^DEMO-[0-9]{3}$";
 
 function isInside(parent: string, candidate: string): boolean {
   const pathFromParent = relative(parent, candidate);
@@ -38,7 +49,7 @@ function isInside(parent: string, candidate: string): boolean {
 
 function createDevice(
   config: Awaited<ReturnType<typeof loadExperimentConfig>>["config"],
-  mode: "development" | "production" | "test",
+  mode: ServerMode,
 ): PufferDevice {
   if (config.device.mode === "mock") {
     return new MockPufferDevice({
@@ -57,7 +68,7 @@ function createDevice(
 export function inferServerMode(
   modulePath = fileURLToPath(import.meta.url),
   nodeEnvironment = process.env.NODE_ENV,
-): "development" | "production" | "test" {
+): Exclude<ServerMode, "rehearsal"> {
   // A compiled CLI entry is always production, even if a inherited shell
   // variable says NODE_ENV=test. Tests select test mode explicitly through
   // startServer({ mode: "test" }).
@@ -65,6 +76,32 @@ export function inferServerMode(
   if (nodeEnvironment === "test") return "test";
   if (nodeEnvironment === "production") return "production";
   return "development";
+}
+
+function assertRehearsalConfig(
+  config: Awaited<ReturnType<typeof loadExperimentConfig>>["config"],
+): void {
+  if (config.device.mode !== "mock") {
+    throw new Error("Rehearsal mode requires the Mock device adapter.");
+  }
+  if (config.network.allowLan) {
+    throw new Error("Rehearsal mode prohibits LAN access.");
+  }
+  if (!REHEARSAL_LOOPBACK_HOSTS.has(config.bindHost)) {
+    throw new Error("Rehearsal mode must bind to a loopback host.");
+  }
+  if (config.network.allowExternalRuntimeRequests) {
+    throw new Error("Rehearsal mode prohibits external runtime requests.");
+  }
+  if (config.formUrl !== "") {
+    throw new Error("Rehearsal mode prohibits a Google Form destination.");
+  }
+  if (config.researchIdPattern !== REHEARSAL_RESEARCH_ID_PATTERN) {
+    throw new Error("Rehearsal mode requires the DEMO-001 research ID format.");
+  }
+  if (config.logging.directory !== "./data/mock-sessions") {
+    throw new Error("Rehearsal mode requires the isolated data/mock-sessions log directory.");
+  }
 }
 
 export async function startServer(
@@ -83,12 +120,19 @@ export async function startServer(
     },
   );
   const { config } = loaded;
+  if (mode === "rehearsal") assertRehearsalConfig(config);
   const appVersion = process.env.npm_package_version ?? "1.0.0";
   const dataDirectory = resolve(rootDirectory, "data");
   const configuredLogDirectory = resolve(
     rootDirectory,
     process.env.DATA_DIRECTORY ?? config.logging.directory,
   );
+  if (
+    mode === "rehearsal" &&
+    configuredLogDirectory !== resolve(rootDirectory, "data", "mock-sessions")
+  ) {
+    throw new Error("Rehearsal mode prohibits overriding its isolated mock log directory.");
+  }
   if (!isInside(dataDirectory, configuredLogDirectory)) {
     throw new Error(
       "The configured logging directory must remain inside the repository data directory.",
@@ -157,6 +201,17 @@ export async function startServer(
     });
 
     try {
+      if (mode === "rehearsal") {
+        const status = await controller.connectDevice();
+        if (
+          !status.connected
+          || status.state !== "idle"
+          || status.level !== 0
+          || status.fault !== null
+        ) {
+          throw new Error("The rehearsal Mock device did not reach a verified idle state.");
+        }
+      }
       await new Promise<void>((resolveListen, rejectListen) => {
         const onError = (error: Error): void => rejectListen(error);
         httpServer.once("error", onError);
@@ -169,6 +224,13 @@ export async function startServer(
       webSocketHub.close();
       controller.dispose();
       httpServer.closeAllConnections();
+      if (mode === "rehearsal") {
+        try {
+          await device.disconnect();
+        } catch {
+          // Preserve the original startup failure. The Mock adapter owns no physical actuator.
+        }
+      }
       await Promise.race([
         application.close(),
         new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
@@ -265,13 +327,17 @@ export async function startServer(
   }
 }
 
-const entryPath = process.argv[1];
-if (entryPath !== undefined && pathToFileURL(resolve(entryPath)).href === import.meta.url) {
+/** Runs a CLI entry with the same STOP/DEFLATE shutdown path in every server mode. */
+export function runServerCli(options: ServerCliOptions = {}): void {
+  const start = options.start ?? (() => startServer());
+  const listeningLabel = options.listeningLabel ?? "SecHack experiment server";
+  const stoppedMessage = options.stoppedMessage
+    ?? "Experiment server stopped; verify the physical device is deflated.";
   let running: RunningExperimentServer | undefined;
-  void startServer()
+  void start()
     .then((server) => {
       running = server;
-      console.info(`SecHack experiment server listening at ${server.url}`);
+      console.info(`${listeningLabel} listening at ${server.url}`);
       if (server.operatorToken !== null) {
         console.info(`LAN Operator token: ${server.operatorToken}`);
         const token = encodeURIComponent(server.operatorToken);
@@ -294,7 +360,7 @@ if (entryPath !== undefined && pathToFileURL(resolve(entryPath)).href === import
         void running?.close().then(
           () => {
             clearTimeout(forceExit);
-            console.info("Experiment server stopped; verify the physical device is deflated.");
+            console.info(stoppedMessage);
             process.exit(exitCode);
           },
           (error: unknown) => {
@@ -325,3 +391,16 @@ if (entryPath !== undefined && pathToFileURL(resolve(entryPath)).href === import
       process.exitCode = 1;
     });
 }
+
+function isProductionCliEntry(entryPath: string | undefined): boolean {
+  if (entryPath === undefined || pathToFileURL(resolve(entryPath)).href !== import.meta.url) {
+    return false;
+  }
+  // Bundling index.ts into rehearsal.js rewrites import.meta.url to the rehearsal
+  // output URL. Checking the basename prevents the production entry from also
+  // starting inside that bundle.
+  const entryName = basename(fileURLToPath(import.meta.url));
+  return entryName === "index.ts" || entryName === "index.js";
+}
+
+if (isProductionCliEntry(process.argv[1])) runServerCli();

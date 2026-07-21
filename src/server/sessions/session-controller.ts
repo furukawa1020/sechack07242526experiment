@@ -1162,6 +1162,7 @@ export class SessionController {
         )
       : [];
     const base: PublicSessionSnapshot = {
+      rehearsal: this.config.device.mode === "mock" && this.config.formUrl === "",
       phase: session.phase,
       sequenceIndex: session.sequenceIndex,
       current,

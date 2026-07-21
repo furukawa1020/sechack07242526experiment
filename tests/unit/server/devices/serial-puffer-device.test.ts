@@ -28,6 +28,9 @@ class FakeSerialPort {
   public deferOpen = false;
   public closeCalls = 0;
   public synchronousWriteFailures = 0;
+  public synchronousWriteFailureValue: unknown = new Error("injected synchronous write failure");
+  public asynchronousWriteFailures = 0;
+  public closeError: Error | null = null;
   private deferredOpenCallback: ((error?: Error | null) => void) | null = null;
   private readonly dataListeners = new Set<DataListener>();
   private readonly errorListeners = new Set<ErrorListener>();
@@ -44,6 +47,10 @@ class FakeSerialPort {
 
   public close(callback: (error?: Error | null) => void): void {
     this.closeCalls += 1;
+    if (this.closeError !== null) {
+      callback(this.closeError);
+      return;
+    }
     this.isOpen = false;
     callback();
     for (const listener of this.closeListeners) listener();
@@ -54,7 +61,12 @@ class FakeSerialPort {
     const command = JSON.parse(data.trim()) as WrittenCommand;
     if (this.synchronousWriteFailures > 0) {
       this.synchronousWriteFailures -= 1;
-      throw new Error("injected synchronous write failure");
+      throw this.synchronousWriteFailureValue;
+    }
+    if (this.asynchronousWriteFailures > 0) {
+      this.asynchronousWriteFailures -= 1;
+      queueMicrotask(() => callback?.(new Error("injected asynchronous write failure")));
+      return true;
     }
     callback?.();
     if (this.autoAck) {
@@ -127,15 +139,24 @@ class FakeSerialPort {
     this.isOpen = false;
     for (const listener of this.closeListeners) listener();
   }
+
+  public closeWithoutEvent(): void {
+    this.isOpen = false;
+  }
 }
 
-function setup(override: { ackTimeoutMs?: number; stopAckTimeoutMs?: number } = {}) {
+function setup(override: {
+  ackTimeoutMs?: number;
+  stopAckTimeoutMs?: number;
+  maxLineBytes?: number;
+} = {}) {
   const port = new FakeSerialPort();
   const device = new SerialPufferDevice({
     path: "COM-TEST",
     baudRate: 115_200,
     ackTimeoutMs: override.ackTimeoutMs ?? 1_000,
     stopAckTimeoutMs: override.stopAckTimeoutMs ?? 500,
+    ...(override.maxLineBytes === undefined ? {} : { maxLineBytes: override.maxLineBytes }),
     portFactory: () => port,
   });
   return { device, port };
@@ -187,6 +208,20 @@ describe("SerialPufferDevice", () => {
     expect(port.commands().map((command) => command.cmd)).toEqual(["ping", "stop"]);
   });
 
+  it("times out STOP without recursively issuing another STOP", async () => {
+    vi.useFakeTimers();
+    const { device, port } = setup({ stopAckTimeoutMs: 50 });
+    port.autoAck = false;
+    await device.connect();
+    const stop = device.stop({ requestId: "timed-out-stop" });
+    const rejection = expect(stop).rejects.toBeInstanceOf(DeviceTimeoutError);
+
+    await vi.advanceTimersByTimeAsync(50);
+    await rejection;
+
+    expect(port.commands().map((command) => command.cmd)).toEqual(["stop"]);
+  });
+
   it("fails closed on malformed JSON, unknown request IDs and invalid ACKs", async () => {
     const malformed = setup();
     malformed.port.autoAck = false;
@@ -214,6 +249,41 @@ describe("SerialPufferDevice", () => {
     const request = invalid.port.commands()[0];
     invalid.port.send({ v: 2, requestId: request?.requestId, ok: true, state: "idle" });
     await invalidRejection;
+  });
+
+  it("fails closed on invalid events and malformed ACK fields", async () => {
+    const invalidReady = setup();
+    const readyStates: Array<{ state: string; level: number }> = [];
+    invalidReady.device.onStatus((status) => readyStates.push({ state: status.state, level: status.level }));
+    invalidReady.port.autoAck = false;
+    await invalidReady.device.connect();
+    invalidReady.port.send("");
+    invalidReady.port.send({ v: 1, event: "ready", state: "idle" });
+    expect(readyStates.at(-1)).toEqual({ state: "idle", level: 0 });
+    const readyPending = invalidReady.device.ping();
+    const readyRejection = expect(readyPending).rejects.toBeInstanceOf(DeviceProtocolError);
+    invalidReady.port.send({ v: 1, event: "ready", state: "idle", level: 2 });
+    await readyRejection;
+
+    const invalidEvent = setup();
+    invalidEvent.port.autoAck = false;
+    await invalidEvent.device.connect();
+    const eventPending = invalidEvent.device.ping();
+    const eventRejection = expect(eventPending).rejects.toBeInstanceOf(DeviceProtocolError);
+    invalidEvent.port.send({ v: 1, event: "unknown", state: "idle" });
+    await eventRejection;
+
+    const invalidAck = setup();
+    invalidAck.port.autoAck = false;
+    await invalidAck.device.connect();
+    const ackPending = invalidAck.device.ping();
+    const ackRejection = expect(ackPending).rejects.toBeInstanceOf(DeviceProtocolError);
+    invalidAck.port.send({ v: 1, requestId: 123, ok: true, state: "idle" });
+    await ackRejection;
+
+    expect(invalidReady.port.commands().at(-1)?.cmd).toBe("stop");
+    expect(invalidEvent.port.commands().at(-1)?.cmd).toBe("stop");
+    expect(invalidAck.port.commands().at(-1)?.cmd).toBe("stop");
   });
 
   it("rejects a successful ACK whose state contradicts the pending command", async () => {
@@ -261,6 +331,41 @@ describe("SerialPufferDevice", () => {
     expect(device.commandHistory.map((entry) => entry.command).slice(-2)).toEqual(["inflate", "stop"]);
   });
 
+  it("accepts an omitted level on PING and preserves a safe fault code on a negative ACK", async () => {
+    const successful = setup();
+    successful.port.autoAck = false;
+    await successful.device.connect();
+    const ping = successful.device.ping();
+    const pingCommand = successful.port.commands()[0];
+    successful.port.send({
+      v: 1,
+      requestId: pingCommand?.requestId,
+      ok: true,
+      state: "idle",
+      fault: null,
+    });
+    await expect(ping).resolves.toMatchObject({ state: "idle", level: 0 });
+
+    const failed = setup();
+    const faults: Array<string | null> = [];
+    failed.device.onStatus((status) => faults.push(status.fault));
+    failed.port.autoAck = false;
+    await failed.device.connect();
+    const inflate = failed.device.inflate({ requestId: "fault-with-detail", level: 0.6, rampMs: 6_000 });
+    const rejection = expect(inflate).rejects.toBeInstanceOf(DeviceFaultError);
+    failed.port.send({
+      v: 1,
+      requestId: "fault-with-detail",
+      ok: false,
+      state: "fault",
+      level: 0,
+      errorCode: "OVERPRESSURE",
+      fault: "OVERPRESSURE",
+    });
+    await rejection;
+    expect(faults).toContain("OVERPRESSURE");
+  });
+
   it("turns a synchronous serial write exception into a safe rejection and STOP attempt", async () => {
     const { device, port } = setup();
     await device.connect();
@@ -269,6 +374,86 @@ describe("SerialPufferDevice", () => {
     await expect(device.ping()).rejects.toBeInstanceOf(DeviceNotConnectedError);
 
     expect(port.commands().map((command) => command.cmd)).toEqual(["ping", "stop"]);
+  });
+
+  it("rejects a STOP write failure without recursively sending STOP", async () => {
+    const { device, port } = setup();
+    await device.connect();
+    port.synchronousWriteFailures = 1;
+    port.synchronousWriteFailureValue = "injected non-Error write failure";
+
+    await expect(device.stop({ requestId: "failed-stop-write" }))
+      .rejects.toBeInstanceOf(DeviceNotConnectedError);
+
+    expect(port.commands().map((command) => command.cmd)).toEqual(["stop"]);
+  });
+
+  it("turns an asynchronous serial write failure into a safe rejection and STOP attempt", async () => {
+    const { device, port } = setup();
+    const faults: Array<string | null> = [];
+    device.onStatus((status) => faults.push(status.fault));
+    await device.connect();
+    port.asynchronousWriteFailures = 1;
+
+    await expect(device.ping()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+
+    expect(port.commands().map((command) => command.cmd)).toEqual(["ping", "stop"]);
+    expect(faults).toContain("SERIAL_WRITE_FAILED");
+  });
+
+  it("fails closed when a response exceeds the line limit and reports emergency STOP write failure", async () => {
+    const { device, port } = setup({ maxLineBytes: 32 });
+    const faults: Array<string | null> = [];
+    device.onStatus((status) => faults.push(status.fault));
+    port.autoAck = false;
+    await device.connect();
+    const ping = device.ping();
+    const rejection = expect(ping).rejects.toBeInstanceOf(DeviceProtocolError);
+    port.asynchronousWriteFailures = 1;
+
+    port.send("x".repeat(33));
+
+    await rejection;
+    await Promise.resolve();
+    expect(port.commands().map((command) => command.cmd)).toEqual(["ping", "stop"]);
+    expect(faults.at(-1)).toBe("EMERGENCY_STOP_WRITE_FAILED");
+  });
+
+  it("ignores one late ACK after timeout but fails closed on a duplicate late ACK", async () => {
+    vi.useFakeTimers();
+    const { device, port } = setup({ ackTimeoutMs: 100 });
+    const faults: Array<string | null> = [];
+    device.onStatus((status) => faults.push(status.fault));
+    port.autoAck = false;
+    await device.connect();
+    const ping = device.ping();
+    const rejection = expect(ping).rejects.toBeInstanceOf(DeviceTimeoutError);
+    const pingCommand = port.commands()[0];
+
+    await vi.advanceTimersByTimeAsync(100);
+    await rejection;
+    port.ack(pingCommand);
+    expect(port.commands().map((command) => command.cmd)).toEqual(["ping", "stop"]);
+
+    port.ack(pingCommand);
+    expect(port.commands().map((command) => command.cmd)).toEqual(["ping", "stop", "stop"]);
+    expect(faults.at(-1)).toBe("INVALID_DEVICE_RESPONSE");
+  });
+
+  it("rejects duplicate pending request IDs without losing STOP priority", async () => {
+    const { device, port } = setup();
+    port.autoAck = false;
+    await device.connect();
+    const inflate = device.inflate({ requestId: "duplicate-request", level: 0.6, rampMs: 6_000 });
+
+    await expect(device.deflate({ requestId: "duplicate-request", rampMs: 6_000 }))
+      .rejects.toBeInstanceOf(DeviceProtocolError);
+
+    const inflateRejection = expect(inflate).rejects.toBeInstanceOf(DeviceCommandSupersededError);
+    const stop = device.stop({ requestId: "duplicate-stop" });
+    await inflateRejection;
+    port.ack(port.commands().at(-1));
+    await expect(stop).resolves.toMatchObject({ requestId: "duplicate-stop", state: "stopped" });
   });
 
   it("times out a serial open and closes a port that opens after the timeout", async () => {
@@ -287,6 +472,21 @@ describe("SerialPufferDevice", () => {
     expect(port.closeCalls).toBe(1);
     expect(port.isOpen).toBe(false);
     await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+  });
+
+  it("handles an explicit open error and permits a safe reconnect", async () => {
+    const openFailure = setup();
+    openFailure.port.deferOpen = true;
+    const connecting = openFailure.device.connect();
+    openFailure.port.completeOpen(new Error("injected open failure"));
+    await expect(connecting).rejects.toBeInstanceOf(DeviceNotConnectedError);
+
+    const reconnect = setup();
+    await reconnect.device.connect();
+    await expect(reconnect.device.connect()).resolves.toBeUndefined();
+    reconnect.port.unexpectedClose();
+    await reconnect.device.connect();
+    await expect(reconnect.device.ping()).resolves.toMatchObject({ connected: true, state: "idle" });
   });
 
   it("allows STOP to be repeated while an earlier STOP acknowledgement is pending", async () => {
@@ -314,6 +514,54 @@ describe("SerialPufferDevice", () => {
     expect(port.commands().at(-1)?.cmd).toBe("stop");
 
     port.unexpectedClose();
+    await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+  });
+
+  it("rejects pending work and attempts STOP on a serial error event", async () => {
+    const { device, port } = setup();
+    const faults: Array<string | null> = [];
+    device.onStatus((status) => faults.push(status.fault));
+    port.autoAck = false;
+    await device.connect();
+    const ping = device.ping();
+    const rejection = expect(ping).rejects.toBeInstanceOf(DeviceNotConnectedError);
+
+    port.fail(new Error("injected serial error"));
+
+    await rejection;
+    expect(port.commands().map((command) => command.cmd)).toEqual(["ping", "stop"]);
+    expect(faults.at(-1)).toBe("SERIAL_ERROR");
+  });
+
+  it("aggregates STOP write and serial close failures while still detaching safely", async () => {
+    const { device, port } = setup();
+    await device.connect();
+    port.asynchronousWriteFailures = 1;
+    port.closeError = new Error("injected close failure");
+
+    const disconnect = device.disconnect();
+    const rejection = expect(disconnect).rejects.toBeInstanceOf(AggregateError);
+    await rejection;
+
+    expect(port.commands().map((command) => command.cmd)).toEqual([
+      "stop",
+      "stop",
+      "deflate",
+      "status",
+    ]);
+    expect(port.closeCalls).toBe(1);
+    await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+  });
+
+  it("disconnects safely when the port closes before the close event is delivered", async () => {
+    const { device, port } = setup();
+    await device.connect();
+    port.closeWithoutEvent();
+
+    await expect(device.disconnect()).resolves.toBeUndefined();
+
+    expect(port.commands()).toEqual([]);
+    expect(port.closeCalls).toBe(0);
     await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
   });
 

@@ -4,7 +4,7 @@
   "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
   "bindHost": "127.0.0.1",
   "port": 4173,
-  "researchIdPattern": "^SH26-[0-9]{3}$",
+  "researchIdPattern": "^DEMO-[0-9]{3}$",
   "orders": ["ABDC", "BCAD", "CDBA", "DACB"],
   "fixedState": {
     "score": 72,
@@ -20,23 +20,15 @@
     "deflateRamp": 6000
   },
   "device": {
-    "mode": "serial",
-    "serialPath": "COM0",
+    "mode": "mock",
+    "serialPath": "",
     "baudRate": 115200,
     "ackTimeout": 1000,
     "allowMockInProduction": false
   },
-  "formUrl": "https://forms.gle/BeShY7cY5zMjunto9",
-  "formAudit": {
-    "status": "NO-GO",
-    "protocolVersion": "R8-010-2x2-mock-v3",
-    "formUrl": "https://forms.gle/BeShY7cY5zMjunto9",
-    "auditedOn": "2026-07-21",
-    "contentSha256": "33762250e42e9cb63900ccd58a64923f4047693086a81a3737cfe7cbb72d9476",
-    "twoPersonVerified": false
-  },
+  "formUrl": "",
   "logging": {
-    "directory": "./data/sessions",
+    "directory": "./data/mock-sessions",
     "includeAbortedInOrderBalancing": true
   },
   "network": {

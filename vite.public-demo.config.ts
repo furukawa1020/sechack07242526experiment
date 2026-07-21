@@ -8,17 +8,17 @@ const publicDemoRoot = resolve(projectRoot, "public-demo");
 const publicDemoSourceSegment = "/src/client/public-demo/";
 const publicDemoHtmlInputs = Object.freeze({
   index: resolve(publicDemoRoot, "index.html"),
-  operator: resolve(publicDemoRoot, "operator", "index.html"),
-  displayDemo: resolve(publicDemoRoot, "display", "demo", "index.html"),
-  deviceTest: resolve(publicDemoRoot, "device-test", "index.html"),
-  healthz: resolve(publicDemoRoot, "healthz", "index.html"),
+  operator: resolve(publicDemoRoot, "operator.html"),
+  displayDemo: resolve(publicDemoRoot, "display-demo.html"),
+  deviceTest: resolve(publicDemoRoot, "device-test.html"),
+  healthz: resolve(publicDemoRoot, "healthz.html"),
 });
 const expectedHtmlArtifacts = new Set([
   "index.html",
-  "operator/index.html",
-  "display/demo/index.html",
-  "device-test/index.html",
-  "healthz/index.html",
+  "operator.html",
+  "display-demo.html",
+  "device-test.html",
+  "healthz.html",
 ]);
 const forbiddenSourcePatterns = [
   { label: "network API", pattern: /fetch\s*\(|XMLHttpRequest|\bWebSocket\b|EventSource|sendBeacon/u },

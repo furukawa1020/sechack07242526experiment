@@ -1,4 +1,13 @@
-import { mkdir, open, readFile, readdir } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  type FileHandle,
+} from "node:fs/promises";
 import { dirname, isAbsolute, parse, relative, resolve } from "node:path";
 
 import { z } from "zod";
@@ -160,8 +169,9 @@ export class ExperimentLogger {
     this.assertInsideLogDirectory(path);
     const previousWrite = this.writes.get(path) ?? Promise.resolve();
     const currentWrite = previousWrite.then(async () => {
-      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      const handle = await open(path, "a", 0o600);
+      const realLogDirectory = await this.ensureSecureLogRoot();
+      await this.ensureSecureDateDirectory(dirname(path), realLogDirectory);
+      const handle = await this.openSecureLogFile(path, realLogDirectory);
       try {
         await handle.writeFile(`${JSON.stringify(validated)}\n`, { encoding: "utf8" });
         await handle.sync();
@@ -268,29 +278,45 @@ export class ExperimentLogger {
   }
 
   private async listLogPaths(): Promise<readonly string[]> {
-    let dateEntries;
+    let realLogDirectory: string;
     try {
-      dateEntries = await readdir(this.directory, { withFileTypes: true });
+      realLogDirectory = await this.resolveSecureLogRoot();
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return Object.freeze([]);
       }
       throw error;
     }
+    const dateEntries = await readdir(this.directory, { withFileTypes: true });
 
     const paths: string[] = [];
     for (const dateEntry of dateEntries) {
-      if (!dateEntry.isDirectory() || !/^\d{4}-\d{2}-\d{2}$/u.test(dateEntry.name)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/u.test(dateEntry.name)) {
         continue;
       }
       const datePath = resolve(this.directory, dateEntry.name);
+      if (dateEntry.isSymbolicLink()) {
+        throw new Error("A dated logging directory must not be a symbolic link or junction.");
+      }
+      if (!dateEntry.isDirectory()) {
+        continue;
+      }
+      await this.assertSecureDirectory(datePath, realLogDirectory);
       const files = await readdir(datePath, { withFileTypes: true });
       for (const file of files) {
-        if (file.isFile() && file.name.endsWith(".jsonl")) {
-          const path = resolve(datePath, file.name);
-          this.assertInsideLogDirectory(path);
-          paths.push(path);
+        if (!file.name.endsWith(".jsonl")) {
+          continue;
         }
+        if (file.isSymbolicLink()) {
+          throw new Error("A session log must not be a symbolic link or junction.");
+        }
+        if (!file.isFile()) {
+          continue;
+        }
+        const path = resolve(datePath, file.name);
+        this.assertInsideLogDirectory(path);
+        await this.assertSecureExistingLogFile(path, realLogDirectory);
+        paths.push(path);
       }
     }
     paths.sort((left, right) => left.localeCompare(right));
@@ -298,9 +324,108 @@ export class ExperimentLogger {
   }
 
   private assertInsideLogDirectory(path: string): void {
-    const relativePath = relative(this.directory, path);
+    this.assertInsideDirectory(this.directory, path);
+  }
+
+  private assertInsideDirectory(directory: string, path: string): void {
+    const relativePath = relative(directory, path);
     if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
       throw new Error("Resolved log path escaped the configured logging directory.");
+    }
+  }
+
+  private async ensureSecureLogRoot(): Promise<string> {
+    await mkdir(this.directory, { recursive: true, mode: 0o700 });
+    return this.resolveSecureLogRoot();
+  }
+
+  private async resolveSecureLogRoot(): Promise<string> {
+    const directoryStat = await lstat(this.directory);
+    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
+      throw new Error("The logging directory must not be a symbolic link or junction.");
+    }
+    return realpath(this.directory);
+  }
+
+  private async ensureSecureDateDirectory(
+    datePath: string,
+    realLogDirectory: string,
+  ): Promise<void> {
+    try {
+      await mkdir(datePath, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+    }
+    await this.assertSecureDirectory(datePath, realLogDirectory);
+  }
+
+  private async assertSecureDirectory(path: string, realLogDirectory: string): Promise<void> {
+    const pathStat = await lstat(path);
+    if (pathStat.isSymbolicLink() || !pathStat.isDirectory()) {
+      throw new Error("A dated logging directory must not be a symbolic link or junction.");
+    }
+    const realDirectory = await realpath(path);
+    this.assertInsideDirectory(realLogDirectory, realDirectory);
+  }
+
+  private async openSecureLogFile(path: string, realLogDirectory: string): Promise<FileHandle> {
+    const noFollow = constants.O_NOFOLLOW ?? 0;
+    let handle: FileHandle;
+    try {
+      handle = await open(
+        path,
+        constants.O_WRONLY
+          | constants.O_APPEND
+          | constants.O_CREAT
+          | constants.O_EXCL
+          | noFollow,
+        0o600,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+      await this.assertSecureExistingLogFile(path, realLogDirectory);
+      handle = await open(path, constants.O_WRONLY | constants.O_APPEND | noFollow, 0o600);
+    }
+
+    try {
+      await this.assertOpenHandleMatchesPath(handle, path, realLogDirectory);
+      return handle;
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
+  }
+
+  private async assertSecureExistingLogFile(
+    path: string,
+    realLogDirectory: string,
+  ): Promise<void> {
+    const pathStat = await lstat(path);
+    if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
+      throw new Error("A session log must not be a symbolic link or junction.");
+    }
+    const realFile = await realpath(path);
+    this.assertInsideDirectory(realLogDirectory, realFile);
+  }
+
+  private async assertOpenHandleMatchesPath(
+    handle: FileHandle,
+    path: string,
+    realLogDirectory: string,
+  ): Promise<void> {
+    await this.assertSecureExistingLogFile(path, realLogDirectory);
+    const [handleStat, pathStat] = await Promise.all([handle.stat(), lstat(path)]);
+    if (
+      pathStat.isSymbolicLink()
+      || !pathStat.isFile()
+      || handleStat.dev !== pathStat.dev
+      || handleStat.ino !== pathStat.ino
+    ) {
+      throw new Error("The session log changed while it was being opened.");
     }
   }
 }

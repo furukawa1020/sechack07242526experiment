@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PublicDemoApp } from "../../../src/client/public-demo/PublicDemoApp.js";
-import { PUBLIC_DEMO_COPY } from "../../../src/client/public-demo/content.js";
+import {
+  PUBLIC_DEMO_COPY,
+  PUBLIC_DEMO_REHEARSAL_TIMING_MS,
+} from "../../../src/client/public-demo/content.js";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -16,10 +20,19 @@ function next(): void {
   fireEvent.click(screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.next }));
 }
 
+function startRehearsal(): void {
+  fireEvent.click(screen.getByRole("button", { name: PUBLIC_DEMO_COPY.rehearsal.start }));
+}
+
+function advance(milliseconds: number): void {
+  act(() => vi.advanceTimersByTime(milliseconds));
+}
+
 describe("public demo", () => {
   it("clearly identifies the hardware-free, no-data public demo", () => {
     render(<PublicDemoApp />);
 
+    expect(PUBLIC_DEMO_COPY.notice.title).toBe("公開デモ（模擬表示）");
     expect(screen.getByText(PUBLIC_DEMO_COPY.notice.title)).toBeInTheDocument();
     expect(screen.getByText(PUBLIC_DEMO_COPY.notice.research)).toBeInTheDocument();
     expect(screen.getByText(PUBLIC_DEMO_COPY.notice.data)).toBeInTheDocument();
@@ -31,6 +44,34 @@ describe("public demo", () => {
       screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.previous }),
     ).toBeDisabled();
     expect(document.querySelector(".public-demo-kicker")).toBeNull();
+    expect(screen.queryByText("公開Mockデモ")).not.toBeInTheDocument();
+  });
+
+  it("uses one main landmark and a level-one scene heading before level-two panels", () => {
+    render(<PublicDemoApp />);
+
+    const main = screen.getByRole("main", { name: "固定模擬データの表示確認" });
+    expect(document.querySelectorAll("main")).toHaveLength(1);
+    expect(within(main).getByRole("heading", { level: 1 })).toHaveTextContent(
+      PUBLIC_DEMO_COPY.intro.title,
+    );
+    expect(main.querySelector("main")).toBeNull();
+
+    next();
+
+    expect(document.querySelectorAll("main")).toHaveLength(1);
+    expect(within(main).getByRole("heading", { level: 1 })).toHaveTextContent("第1提示 / 4");
+    expect(within(main).getAllByRole("heading", { level: 2 })).toHaveLength(2);
+    expect(main.querySelector("main")).toBeNull();
+    expect(document.querySelector("article main")).toBeNull();
+
+    for (let index = 0; index < 4; index += 1) next();
+
+    expect(document.querySelectorAll("main")).toHaveLength(1);
+    expect(within(main).getByRole("heading", { level: 1 })).toHaveTextContent(
+      PUBLIC_DEMO_COPY.summary.title,
+    );
+    expect(main.querySelector("main")).toBeNull();
   });
 
   it("shows all four fixed presentations without exposing internal condition codes", () => {
@@ -149,5 +190,122 @@ describe("public demo", () => {
 
     expect(screen.getByText("第1提示 / 4（2 / 6画面）")).toBeInTheDocument();
     expect(document.querySelector("[data-scene='result']")).not.toBeNull();
+  });
+
+  it("automatically replays the four timed presentation phases and ends at the summary", () => {
+    vi.useFakeTimers();
+    render(<PublicDemoApp />);
+
+    expect(PUBLIC_DEMO_REHEARSAL_TIMING_MS).toEqual({
+      handling: 8_000,
+      processing: 3_000,
+      result: 15_000,
+      reset: 7_000,
+      pufferInflate: 6_000,
+      pufferDeflate: 6_000,
+    });
+
+    startRehearsal();
+    const app = screen.getByTestId("public-demo-app");
+    const stage = screen.getByLabelText("固定模擬データの表示確認");
+    expect(app).toHaveAttribute("data-rehearsal-mode", "automatic");
+    expect(
+      screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.previous }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.next })).toBeDisabled();
+
+    for (let position = 1; position <= 4; position += 1) {
+      expect(stage).toHaveAttribute("data-rehearsal-position", String(position));
+      expect(stage).toHaveAttribute("data-rehearsal-phase", "handling");
+      advance(7_999);
+      expect(stage).toHaveAttribute("data-rehearsal-phase", "handling");
+      advance(1);
+      expect(stage).toHaveAttribute("data-rehearsal-phase", "processing");
+      advance(3_000);
+      expect(stage).toHaveAttribute("data-rehearsal-phase", "result");
+      advance(15_000);
+      expect(stage).toHaveAttribute("data-rehearsal-phase", "reset");
+      advance(7_000);
+    }
+
+    expect(app).toHaveAttribute("data-rehearsal-mode", "manual");
+    expect(screen.getByTestId("public-demo-summary")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: PUBLIC_DEMO_COPY.rehearsal.stop }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: PUBLIC_DEMO_COPY.rehearsal.start }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps automatic paired results identical and uses the same six-second puffer motion", () => {
+    vi.useFakeTimers();
+    render(<PublicDemoApp />);
+    startRehearsal();
+
+    advance(8_000);
+    advance(3_000);
+    const firstLabelResult = screen.getByTestId("result-panel").innerHTML;
+    advance(15_000);
+    advance(7_000);
+    advance(8_000);
+    advance(3_000);
+    const secondLabelResult = screen.getByTestId("result-panel").innerHTML;
+    expect(secondLabelResult).toBe(firstLabelResult);
+
+    advance(15_000);
+    advance(7_000);
+    advance(8_000);
+    advance(3_000);
+    const cloudPufferResult = screen.getByTestId("result-panel").innerHTML;
+    let puffer = screen.getByTestId("public-demo-puffer");
+    expect(puffer).toHaveAttribute("data-puffer-motion", "inflating");
+    expect(puffer).toHaveAttribute("data-motion-duration-ms", "6000");
+    advance(5_999);
+    expect(puffer).toHaveAttribute("data-puffer-motion", "inflating");
+    advance(1);
+    expect(puffer).toHaveAttribute("data-puffer-motion", "holding");
+
+    advance(9_000);
+    puffer = screen.getByTestId("public-demo-puffer");
+    expect(puffer).toHaveAttribute("data-puffer-motion", "deflating");
+    expect(puffer).toHaveAttribute("data-motion-duration-ms", "6000");
+    advance(6_000);
+    expect(puffer).toHaveAttribute("data-puffer-motion", "resting");
+    advance(1_000);
+    advance(8_000);
+    advance(3_000);
+
+    const localPufferResult = screen.getByTestId("result-panel").innerHTML;
+    expect(localPufferResult).toBe(cloudPufferResult);
+    puffer = screen.getByTestId("public-demo-puffer");
+    expect(puffer).toHaveAttribute("data-puffer-motion", "inflating");
+    expect(puffer).toHaveAttribute("data-motion-duration-ms", "6000");
+  });
+
+  it("runs automatic rehearsal only in memory without network, storage, forms, or device APIs", () => {
+    vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const localStorageSet = vi.spyOn(Storage.prototype, "setItem");
+    const sessionStorageSet = vi.spyOn(window.sessionStorage, "setItem");
+    const webSocketConstructor = vi.fn();
+    vi.stubGlobal("WebSocket", webSocketConstructor);
+    render(<PublicDemoApp />);
+
+    startRehearsal();
+    for (let position = 0; position < 4; position += 1) {
+      advance(8_000);
+      advance(3_000);
+      advance(15_000);
+      advance(7_000);
+    }
+
+    expect(screen.getByTestId("public-demo-summary")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(webSocketConstructor).not.toHaveBeenCalled();
+    expect(localStorageSet).not.toHaveBeenCalled();
+    expect(sessionStorageSet).not.toHaveBeenCalled();
   });
 });

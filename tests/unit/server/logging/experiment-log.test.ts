@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 
@@ -173,6 +173,20 @@ describe("ExperimentLogger", () => {
     await writeFile(join(directory, "2026-07-19", "ignored.txt"), "garbage", "utf8");
     const logger = new ExperimentLogger({ directory });
     expect(await logger.listEvents()).toEqual([]);
+  });
+
+  it("rejects a dated directory junction that redirects logs outside the configured root", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "sechack-linked-logs-"));
+    const directory = join(parent, "sessions");
+    const outsideDirectory = join(parent, "outside");
+    await mkdir(directory);
+    await mkdir(outsideDirectory);
+    await symlink(outsideDirectory, join(directory, "2026-07-19"), "junction");
+    const logger = new ExperimentLogger({ directory });
+
+    await expect(logger.append(event())).rejects.toThrow(/symbolic link|junction/iu);
+    await expect(logger.listEvents()).rejects.toThrow(/symbolic link|junction/iu);
+    expect(await readdir(outsideDirectory)).toEqual([]);
   });
 });
 

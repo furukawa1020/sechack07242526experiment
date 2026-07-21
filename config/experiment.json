@@ -4,7 +4,7 @@
   "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
   "bindHost": "127.0.0.1",
   "port": 4173,
-  "researchIdPattern": "^SH26-[0-9]{3}$",
+  "researchIdPattern": "^DEV-[0-9]{3}$",
   "orders": ["ABDC", "BCAD", "CDBA", "DACB"],
   "fixedState": {
     "score": 72,
@@ -26,15 +26,9 @@
     "ackTimeout": 1000,
     "allowMockInProduction": false
   },
-  "formUrl": "https://forms.gle/BeShY7cY5zMjunto9",
-  "formAudit": {
-    "status": "pending",
-    "reviewedUrl": "",
-    "reviewedAt": null,
-    "reviewerCount": 0
-  },
+  "formUrl": "",
   "logging": {
-    "directory": "./data/sessions",
+    "directory": "./data/dev-sessions",
     "includeAbortedInOrderBalancing": true
   },
   "network": {

@@ -6,48 +6,30 @@ import {
   PUBLIC_DEMO_FIRST_PRESENTATION_STEP,
   PUBLIC_DEMO_FIXED_STATE,
   PUBLIC_DEMO_INTRO_STEP,
+  PUBLIC_DEMO_REHEARSAL_TIMING_MS,
   PUBLIC_DEMO_SUMMARY_STEP,
   PUBLIC_DEMO_TOTAL_STEPS,
   publicDemoStepLabel,
   type DemoProcessingLocation,
   type PublicDemoCondition,
+  type PublicDemoRehearsalTimingMs,
 } from "./content.js";
 
-export type PublicDemoRehearsalPhase = "handling" | "processing" | "result" | "reset";
+type PublicDemoRehearsalPhase = "handling" | "processing" | "result" | "reset";
 type PublicDemoConditionIndex = 0 | 1 | 2 | 3;
 type PublicDemoPufferMotion = "resting" | "inflating" | "holding" | "deflating";
 
-export interface PublicDemoRehearsalFrame {
+interface PublicDemoRehearsalFrame {
   readonly conditionIndex: PublicDemoConditionIndex;
   readonly phase: PublicDemoRehearsalPhase;
 }
-
-export interface PublicDemoRehearsalTimingMs {
-  readonly handling: number;
-  readonly processing: number;
-  readonly result: number;
-  readonly reset: number;
-  readonly pufferInflate: number;
-  readonly pufferDeflate: number;
-}
-
-export const PUBLIC_DEMO_REHEARSAL_TIMING_MS = Object.freeze({
-  handling: 8_000,
-  processing: 3_000,
-  result: 15_000,
-  reset: 7_000,
-  pufferInflate: 6_000,
-  pufferDeflate: 6_000,
-} as const satisfies PublicDemoRehearsalTimingMs);
 
 const FIRST_REHEARSAL_FRAME: PublicDemoRehearsalFrame = Object.freeze({
   conditionIndex: 0,
   phase: "handling",
 });
 
-export function nextRehearsalFrame(
-  frame: PublicDemoRehearsalFrame,
-): PublicDemoRehearsalFrame | null {
+function nextRehearsalFrame(frame: PublicDemoRehearsalFrame): PublicDemoRehearsalFrame | null {
   switch (frame.phase) {
     case "handling":
       return { ...frame, phase: "processing" };
@@ -206,14 +188,33 @@ function PufferFigure({
   );
 }
 
+function TimedPufferFigure({
+  phase,
+  timingMs,
+}: {
+  readonly phase: "result" | "reset";
+  readonly timingMs: PublicDemoRehearsalTimingMs;
+}): React.JSX.Element {
+  const inflating = phase === "result";
+  const [motion, setMotion] = useState<PublicDemoPufferMotion>(
+    inflating ? "inflating" : "deflating",
+  );
+  const durationMs = inflating ? timingMs.pufferInflate : timingMs.pufferDeflate;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMotion(inflating ? "holding" : "resting"), durationMs);
+    return (): void => window.clearTimeout(timer);
+  }, [durationMs, inflating]);
+
+  return <PufferFigure motion={motion} motionDurationMs={durationMs} />;
+}
+
 function ResultPanel({
   condition,
-  pufferMotion = "holding",
-  pufferMotionDurationMs = PUBLIC_DEMO_REHEARSAL_TIMING_MS.pufferInflate,
+  pufferFigure,
 }: {
   readonly condition: PublicDemoCondition;
-  readonly pufferMotion?: PublicDemoPufferMotion;
-  readonly pufferMotionDurationMs?: number;
+  readonly pufferFigure?: React.ReactNode;
 }): React.JSX.Element {
   return (
     <section className="public-demo-panel public-demo-result" data-testid="result-panel">
@@ -230,13 +231,68 @@ function ResultPanel({
         </div>
       ) : (
         <div className="public-demo-puffer-result">
-          <PufferFigure motion={pufferMotion} motionDurationMs={pufferMotionDurationMs} />
+          {pufferFigure ?? <PufferFigure />}
           <div>
             <p>{PUBLIC_DEMO_COPY.result.puffer}</p>
             <small>{PUBLIC_DEMO_COPY.result.deviceNote}</small>
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+function RehearsalStatusPanel({
+  phase,
+}: {
+  readonly phase: "handling" | "processing";
+}): React.JSX.Element {
+  const processing = phase === "processing";
+  return (
+    <section
+      aria-live={processing ? "polite" : undefined}
+      className="public-demo-panel public-demo-rehearsal-status"
+      data-testid="rehearsal-status-panel"
+    >
+      <h2>{PUBLIC_DEMO_COPY.result.title}</h2>
+      <div>
+        {processing ? <span aria-hidden="true" className="public-demo-rehearsal-spinner" /> : null}
+        <p>
+          {processing ? PUBLIC_DEMO_COPY.rehearsal.processing : PUBLIC_DEMO_COPY.rehearsal.handling}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function PresentationLayout({
+  condition,
+  position,
+  scene,
+  rightPanel,
+}: {
+  readonly condition: PublicDemoCondition;
+  readonly position: number;
+  readonly scene: Exclude<PublicDemoRehearsalPhase, "reset">;
+  readonly rightPanel: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <section
+      aria-labelledby={`public-demo-presentation-title-${position}`}
+      className="public-demo-presentation"
+      data-scene={scene}
+    >
+      <header className="public-demo-presentation-header">
+        <h1 id={`public-demo-presentation-title-${position}`}>
+          {PUBLIC_DEMO_COPY.presentation.position(position)}
+        </h1>
+        <span>{PUBLIC_DEMO_COPY.presentation.sameData}</span>
+      </header>
+      <div className="public-demo-comparison">
+        <HandlingPanel processing={condition.processing} />
+        {rightPanel}
+      </div>
+      <DemoFooter />
     </section>
   );
 }
@@ -249,23 +305,86 @@ function PresentationScene({
   readonly position: number;
 }): React.JSX.Element {
   return (
+    <PresentationLayout
+      condition={condition}
+      position={position}
+      rightPanel={<ResultPanel condition={condition} />}
+      scene="result"
+    />
+  );
+}
+
+function RehearsalResetScene({
+  condition,
+  position,
+  timingMs,
+}: {
+  readonly condition: PublicDemoCondition;
+  readonly position: number;
+  readonly timingMs: PublicDemoRehearsalTimingMs;
+}): React.JSX.Element {
+  const showsPuffer = condition.presentation === "puffer";
+  return (
     <section
-      aria-labelledby={`public-demo-presentation-title-${position}`}
+      aria-labelledby={`public-demo-reset-title-${position}`}
       className="public-demo-presentation"
-      data-scene="result"
+      data-scene="reset"
     >
       <header className="public-demo-presentation-header">
-        <h1 id={`public-demo-presentation-title-${position}`}>
-          {PUBLIC_DEMO_COPY.presentation.position(position)}
-        </h1>
+        <h1>{PUBLIC_DEMO_COPY.presentation.position(position)}</h1>
         <span>{PUBLIC_DEMO_COPY.presentation.sameData}</span>
       </header>
-      <div className="public-demo-comparison">
-        <HandlingPanel processing={condition.processing} />
-        <ResultPanel condition={condition} />
+      <div className="public-demo-rehearsal-reset" data-testid="rehearsal-reset-panel">
+        <section>
+          {showsPuffer ? <TimedPufferFigure phase="reset" timingMs={timingMs} /> : null}
+          <div>
+            <h2 id={`public-demo-reset-title-${position}`}>
+              {PUBLIC_DEMO_COPY.rehearsal.reset.title}
+            </h2>
+            <p>
+              {showsPuffer
+                ? PUBLIC_DEMO_COPY.rehearsal.reset.puffer
+                : PUBLIC_DEMO_COPY.rehearsal.reset.body}
+            </p>
+          </div>
+        </section>
       </div>
       <DemoFooter />
     </section>
+  );
+}
+
+function RehearsalScene({
+  frame,
+  timingMs,
+}: {
+  readonly frame: PublicDemoRehearsalFrame;
+  readonly timingMs: PublicDemoRehearsalTimingMs;
+}): React.JSX.Element {
+  const condition = PUBLIC_DEMO_CONDITIONS[frame.conditionIndex];
+  const position = frame.conditionIndex + 1;
+
+  if (frame.phase === "reset") {
+    return <RehearsalResetScene condition={condition} position={position} timingMs={timingMs} />;
+  }
+
+  const rightPanel =
+    frame.phase === "result" ? (
+      <ResultPanel
+        condition={condition}
+        pufferFigure={<TimedPufferFigure phase="result" timingMs={timingMs} />}
+      />
+    ) : (
+      <RehearsalStatusPanel phase={frame.phase} />
+    );
+
+  return (
+    <PresentationLayout
+      condition={condition}
+      position={position}
+      rightPanel={rightPanel}
+      scene={frame.phase}
+    />
   );
 }
 
@@ -300,6 +419,11 @@ function SummaryScene(): React.JSX.Element {
 }
 
 export function Scene({ step }: { readonly step: number }): React.JSX.Element {
+  useEffect(() => {
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [step]);
+
   if (step === PUBLIC_DEMO_INTRO_STEP) return <IntroScene />;
   if (step === PUBLIC_DEMO_SUMMARY_STEP) return <SummaryScene />;
 
@@ -308,36 +432,104 @@ export function Scene({ step }: { readonly step: number }): React.JSX.Element {
   return <PresentationScene condition={condition} position={step} />;
 }
 
-export function PublicDemoApp(): React.JSX.Element {
+export function PublicDemoApp({
+  rehearsalTimingMs = PUBLIC_DEMO_REHEARSAL_TIMING_MS,
+}: {
+  readonly rehearsalTimingMs?: PublicDemoRehearsalTimingMs;
+}): React.JSX.Element {
   const [step, setStep] = useState(PUBLIC_DEMO_INTRO_STEP);
+  const [rehearsalFrame, setRehearsalFrame] = useState<PublicDemoRehearsalFrame | null>(null);
+  const rehearsalRunning = rehearsalFrame !== null;
+
+  useEffect(() => {
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [rehearsalFrame]);
+
+  useEffect(() => {
+    if (rehearsalFrame === null) return undefined;
+    const phaseDurationMs = rehearsalTimingMs[rehearsalFrame.phase];
+    const timer = window.setTimeout(() => {
+      const nextFrame = nextRehearsalFrame(rehearsalFrame);
+      if (nextFrame === null) {
+        setStep(PUBLIC_DEMO_SUMMARY_STEP);
+        setRehearsalFrame(null);
+      } else {
+        setRehearsalFrame(nextFrame);
+      }
+    }, phaseDurationMs);
+    return (): void => window.clearTimeout(timer);
+  }, [rehearsalFrame, rehearsalTimingMs]);
+
+  const startRehearsal = (): void => {
+    setStep(PUBLIC_DEMO_INTRO_STEP);
+    setRehearsalFrame(FIRST_REHEARSAL_FRAME);
+  };
+
+  const stopRehearsal = (): void => {
+    if (rehearsalFrame !== null) {
+      setStep(rehearsalFrame.conditionIndex + PUBLIC_DEMO_FIRST_PRESENTATION_STEP);
+    }
+    setRehearsalFrame(null);
+  };
+
+  const rehearsalPhaseLabel =
+    rehearsalFrame === null ? null : PUBLIC_DEMO_COPY.rehearsal.phases[rehearsalFrame.phase];
 
   return (
-    <div className="public-demo-app" data-testid="public-demo-app">
+    <div
+      className="public-demo-app"
+      data-rehearsal-mode={rehearsalRunning ? "automatic" : "manual"}
+      data-testid="public-demo-app"
+    >
       <DemoNotice />
       <main
         className="public-demo-stage"
+        data-rehearsal-phase={rehearsalFrame?.phase}
+        data-rehearsal-position={
+          rehearsalFrame === null ? undefined : rehearsalFrame.conditionIndex + 1
+        }
         aria-label="固定模擬データの表示確認"
         aria-live="polite"
       >
-        <Scene step={step} />
+        {rehearsalFrame === null ? (
+          <Scene step={step} />
+        ) : (
+          <RehearsalScene frame={rehearsalFrame} timingMs={rehearsalTimingMs} />
+        )}
       </main>
       <nav className="public-demo-controls" aria-label="公開デモの画面操作">
         <button
+          className="public-demo-previous"
           type="button"
-          disabled={step === PUBLIC_DEMO_INTRO_STEP}
+          disabled={rehearsalRunning || step === PUBLIC_DEMO_INTRO_STEP}
           onClick={() => setStep((current) => Math.max(PUBLIC_DEMO_INTRO_STEP, current - 1))}
         >
           {PUBLIC_DEMO_COPY.navigation.previous}
         </button>
-        <output>
-          {publicDemoStepLabel(step)}（{step + 1} / {PUBLIC_DEMO_TOTAL_STEPS}画面）
+        <output aria-live="polite">
+          {rehearsalFrame === null || rehearsalPhaseLabel === null
+            ? `${publicDemoStepLabel(step)}（${step + 1} / ${PUBLIC_DEMO_TOTAL_STEPS}画面）`
+            : `${PUBLIC_DEMO_COPY.rehearsal.running}・${PUBLIC_DEMO_COPY.rehearsal.progress(
+                rehearsalFrame.conditionIndex + 1,
+                rehearsalPhaseLabel,
+              )}`}
         </output>
         <button
+          className="public-demo-next"
           type="button"
-          disabled={step === PUBLIC_DEMO_SUMMARY_STEP}
+          disabled={rehearsalRunning || step === PUBLIC_DEMO_SUMMARY_STEP}
           onClick={() => setStep((current) => Math.min(PUBLIC_DEMO_SUMMARY_STEP, current + 1))}
         >
           {PUBLIC_DEMO_COPY.navigation.next}
+        </button>
+        <button
+          aria-pressed={rehearsalRunning}
+          className="public-demo-rehearsal-control"
+          onClick={rehearsalRunning ? stopRehearsal : startRehearsal}
+          type="button"
+        >
+          {rehearsalRunning ? PUBLIC_DEMO_COPY.rehearsal.stop : PUBLIC_DEMO_COPY.rehearsal.start}
         </button>
       </nav>
     </div>

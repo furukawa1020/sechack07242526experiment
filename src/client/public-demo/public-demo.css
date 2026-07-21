@@ -123,9 +123,11 @@ output {
   background: #fff;
 }
 
-.public-demo-presentation-header strong {
+.public-demo-presentation-header h1 {
+  margin: 0;
   color: #245aa6;
   font-size: 21px;
+  line-height: 1.35;
 }
 
 .public-demo-presentation-header span {
@@ -274,6 +276,43 @@ output {
   width: min(17vw, 190px);
   aspect-ratio: 1;
   margin-inline: auto;
+  transform-origin: center;
+}
+
+.public-demo-puffer[data-puffer-motion="resting"] {
+  transform: scale(0.62);
+}
+
+.public-demo-puffer[data-puffer-motion="inflating"] {
+  animation: public-demo-puffer-inflate var(--public-demo-puffer-motion-duration) linear forwards;
+}
+
+.public-demo-puffer[data-puffer-motion="holding"] {
+  transform: scale(1);
+}
+
+.public-demo-puffer[data-puffer-motion="deflating"] {
+  animation: public-demo-puffer-deflate var(--public-demo-puffer-motion-duration) linear forwards;
+}
+
+@keyframes public-demo-puffer-inflate {
+  from {
+    transform: scale(0.62);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes public-demo-puffer-deflate {
+  from {
+    transform: scale(1);
+  }
+
+  to {
+    transform: scale(0.62);
+  }
 }
 
 .public-demo-puffer-body {
@@ -315,6 +354,78 @@ output {
   height: 12%;
   border-bottom: 3px solid #557ba8;
   transform: rotate(-12deg);
+}
+
+.public-demo-rehearsal-status {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.public-demo-rehearsal-status > div {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-height: 0;
+  text-align: center;
+}
+
+.public-demo-rehearsal-status p {
+  margin: 26px 0 0;
+  color: #3f4e63;
+  font-size: clamp(24px, 2vw, 34px);
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.public-demo-rehearsal-spinner {
+  width: 66px;
+  aspect-ratio: 1;
+  border: 6px solid #d8e1ed;
+  border-top-color: #557ba8;
+  border-radius: 50%;
+  animation: public-demo-processing-spin 1s linear infinite;
+}
+
+@keyframes public-demo-processing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.public-demo-rehearsal-reset {
+  display: grid;
+  min-height: 0;
+  margin: clamp(18px, 2.6vh, 30px) clamp(26px, 4vw, 64px);
+  border: 1px solid #d8dde6;
+  background: #fff;
+  place-items: center;
+}
+
+.public-demo-rehearsal-reset > section {
+  display: grid;
+  grid-template-columns: auto minmax(0, 620px);
+  align-items: center;
+  gap: clamp(34px, 5vw, 76px);
+  width: min(960px, calc(100% - 80px));
+}
+
+.public-demo-rehearsal-reset > section > div:only-child {
+  grid-column: 1 / -1;
+  text-align: center;
+}
+
+.public-demo-rehearsal-reset h2 {
+  margin: 0;
+  color: #245aa6;
+  font-size: clamp(32px, 3vw, 48px);
+  line-height: 1.4;
+}
+
+.public-demo-rehearsal-reset p {
+  margin: 20px 0 0;
+  color: #536176;
+  font-size: clamp(18px, 1.5vw, 24px);
+  line-height: 1.75;
 }
 
 .public-demo-participant-footer {
@@ -396,7 +507,10 @@ output {
 
 .public-demo-controls {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) auto minmax(150px, 1fr);
+  grid-template-columns: minmax(130px, 0.7fr) minmax(300px, 1.5fr) minmax(130px, 0.7fr) minmax(
+      240px,
+      1fr
+    );
   border-top: 1px solid #c8d0dc;
   background: #fff;
 }
@@ -414,16 +528,28 @@ output {
   cursor: pointer;
 }
 
-.public-demo-controls button:first-child {
+.public-demo-controls .public-demo-previous {
   justify-self: start;
   border-right: 1px solid #d8dde6;
 }
 
-.public-demo-controls button:last-child {
+.public-demo-controls .public-demo-next {
   justify-self: end;
   border-left: 1px solid #d8dde6;
   color: #fff;
   background: #245aa6;
+}
+
+.public-demo-controls .public-demo-rehearsal-control {
+  width: 100%;
+  border-left: 1px solid #d8dde6;
+  color: #245aa6;
+  background: #edf3fa;
+}
+
+.public-demo-controls .public-demo-rehearsal-control[aria-pressed="true"] {
+  color: #fff;
+  background: #435b79;
 }
 
 .public-demo-controls button:disabled {
@@ -433,8 +559,13 @@ output {
 }
 
 .public-demo-controls button:focus-visible {
-  outline: 3px solid #8eb4e7;
+  outline: 3px solid #245aa6;
   outline-offset: -4px;
+}
+
+.public-demo-controls .public-demo-next:focus-visible,
+.public-demo-controls .public-demo-rehearsal-control[aria-pressed="true"]:focus-visible {
+  outline-color: #fff;
 }
 
 .public-demo-controls output {
@@ -723,8 +854,15 @@ output {
 .public-review-links a:focus-visible,
 .public-review-back-link:focus-visible,
 .public-review-health a:focus-visible {
-  outline: 3px solid #8eb4e7;
+  outline: 3px solid #245aa6;
   outline-offset: 3px;
+}
+
+.public-review-scene-buttons button[aria-pressed="true"]:focus-visible,
+.public-review-device-actions button:last-child:focus-visible,
+.public-review-links a:first-child:focus-visible {
+  outline-color: #fff;
+  outline-offset: -5px;
 }
 
 @media (max-width: 900px) {
@@ -784,7 +922,21 @@ output {
   }
 
   .public-demo-controls output {
-    min-width: 180px;
+    min-width: 210px;
+  }
+
+  .public-demo-controls {
+    grid-template-columns: 104px minmax(210px, 1fr) 104px minmax(210px, 0.8fr);
+  }
+
+  .public-demo-controls button {
+    min-width: 0;
+    padding-inline: 14px;
+    font-size: 15px;
+  }
+
+  .public-demo-rehearsal-reset > section {
+    width: calc(100% - 40px);
   }
 
   .public-review-shell {
@@ -809,5 +961,310 @@ output {
 
   .public-review-device-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+
+  .public-demo-app {
+    grid-template-rows: auto auto auto;
+    height: auto;
+    min-height: 100svh;
+    overflow: visible;
+  }
+
+  .public-demo-notice {
+    position: sticky;
+    top: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px 4px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+
+  .public-demo-notice strong,
+  .public-demo-notice span {
+    padding: 3px 4px;
+    border: 0;
+    line-height: 1.45;
+    white-space: normal;
+  }
+
+  .public-demo-notice strong {
+    grid-column: 1 / -1;
+    font-size: 16px;
+  }
+
+  .public-demo-notice span {
+    font-size: 12px;
+  }
+
+  .public-demo-notice span:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .public-demo-stage {
+    overflow: visible;
+  }
+
+  .public-demo-intro {
+    display: block;
+    height: auto;
+    min-height: 0;
+    padding: 38px 18px 48px;
+  }
+
+  .public-demo-intro h1,
+  .public-demo-summary h1 {
+    font-size: clamp(28px, 9vw, 38px);
+    line-height: 1.4;
+  }
+
+  .public-demo-intro p {
+    margin-top: 24px;
+    font-size: 17px;
+    line-height: 1.85;
+  }
+
+  .public-demo-intro aside {
+    margin-top: 26px;
+    padding: 20px 4px 0;
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  .public-demo-presentation {
+    grid-template-rows: auto auto auto;
+    height: auto;
+    overflow: visible;
+  }
+
+  .public-demo-presentation-header {
+    display: grid;
+    gap: 6px;
+    justify-items: center;
+    padding: 14px 16px;
+    text-align: center;
+  }
+
+  .public-demo-presentation-header h1 {
+    font-size: 20px;
+  }
+
+  .public-demo-presentation-header span {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .public-demo-comparison {
+    grid-template-columns: minmax(0, 1fr);
+    margin: 12px;
+    overflow: visible;
+  }
+
+  .public-demo-panel {
+    padding: 24px 18px;
+  }
+
+  .public-demo-panel h2 {
+    font-size: 22px;
+  }
+
+  .public-demo-handling dl {
+    height: auto;
+    margin-top: 16px;
+  }
+
+  .public-demo-handling dl > div {
+    min-height: 104px;
+    padding: 14px 2px;
+  }
+
+  .public-demo-handling dd {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 14px;
+    font-size: 23px;
+  }
+
+  .public-demo-processing-location dd {
+    font-size: 30px;
+  }
+
+  .public-demo-result {
+    min-height: 340px;
+  }
+
+  .public-demo-label-result > strong {
+    font-size: clamp(64px, 22vw, 84px);
+  }
+
+  .public-demo-label-result b {
+    font-size: clamp(34px, 11vw, 42px);
+  }
+
+  .public-demo-puffer-result {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+    padding-top: 22px;
+    text-align: center;
+  }
+
+  .public-demo-puffer-result p {
+    font-size: 24px;
+  }
+
+  .public-demo-puffer {
+    width: 132px;
+  }
+
+  .public-demo-participant-footer {
+    display: grid;
+    gap: 7px;
+    padding: 16px 18px;
+    font-size: 13px;
+    line-height: 1.5;
+    text-align: center;
+  }
+
+  .public-demo-participant-footer span:nth-child(2) {
+    display: block;
+  }
+
+  .public-demo-summary {
+    grid-template-rows: auto auto auto auto;
+    height: auto;
+    padding-top: 36px;
+    overflow: visible;
+  }
+
+  .public-demo-summary-heading {
+    padding: 0 18px;
+  }
+
+  .public-demo-summary-heading p {
+    font-size: 16px;
+  }
+
+  .public-demo-summary ol {
+    grid-template-columns: minmax(0, 1fr);
+    margin: 28px 12px 0;
+  }
+
+  .public-demo-summary li {
+    min-height: 128px;
+    padding: 22px 18px;
+  }
+
+  .public-demo-summary li strong {
+    font-size: 21px;
+  }
+
+  .public-demo-summary-note {
+    margin: 22px 18px;
+    line-height: 1.65;
+  }
+
+  .public-demo-controls {
+    position: sticky;
+    z-index: 20;
+    bottom: 0;
+    grid-template-rows: 34px 54px 50px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-demo-controls output {
+    grid-row: 1;
+    grid-column: 1 / -1;
+    min-width: 0;
+    padding: 0 8px;
+    border-bottom: 1px solid #d8dde6;
+    font-size: 12px;
+  }
+
+  .public-demo-controls button {
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
+    min-height: 54px;
+    padding: 0 12px;
+    font-size: 16px;
+  }
+
+  .public-demo-controls .public-demo-previous {
+    grid-column: 1;
+    justify-self: stretch;
+  }
+
+  .public-demo-controls .public-demo-next {
+    grid-column: 2;
+    justify-self: stretch;
+  }
+
+  .public-demo-controls .public-demo-rehearsal-control {
+    grid-row: 3;
+    grid-column: 1 / -1;
+    min-height: 50px;
+    border-top: 1px solid #d8dde6;
+    border-left: 0;
+  }
+
+  .public-review-shell {
+    grid-template-rows: auto auto;
+    height: auto;
+    min-height: 100svh;
+    overflow: visible;
+  }
+
+  .public-review-operator,
+  .public-review-device {
+    grid-template-rows: auto;
+    width: calc(100% - 24px);
+    padding: 26px 0;
+  }
+
+  .public-review-operator-grid,
+  .public-review-scene-buttons,
+  .public-review-links {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .public-review-current-panel {
+    min-height: 260px;
+  }
+
+  .public-review-display-stage {
+    overflow: visible;
+  }
+
+  .public-review-display-note {
+    position: static;
+    margin: 16px;
+  }
+
+  .public-review-device-state {
+    min-height: 380px;
+    padding: 28px 16px;
+  }
+
+  .public-review-health {
+    width: calc(100% - 32px);
+    min-height: calc(100svh - 110px);
+    padding: 32px 0;
+  }
+
+  .public-review-health a {
+    width: 100%;
+    min-width: 0;
   }
 }

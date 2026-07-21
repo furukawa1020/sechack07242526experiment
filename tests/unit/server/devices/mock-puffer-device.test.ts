@@ -112,6 +112,44 @@ describe("MockPufferDevice", () => {
     await expect(device.disconnect()).resolves.toBeUndefined();
   });
 
+  it("attempts DEFLATE and disconnects even when STOP times out", async () => {
+    const device = new MockPufferDevice({ timingMode: "fast", initialConnected: true });
+    const observed: string[] = [];
+    device.onStatus((status) => observed.push(status.state));
+    device.inject({ kind: "timeout", command: "stop" });
+
+    await expect(device.disconnect()).rejects.toMatchObject({
+      name: "AggregateError",
+      errors: [expect.any(DeviceTimeoutError)],
+    });
+
+    expect(device.commandHistory.slice(-2).map((entry) => entry.command)).toEqual([
+      "stop",
+      "deflate",
+    ]);
+    expect(observed.at(-1)).toBe("disconnected");
+    await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+  });
+
+  it("attempts DEFLATE after a STOP-triggered disconnect and reports both failures", async () => {
+    const device = new MockPufferDevice({ timingMode: "fast", initialConnected: true });
+    device.inject({ kind: "disconnect", command: "stop" });
+
+    await expect(device.disconnect()).rejects.toMatchObject({
+      name: "AggregateError",
+      errors: [
+        expect.any(DeviceNotConnectedError),
+        expect.any(DeviceNotConnectedError),
+      ],
+    });
+
+    expect(device.commandHistory.slice(-2).map((entry) => entry.command)).toEqual([
+      "stop",
+      "deflate",
+    ]);
+    await expect(device.ping()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+  });
+
   it("validates normalized commands before sending them", async () => {
     const device = new MockPufferDevice({ timingMode: "fast", initialConnected: true });
     await expect(device.inflate({ requestId: "bad-level", level: 1.1, rampMs: 1 })).rejects.toThrow(RangeError);

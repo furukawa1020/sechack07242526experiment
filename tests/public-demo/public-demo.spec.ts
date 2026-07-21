@@ -24,8 +24,15 @@ function monitorNetwork(page: Page): NetworkAudit {
   return audit;
 }
 
-async function expectNoViewportOverflow(page: Page): Promise<void> {
-  const dimensions = await page.evaluate(() => {
+interface ViewportDimensions {
+  readonly viewportWidth: number;
+  readonly viewportHeight: number;
+  readonly documentWidth: number;
+  readonly documentHeight: number;
+}
+
+async function viewportDimensions(page: Page): Promise<ViewportDimensions> {
+  return page.evaluate(() => {
     const scrollingElement = document.scrollingElement ?? document.documentElement;
     return {
       viewportWidth: window.innerWidth,
@@ -34,13 +41,41 @@ async function expectNoViewportOverflow(page: Page): Promise<void> {
       documentHeight: scrollingElement.scrollHeight,
     };
   });
+}
+
+async function expectResponsiveViewportState(page: Page): Promise<void> {
+  const dimensions = await viewportDimensions(page);
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
-  expect(dimensions.documentHeight).toBeLessThanOrEqual(dimensions.viewportHeight);
+  if (dimensions.viewportWidth > 640) {
+    expect(dimensions.documentHeight).toBeLessThanOrEqual(dimensions.viewportHeight);
+  }
+}
+
+function relativeLuminance(cssRgb: string): number {
+  const channels = cssRgb
+    .match(/[\d.]+/gu)
+    ?.slice(0, 3)
+    .map(Number);
+  if (channels === undefined || channels.length !== 3) {
+    throw new Error(`Unsupported computed color: ${cssRgb}`);
+  }
+  const linear = channels.map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * (linear[0] ?? 0) + 0.7152 * (linear[1] ?? 0) + 0.0722 * (linear[2] ?? 0);
+}
+
+function contrastRatio(first: string, second: string): number {
+  const lighter = Math.max(relativeLuminance(first), relativeLuminance(second));
+  const darker = Math.min(relativeLuminance(first), relativeLuminance(second));
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 async function expectSafeVisibleState(page: Page): Promise<void> {
   const body = page.locator("body");
-  await expect(page.locator(".public-demo-notice")).toContainText("公開Mockデモ");
+  await expect(page.locator(".public-demo-notice")).toContainText("公開デモ（模擬表示）");
+  await expect(page.locator(".public-demo-notice")).not.toContainText("公開Mockデモ");
   await expect(page.locator(".public-demo-notice")).toContainText("研究参加用ではありません");
   await expect(page.locator(".public-demo-notice")).toContainText("入力／保存／送信なし");
   await expect(page.locator(".public-demo-notice")).toContainText("実機なし");
@@ -49,7 +84,7 @@ async function expectSafeVisibleState(page: Page): Promise<void> {
   await expect(body).not.toContainText("Googleフォーム");
   await expect(body).not.toContainText(/(?:内部コード|条件コード)/u);
   await expect(page.getByText(/^[ABCD]$/u, { exact: true })).toHaveCount(0);
-  await expectNoViewportOverflow(page);
+  await expectResponsiveViewportState(page);
 }
 
 test("固定模擬データの4提示を操作でき、入力・フォーム・内部コードを公開しない", async ({
@@ -68,6 +103,11 @@ test("固定模擬データの4提示を操作でき、入力・フォーム・�
   await expect(
     page.getByRole("heading", { name: "同じ身体データを、4つの方法で提示します" }),
   ).toBeVisible();
+  await expect(page.getByRole("main")).toHaveCount(1);
+  await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toHaveText(
+    "同じ身体データを、4つの方法で提示します",
+  );
+  await expect(page.locator("main main, article main")).toHaveCount(0);
   await expect(page.locator(".public-demo-kicker")).toHaveCount(0);
   await expectSafeVisibleState(page);
   await page.screenshot({
@@ -88,6 +128,12 @@ test("固定模擬データの4提示を操作でき、入力・フォーム・�
   for (const presentation of presentations) {
     await page.getByRole("button", { name: "次へ" }).click();
     await expect(page.locator("[data-scene='result']")).toBeVisible();
+    await expect(page.getByRole("main")).toHaveCount(1);
+    await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toHaveText(
+      `第${presentation.position}提示 / 4`,
+    );
+    await expect(page.getByRole("main").getByRole("heading", { level: 2 })).toHaveCount(2);
+    await expect(page.locator("main main, article main")).toHaveCount(0);
     await expect(page.locator(".public-demo-presentation-header")).toContainText(
       `第${presentation.position}提示 / 4`,
     );
@@ -150,7 +196,8 @@ test("固定模擬データの4提示を操作でき、入力・フォーム・�
       .evaluate((row) => {
         const icon = row.querySelector<SVGSVGElement>(".public-demo-handling-icon");
         const value = row.querySelector<HTMLElement>("dd span");
-        if (icon === null || value === null) throw new Error("processing location cue is incomplete");
+        if (icon === null || value === null)
+          throw new Error("processing location cue is incomplete");
         const rowBounds = row.getBoundingClientRect();
         const iconBounds = icon.getBoundingClientRect();
         const rowStyle = window.getComputedStyle(row);
@@ -227,4 +274,225 @@ test("固定模擬データの4提示を操作でき、入力・フォーム・�
   expect(network.activeRequests).toEqual([]);
   expect(network.webSockets).toEqual([]);
   expect(network.externalRequests).toEqual([]);
+});
+
+test("自動リハーサルが規定時間で4提示を再生し、通信や保存を行わない", async ({ page }) => {
+  const network = monitorNetwork(page);
+  await page.goto("/", { waitUntil: "networkidle" });
+  await page.clock.install();
+
+  await page.getByRole("button", { name: "自動リハーサルを開始" }).click();
+  const app = page.getByTestId("public-demo-app");
+  const stage = page.getByRole("main", { name: "固定模擬データの表示確認" });
+  const rightPanelHtml: string[] = [];
+
+  await expect(app).toHaveAttribute("data-rehearsal-mode", "automatic");
+  await expect(page.getByRole("button", { name: "前へ" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "次へ" })).toBeDisabled();
+
+  for (let position = 1; position <= 4; position += 1) {
+    await expect(stage).toHaveAttribute("data-rehearsal-position", String(position));
+    await expect(stage).toHaveAttribute("data-rehearsal-phase", "handling");
+    await page.clock.fastForward(8_000);
+    await expect(stage).toHaveAttribute("data-rehearsal-phase", "processing");
+    await page.clock.fastForward(3_000);
+    await expect(stage).toHaveAttribute("data-rehearsal-phase", "result");
+    rightPanelHtml.push(await page.getByTestId("result-panel").innerHTML());
+
+    if (position >= 3) {
+      const puffer = page.getByTestId("public-demo-puffer");
+      await expect(puffer).toHaveAttribute("data-puffer-motion", "inflating");
+      await expect(puffer).toHaveAttribute("data-motion-duration-ms", "6000");
+      await page.clock.fastForward(6_000);
+      await expect(puffer).toHaveAttribute("data-puffer-motion", "holding");
+      await page.clock.fastForward(9_000);
+      await expect(stage).toHaveAttribute("data-rehearsal-phase", "reset");
+      await expect(page.getByTestId("public-demo-puffer")).toHaveAttribute(
+        "data-puffer-motion",
+        "deflating",
+      );
+      await page.clock.fastForward(6_000);
+      await expect(page.getByTestId("public-demo-puffer")).toHaveAttribute(
+        "data-puffer-motion",
+        "resting",
+      );
+      await page.clock.fastForward(1_000);
+    } else {
+      await page.clock.fastForward(15_000);
+      await expect(stage).toHaveAttribute("data-rehearsal-phase", "reset");
+      await page.clock.fastForward(7_000);
+    }
+  }
+
+  expect(rightPanelHtml[0]).toBe(rightPanelHtml[1]);
+  expect(rightPanelHtml[2]).toBe(rightPanelHtml[3]);
+  await expect(app).toHaveAttribute("data-rehearsal-mode", "manual");
+  await expect(page.getByTestId("public-demo-summary")).toBeVisible();
+  await expectSafeVisibleState(page);
+  expect(network.activeRequests).toEqual([]);
+  expect(network.webSockets).toEqual([]);
+  expect(network.externalRequests).toEqual([]);
+});
+
+test("画面幅に応じて二列または一列で、横にはみ出さず操作できる", async ({ page }) => {
+  const viewport = page.viewportSize();
+  if (viewport === null) throw new Error("Public demo viewport is unavailable.");
+  const narrow = viewport.width <= 640;
+
+  await page.goto("/", { waitUntil: "networkidle" });
+  const notice = page.locator(".public-demo-notice");
+  await expect(notice).toBeVisible();
+  await expect(notice.locator("strong, span")).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "次へ" })).toBeVisible();
+  await expectResponsiveViewportState(page);
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "次へ" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  const panelBounds = await page.locator(".public-demo-panel").evaluateAll((panels) =>
+    panels.map((panel) => {
+      const bounds = panel.getBoundingClientRect();
+      return { bottom: bounds.bottom, left: bounds.left, right: bounds.right, top: bounds.top };
+    }),
+  );
+  expect(panelBounds).toHaveLength(2);
+  if (narrow) {
+    expect(panelBounds[1]?.top).toBeGreaterThanOrEqual((panelBounds[0]?.bottom ?? 0) - 1);
+  } else {
+    expect(panelBounds[1]?.left).toBeGreaterThanOrEqual((panelBounds[0]?.right ?? 0) - 1);
+    expect(panelBounds[1]?.top).toBeCloseTo(panelBounds[0]?.top ?? Number.NaN, 1);
+  }
+  for (const bounds of panelBounds) {
+    expect(bounds.left).toBeGreaterThanOrEqual(0);
+    expect(bounds.right).toBeLessThanOrEqual(viewport.width);
+  }
+
+  const dimensions = await viewportDimensions(page);
+  if (narrow) {
+    expect(dimensions.documentHeight).toBeGreaterThan(dimensions.viewportHeight);
+  } else {
+    expect(dimensions.documentHeight).toBeLessThanOrEqual(dimensions.viewportHeight);
+  }
+  await expectResponsiveViewportState(page);
+
+  const previous = page.getByRole("button", { name: "前へ" });
+  await page.keyboard.press("Shift+Tab");
+  await expect(previous).toBeFocused();
+  const previousFocus = await previous.evaluate((button) => {
+    const style = window.getComputedStyle(button);
+    return {
+      backgroundColor: style.backgroundColor,
+      outlineColor: style.outlineColor,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: Number.parseFloat(style.outlineWidth),
+    };
+  });
+  expect(previousFocus.outlineStyle).toBe("solid");
+  expect(previousFocus.outlineWidth).toBeGreaterThanOrEqual(3);
+  expect(
+    contrastRatio(previousFocus.outlineColor, previousFocus.backgroundColor),
+  ).toBeGreaterThanOrEqual(3);
+
+  await page.keyboard.press("Tab");
+  const nextButton = page.getByRole("button", { name: "次へ" });
+  await expect(nextButton).toBeFocused();
+  const nextFocus = await nextButton.evaluate((button) => {
+    const style = window.getComputedStyle(button);
+    const bounds = button.getBoundingClientRect();
+    return {
+      backgroundColor: style.backgroundColor,
+      bottom: bounds.bottom,
+      height: bounds.height,
+      outlineColor: style.outlineColor,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: Number.parseFloat(style.outlineWidth),
+    };
+  });
+  expect(nextFocus.height).toBeGreaterThanOrEqual(44);
+  expect(nextFocus.bottom).toBeLessThanOrEqual(viewport.height);
+  expect(nextFocus.outlineStyle).toBe("solid");
+  expect(nextFocus.outlineWidth).toBeGreaterThanOrEqual(3);
+  expect(contrastRatio(nextFocus.outlineColor, nextFocus.backgroundColor)).toBeGreaterThanOrEqual(
+    3,
+  );
+});
+
+test("公開レビュー用の固定経路を実機なしで開き、同じブラウザの表示だけを同期する", async ({
+  context,
+  page,
+}, testInfo) => {
+  const operatorNetwork = monitorNetwork(page);
+  await page.goto("/operator.html", { waitUntil: "networkidle" });
+
+  await expect(page).toHaveTitle("公開レビュー進行画面");
+  await expect(page.getByTestId("public-review-operator")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "公開レビュー進行画面" })).toBeVisible();
+  await expect(page.getByText("同じブラウザ内だけで同期します")).toBeVisible();
+  await expect(page.locator("form, input, textarea, select")).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("Googleフォーム");
+  await expectResponsiveViewportState(page);
+
+  const displayPage = await context.newPage();
+  const displayNetwork = monitorNetwork(displayPage);
+  await displayPage.goto("/display-demo.html", { waitUntil: "networkidle" });
+  await expect(displayPage).toHaveTitle("参加者表示・公開模擬レビュー");
+  await expect(displayPage.getByTestId("public-review-display")).toBeVisible();
+  await expect(displayPage.locator("button, a, form, input, textarea, select")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "第1提示" }).click();
+  await expect(displayPage.locator(".public-demo-presentation-header")).toContainText(
+    "第1提示 / 4",
+  );
+  await expect(
+    displayPage.getByTestId("handling-panel").getByText("クラウド", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    displayPage.getByTestId("handling-panel").locator("[data-icon-kind='cloud']"),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "第2提示" }).click();
+  await expect(displayPage.locator(".public-demo-presentation-header")).toContainText(
+    "第2提示 / 4",
+  );
+  await expect(
+    displayPage.getByTestId("handling-panel").getByText("この端末内", { exact: true }),
+  ).toBeVisible();
+  await expectResponsiveViewportState(displayPage);
+
+  const viewportName = testInfo.project.name.replace("chromium-", "");
+  await page.screenshot({
+    path: `artifacts/screenshots/public-review-operator-${viewportName}.png`,
+    fullPage: false,
+  });
+  await displayPage.screenshot({
+    path: `artifacts/screenshots/public-review-display-${viewportName}.png`,
+    fullPage: false,
+  });
+  await displayPage.close();
+
+  await page.goto("/device-test.html", { waitUntil: "networkidle" });
+  await expect(page).toHaveTitle("模擬装置確認・公開レビュー");
+  await expect(page.getByTestId("public-review-device")).toContainText(
+    "実機やUSBシリアルには接続せず",
+  );
+  await expect(page.getByText("未接続", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "模擬装置を接続" }).click();
+  await page.getByRole("button", { name: "膨張を模擬" }).click();
+  await expect(page.getByText("膨張状態を模擬中", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^停止$/u }).click();
+  await expect(page.getByText("停止済み", { exact: true })).toBeVisible();
+  await expectResponsiveViewportState(page);
+
+  await page.goto("/healthz.html", { waitUntil: "networkidle" });
+  await expect(page).toHaveTitle("公開レビュー版・稼働確認");
+  await expect(page.getByTestId("public-review-health")).toContainText(
+    "公開レビュー版は正常に配信されています",
+  );
+  await expectResponsiveViewportState(page);
+
+  for (const network of [operatorNetwork, displayNetwork]) {
+    expect(network.activeRequests).toEqual([]);
+    expect(network.webSockets).toEqual([]);
+    expect(network.externalRequests).toEqual([]);
+  }
 });

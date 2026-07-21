@@ -139,6 +139,7 @@ function SetupForm({
   automaticOrder,
   manualOrder,
   researchIdPattern,
+  isMock,
   busy,
   onResearchId,
   onConsent,
@@ -151,6 +152,7 @@ function SetupForm({
   readonly automaticOrder: boolean;
   readonly manualOrder: OrderCode;
   readonly researchIdPattern: string;
+  readonly isMock: boolean;
   readonly busy: boolean;
   readonly onResearchId: (value: string) => void;
   readonly onConsent: (value: boolean) => void;
@@ -163,7 +165,7 @@ function SetupForm({
     <form className="operator-card setup-form" onSubmit={onSubmit}>
       <div className="card-heading">
         <span className="step-number">1</span>
-        <div><h2>参加者セッション</h2></div>
+        <div><h2>{isMock ? "模擬リハーサル" : "参加者セッション"}</h2></div>
       </div>
       <label className="field-label" htmlFor="research-id">研究用ID</label>
       <input
@@ -188,7 +190,10 @@ function SetupForm({
           checked={consentConfirmed}
           onChange={(event) => onConsent(event.target.checked)}
         />
-        <span><strong>Googleフォームでの同意を確認済み</strong><small>口頭確認だけでは開始しません</small></span>
+        <span>
+          <strong>{isMock ? "リハーサル開始条件を確認済み" : "Googleフォームでの同意を確認済み"}</strong>
+          <small>{isMock ? "実参加者・実回答には使用しません" : "口頭確認だけでは開始しません"}</small>
+        </span>
       </label>
 
       <fieldset className="order-fieldset">
@@ -223,7 +228,7 @@ function SetupForm({
       </fieldset>
 
       <button className="primary-button" type="submit" disabled={busy || !validId || !consentConfirmed}>
-        セッションを準備
+        {isMock ? "リハーサルを準備" : "セッションを準備"}
       </button>
     </form>
   );
@@ -282,6 +287,7 @@ function ActionPanel({
   emergencyPending,
   formComplete,
   fullscreenConfirmed,
+  isMock,
   onFormComplete,
   onFullscreenConfirmed,
   onAction,
@@ -293,6 +299,7 @@ function ActionPanel({
   readonly emergencyPending: boolean;
   readonly formComplete: boolean;
   readonly fullscreenConfirmed: boolean;
+  readonly isMock: boolean;
   readonly onFormComplete: (checked: boolean) => void;
   readonly onFullscreenConfirmed: (checked: boolean) => void;
   readonly onAction: (action: "prepare" | "start" | "resume" | "abort" | "confirm-form-complete") => void;
@@ -364,7 +371,7 @@ function ActionPanel({
         {session.phase === "summary" ? (
           <label className="check-row compact-check">
             <input type="checkbox" checked={formComplete} onChange={(event) => onFormComplete(event.target.checked)} />
-            Googleフォームの回答完了を確認済み
+            {isMock ? "リハーサルの確認を完了済み" : "Googleフォームの回答完了を確認済み"}
           </label>
         ) : null}
         {session.phase === "summary" ? (
@@ -374,7 +381,7 @@ function ActionPanel({
             onClick={() => onAction("confirm-form-complete")}
             disabled={busy || !formComplete}
           >
-            回答完了を確認してセッション完了
+            {isMock ? "確認を完了してリハーサル終了" : "回答完了を確認してセッション完了"}
           </button>
         ) : null}
         {session.phase === "completed" || session.phase === "aborted" ? (
@@ -426,7 +433,7 @@ function DeviceAndEvents({
           <StatusItem label="異常" value={device.fault ?? "なし"} />
         </dl>
         <button type="button" className="secondary-button full-button" onClick={onConnect} disabled={busy || device.connected}>
-          装置を接続
+          {device.mode === "mock" ? "模擬装置を準備" : "装置を接続"}
         </button>
         <a className="text-link" href="/device-test" target="_blank" rel="noreferrer">デバイステストを開く</a>
       </section>
@@ -639,6 +646,7 @@ export function OperatorScreen(): React.JSX.Element {
   const displayedDevice = session !== null && (session.device.connected || session.device.fault !== null)
     ? session.device
     : device;
+  const isMock = displayedDevice.mode === "mock";
   const events = session?.recentEvents ?? [];
   const operatorClass = useMemo(
     () => busy || emergencyPending ? "operator-app is-busy" : "operator-app",
@@ -652,6 +660,7 @@ export function OperatorScreen(): React.JSX.Element {
           <h1>実験進行コンソール</h1>
         </div>
         <div className="operator-header-actions">
+          {isMock ? <span className="rehearsal-pill">実機なし・模擬リハーサル</span> : null}
           <span className={`connection-pill status-${realtime.status}`}>同期 {connectionLabel(realtime.status)}</span>
           <button type="button" className="secondary-button" onClick={() => { void exportCsv(); }} disabled={busy}>
             CSVを出力
@@ -660,6 +669,11 @@ export function OperatorScreen(): React.JSX.Element {
       </header>
 
       {failure === null ? null : <div className="operator-banner is-failure" role="alert">{failure}</div>}
+      {isMock ? (
+        <div className="operator-banner is-rehearsal" role="status">
+          実機は動作しません。固定模擬データによる開発・リハーサル専用です。本番参加者には使用しないでください。
+        </div>
+      ) : null}
       {notice === null ? null : <div className="operator-banner" role="status">{notice}</div>}
 
       <main className="operator-layout">
@@ -671,6 +685,7 @@ export function OperatorScreen(): React.JSX.Element {
               automaticOrder={automaticOrder}
               manualOrder={manualOrder}
               researchIdPattern={researchIdPattern}
+              isMock={isMock}
               busy={busy}
               onResearchId={setResearchId}
               onConsent={setConsentConfirmed}
@@ -687,6 +702,7 @@ export function OperatorScreen(): React.JSX.Element {
                 emergencyPending={emergencyPending}
                 formComplete={formComplete}
                 fullscreenConfirmed={fullscreenConfirmed}
+                isMock={isMock}
                 onFormComplete={setFormComplete}
                 onFullscreenConfirmed={setFullscreenConfirmed}
                 onAction={(action) => { void sessionAction(action); }}

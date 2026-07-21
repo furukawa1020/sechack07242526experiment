@@ -5,8 +5,11 @@ import { pathToFileURL } from "node:url";
 
 import { loadExperimentConfig } from "../src/shared/config-loader.js";
 import {
-  formatConfigError,
+  assessFormAudit,
   STUDY_FORM_URL,
+} from "../src/shared/form-audit.js";
+import {
+  formatConfigError,
   type ExperimentConfig,
 } from "../src/shared/schemas.js";
 import { ExperimentLogger } from "../src/server/logging/experiment-log.js";
@@ -38,6 +41,7 @@ export interface PreflightReport {
   readonly configHash: string;
   readonly configFileHash: string;
   readonly protocolVersion: string;
+  readonly researchIdPattern: string;
   readonly deviceMode: ExperimentConfig["device"]["mode"];
   readonly serialPath: string;
   readonly baudRate: number;
@@ -47,10 +51,12 @@ export interface PreflightReport {
   readonly fixedLabel: string;
   readonly pufferLevel: number;
   readonly formUrl: string;
-  readonly formAuditStatus: ExperimentConfig["formAudit"]["status"];
-  readonly formAuditReviewedUrl: string;
-  readonly formAuditReviewedAt: string | null;
-  readonly formAuditReviewerCount: number;
+  readonly formAuditStatus: "GO" | "NO-GO" | "MISSING";
+  readonly formAuditProtocolVersion: string;
+  readonly formAuditFormUrl: string;
+  readonly formAuditAuditedOn: string | null;
+  readonly formAuditContentSha256: string;
+  readonly formAuditTwoPersonVerified: boolean;
   readonly bindHost: string;
   readonly port: number;
   readonly allowLan: boolean;
@@ -163,6 +169,7 @@ export function isWindowsComPath(value: string): boolean {
 export function evaluatePreflightGates(
   config: ExperimentConfig,
   allowMock: boolean,
+  now = new Date(),
 ): readonly GateCheck[] {
   const checks: GateCheck[] = [];
   const production = !allowMock;
@@ -221,17 +228,14 @@ export function evaluatePreflightGates(
         : "開発確認のため、指定フォームURLとの不一致または未設定を警告扱いにしました。",
   });
 
-  const approvedFormAudit = config.formAudit.status === "approved"
-    && config.formAudit.reviewedUrl === config.formUrl
-    && config.formAudit.reviewedUrl === STUDY_FORM_URL
-    && config.formAudit.reviewerCount === 2;
+  const formAudit = assessFormAudit(config, now);
   checks.push({
     name: "formAudit",
-    status: approvedFormAudit ? "pass" : production ? "fail" : "warning",
-    detail: approvedFormAudit
-      ? `フォーム内容の二名監査承認を確認しました（${config.formAudit.reviewedAt}）。`
+    status: formAudit.approved ? "pass" : production ? "fail" : "warning",
+    detail: formAudit.approved
+      ? `フォーム監査のGO、二名確認、設定との一致、有効期限内（${String(formAudit.ageDays)}日前）を確認しました。`
       : production
-        ? "本番では修正後フォームの二名監査を完了し、formAuditをapprovedにする必要があります。"
+        ? `本番フォーム監査ゲートを通過できません（${formAudit.issues.join(", ")}）。`
         : "フォーム監査は未承認です。開発用Mock確認には影響しませんが、本番リリースは生成できません。",
   });
 
@@ -395,6 +399,7 @@ export async function collectPreflightReport(
     configHash: loaded.configHash,
     configFileHash,
     protocolVersion: config.protocolVersion,
+    researchIdPattern: config.researchIdPattern,
     deviceMode: config.device.mode,
     serialPath: config.device.serialPath,
     baudRate: config.device.baudRate,
@@ -404,10 +409,12 @@ export async function collectPreflightReport(
     fixedLabel: config.fixedState.label,
     pufferLevel: config.fixedState.pufferLevel,
     formUrl: config.formUrl,
-    formAuditStatus: config.formAudit.status,
-    formAuditReviewedUrl: config.formAudit.reviewedUrl,
-    formAuditReviewedAt: config.formAudit.reviewedAt,
-    formAuditReviewerCount: config.formAudit.reviewerCount,
+    formAuditStatus: config.formAudit?.status ?? "MISSING",
+    formAuditProtocolVersion: config.formAudit?.protocolVersion ?? "",
+    formAuditFormUrl: config.formAudit?.formUrl ?? "",
+    formAuditAuditedOn: config.formAudit?.auditedOn ?? null,
+    formAuditContentSha256: config.formAudit?.contentSha256 ?? "",
+    formAuditTwoPersonVerified: config.formAudit?.twoPersonVerified ?? false,
     bindHost: config.bindHost,
     port: config.port,
     allowLan: config.network.allowLan,
@@ -445,6 +452,7 @@ export function renderPreflightReport(
   writeLine(`  設定ファイルSHA-256: ${report.configFileHash}`);
   writeLine(`  設定内容SHA-256: ${report.configHash}`);
   writeLine(`  protocolVersion: ${report.protocolVersion}`);
+  writeLine(`  ID形式: ${report.researchIdPattern}`);
   writeLine(`  device mode: ${report.deviceMode}`);
   writeLine(`  serialPath: ${report.serialPath === "" ? "(未設定)" : report.serialPath}`);
   writeLine(`  baudRate: ${report.baudRate}`);
@@ -453,9 +461,11 @@ export function renderPreflightReport(
   writeLine(`  固定状態: score=${report.fixedScore}, label=${report.fixedLabel}, pufferLevel=${report.pufferLevel}`);
   writeLine(`  Google Forms URL: ${report.formUrl === "" ? "(未設定)" : report.formUrl}`);
   writeLine(`  フォーム監査: ${report.formAuditStatus}`);
-  writeLine(`  監査対象URL: ${report.formAuditReviewedUrl === "" ? "(未設定)" : report.formAuditReviewedUrl}`);
-  writeLine(`  監査完了日時: ${report.formAuditReviewedAt ?? "(未設定)"}`);
-  writeLine(`  監査確認者数: ${String(report.formAuditReviewerCount)}名`);
+  writeLine(`  監査対象protocolVersion: ${report.formAuditProtocolVersion === "" ? "(未設定)" : report.formAuditProtocolVersion}`);
+  writeLine(`  監査対象URL: ${report.formAuditFormUrl === "" ? "(未設定)" : report.formAuditFormUrl}`);
+  writeLine(`  監査日: ${report.formAuditAuditedOn ?? "(未設定)"}`);
+  writeLine(`  公開内容SHA-256: ${report.formAuditContentSha256 === "" ? "(未設定)" : report.formAuditContentSha256}`);
+  writeLine(`  二名確認: ${String(report.formAuditTwoPersonVerified)}`);
   writeLine(`  bind: ${report.bindHost}:${report.port}`);
   writeLine(`  allowLan: ${String(report.allowLan)}`);
   writeLine(`  allowExternalRuntimeRequests: ${String(report.allowExternalRuntimeRequests)}`);

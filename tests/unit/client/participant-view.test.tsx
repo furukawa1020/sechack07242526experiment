@@ -3,7 +3,7 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import QRCode from "qrcode";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UI_COPY } from "../../../src/shared/copy.js";
+import { UI_COPY, formatPresentationPosition } from "../../../src/shared/copy.js";
 import { ParticipantView } from "../../../src/client/participant/ParticipantView.js";
 import {
   parseParticipantSnapshot,
@@ -23,6 +23,7 @@ function snapshot(
   overrides: Partial<ParticipantSnapshot> = {},
 ): ParticipantSnapshot {
   return {
+    rehearsal: false,
     phase: "result",
     sequenceIndex: 0,
     condition: { processing, presentation },
@@ -136,6 +137,29 @@ describe("participant presentation invariants", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["missing condition", { condition: null }],
+    ["missing sequence index", { sequenceIndex: null }],
+    ["missing label fixed state", { fixedState: null }],
+  ] as const)("fails closed for %s without showing either processing condition", (_label, overrides) => {
+    render(<ParticipantView snapshot={snapshot("cloud", "label", overrides)} />);
+
+    expect(screen.getByRole("heading", { name: UI_COPY.error.title })).toBeInTheDocument();
+    expect(screen.getByText(UI_COPY.error.waiting)).toBeInTheDocument();
+    expect(screen.queryByText(UI_COPY.handling.cloud.processing)).not.toBeInTheDocument();
+    expect(screen.queryByText(UI_COPY.handling.local.processing)).not.toBeInTheDocument();
+    expect(screen.queryByText(formatPresentationPosition(1))).not.toBeInTheDocument();
+    expect(screen.queryByTestId("handling-panel")).not.toBeInTheDocument();
+  });
+
+  it("keeps the puffer result valid without exposing label-only fixed state", () => {
+    render(<ParticipantView snapshot={snapshot("cloud", "puffer", { fixedState: null })} />);
+    expect(screen.getByTestId("result-panel")).toHaveTextContent(
+      UI_COPY.result.puffer.replace("\n", " "),
+    );
+    expect(screen.queryByRole("heading", { name: UI_COPY.error.title })).not.toBeInTheDocument();
+  });
+
   it("uses fixed copy for the intro, result and footer", () => {
     const { rerender } = render(<ParticipantView snapshot={snapshot("local", "label", { phase: "intro" })} />);
     expect(screen.getByRole("heading", { name: UI_COPY.intro.title })).toBeInTheDocument();
@@ -148,6 +172,22 @@ describe("participant presentation invariants", () => {
     rerender(<ParticipantView snapshot={snapshot("local", "label")} />);
     expect(screen.getByText(UI_COPY.result.metric)).toBeInTheDocument();
     expect(screen.getByText("高ストレス")).toBeInTheDocument();
+  });
+
+  it("uses plain Japanese guidance for handling and processing without decorative orbit markup", () => {
+    const view = render(<ParticipantView snapshot={snapshot("cloud", "label", { phase: "handling" })} />);
+
+    const handlingMessage = view.container.querySelector(".handling-message-panel");
+    expect(handlingMessage).not.toBeNull();
+    expect(handlingMessage).toHaveTextContent(UI_COPY.footer.remember);
+    expect(handlingMessage).toHaveAttribute("aria-live", "polite");
+    expect(view.container.querySelector(".neutral-orbit, .neutral-panel")).toBeNull();
+
+    view.rerender(<ParticipantView snapshot={snapshot("cloud", "label", { phase: "processing" })} />);
+    const processingPanel = view.container.querySelector(".processing-panel");
+    expect(processingPanel).not.toBeNull();
+    expect(processingPanel).toHaveTextContent(UI_COPY.processing);
+    expect(view.container.querySelector(".neutral-orbit, .neutral-panel")).toBeNull();
   });
 
   it("renders all participant-safe phases with the stable phase attribute", () => {
@@ -198,6 +238,41 @@ describe("participant presentation invariants", () => {
     expect(qrSpy.mock.calls[0]?.[0]).toBe(formUrl);
     expect(window.location.href).toBe(locationBeforeRender);
   });
+
+  it("labels a hardware-free rehearsal and removes every form instruction", () => {
+    const summary = [
+      { processing: "cloud", presentation: "label" },
+      { processing: "local", presentation: "label" },
+      { processing: "cloud", presentation: "puffer" },
+      { processing: "local", presentation: "puffer" },
+    ] as const;
+    const view = render(<ParticipantView snapshot={snapshot("cloud", "label", {
+      rehearsal: true,
+      phase: "intro",
+    })} />);
+
+    expect(screen.getByRole("note")).toHaveTextContent(UI_COPY.rehearsal.title);
+    expect(screen.getByRole("note")).toHaveTextContent(UI_COPY.rehearsal.body);
+    expect(screen.getByTestId("participant-app")).toHaveAttribute("data-rehearsal", "true");
+
+    view.rerender(<ParticipantView snapshot={snapshot("cloud", "label", {
+      rehearsal: true,
+      phase: "summary",
+      summary,
+      formUrl: null,
+    })} />);
+    expect(screen.getByText(UI_COPY.rehearsal.summary)).toBeInTheDocument();
+    expect(screen.queryByText(UI_COPY.summary.body)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(view.container).not.toHaveTextContent("Googleフォームへ戻り");
+
+    view.rerender(<ParticipantView snapshot={snapshot("cloud", "label", {
+      rehearsal: true,
+      phase: "completed",
+    })} />);
+    expect(screen.getByRole("heading", { name: UI_COPY.rehearsal.completedTitle })).toBeInTheDocument();
+    expect(screen.getByText(UI_COPY.rehearsal.completedWaiting)).toBeInTheDocument();
+  });
 });
 
 describe("participant snapshot boundary", () => {
@@ -215,6 +290,7 @@ describe("participant snapshot boundary", () => {
     });
 
     expect(parsed).toMatchObject({
+      rehearsal: false,
       phase: "result",
       sequenceIndex: 2,
       condition: { processing: "cloud", presentation: "label" },
@@ -223,6 +299,19 @@ describe("participant snapshot boundary", () => {
     expect(parsed).not.toHaveProperty("researchId");
     expect(parsed?.fixedState).toEqual({ score: 72, label: "高ストレス" });
     expect(parsed?.fixedState).not.toHaveProperty("pufferLevel");
+  });
+
+  it("parses only an explicit rehearsal flag", () => {
+    const parsed = parseParticipantSnapshot({
+      rehearsal: true,
+      phase: "intro",
+      current: null,
+      recoveryRequired: false,
+      phaseEndsAt: null,
+      summary: [],
+      formUrl: null,
+    });
+    expect(parsed?.rehearsal).toBe(true);
   });
 
   it("shows the neutral recovery state when the server requires confirmation", () => {

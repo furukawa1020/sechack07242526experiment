@@ -31,6 +31,7 @@ export interface ParticipantFixedState {
 }
 
 export interface ParticipantSnapshot {
+  readonly rehearsal: boolean;
   readonly phase: ExperimentPhase;
   readonly sequenceIndex: 0 | 1 | 2 | 3 | null;
   readonly condition: PublicCondition | null;
@@ -115,6 +116,7 @@ export const EMPTY_DEVICE_STATUS: DeviceStatus = {
 };
 
 export const EMPTY_PARTICIPANT_SNAPSHOT: ParticipantSnapshot = {
+  rehearsal: false,
   phase: "recovery",
   sequenceIndex: null,
   condition: null,
@@ -252,6 +254,7 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot | 
   );
 
   return {
+    rehearsal: value["rehearsal"] === true,
     phase,
     sequenceIndex,
     condition: parseCondition(current, value),

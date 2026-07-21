@@ -6,6 +6,7 @@ import {
   parseExperimentConfig,
   type ExperimentConfig,
 } from "./schemas.js";
+import { assessFormAudit } from "./form-audit.js";
 
 export interface LoadExperimentConfigOptions {
   /** Repository root. Defaults to process.cwd(). */
@@ -13,6 +14,8 @@ export interface LoadExperimentConfigOptions {
   /** Allowed config directory. Defaults to <rootDirectory>/config. */
   readonly allowedDirectory?: string;
   readonly production?: boolean;
+  /** Test-only clock override for the production form-audit freshness gate. */
+  readonly currentDate?: Date;
 }
 
 export interface LoadedExperimentConfig {
@@ -85,6 +88,14 @@ export async function loadExperimentConfig(
   const config = parseExperimentConfig(parsedJson);
   if (options.production === true && config.device.mode === "mock") {
     throw new Error("Mock device mode is unconditionally disabled in production.");
+  }
+  if (options.production === true) {
+    const formAudit = assessFormAudit(config, options.currentDate ?? new Date());
+    if (!formAudit.approved) {
+      throw new Error(
+        `Production Google Form audit gate rejected the config (${formAudit.issues.join(", ")}).`,
+      );
+    }
   }
 
   return Object.freeze({

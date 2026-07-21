@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { ORDER_CODES } from "./conditions.js";
 
-export const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
+export { STUDY_FORM_URL } from "./form-audit.js";
 
 const singleLineText = z.string().min(1).max(200).refine(
   (value) => !/[\r\n]/u.test(value),
@@ -103,27 +103,26 @@ const formUrlSchema = z.string().max(2_048).superRefine((value, context) => {
   }
 });
 
-const PendingFormAuditSchema = z.object({
-  status: z.literal("pending"),
-  reviewedUrl: z.literal(""),
-  reviewedAt: z.null(),
-  reviewerCount: z.literal(0),
-}).strict();
+const auditDateSchema = z.string().regex(
+  /^\d{4}-\d{2}-\d{2}$/u,
+  "auditedOn must use YYYY-MM-DD.",
+).refine((value) => {
+  const milliseconds = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(milliseconds)
+    && new Date(milliseconds).toISOString().slice(0, 10) === value;
+}, "auditedOn must be a valid calendar date.");
 
-const ApprovedFormAuditSchema = z.object({
-  status: z.literal("approved"),
-  reviewedUrl: formUrlSchema.refine(
-    (value) => value !== "",
-    "reviewedUrl is required for an approved form audit.",
+export const FormAuditSchema = z.object({
+  status: z.enum(["GO", "NO-GO"]),
+  protocolVersion: singleLineText,
+  formUrl: formUrlSchema,
+  auditedOn: auditDateSchema,
+  contentSha256: z.string().regex(
+    /^[a-f0-9]{64}$/u,
+    "contentSha256 must be a lowercase SHA-256 digest.",
   ),
-  reviewedAt: z.string().datetime({ offset: true }),
-  reviewerCount: z.literal(2),
+  twoPersonVerified: z.boolean(),
 }).strict();
-
-export const FormAuditSchema = z.discriminatedUnion("status", [
-  PendingFormAuditSchema,
-  ApprovedFormAuditSchema,
-]);
 
 export const ExperimentConfigSchema = z.object({
   schemaVersion: z.literal(1),
@@ -147,7 +146,9 @@ export const ExperimentConfigSchema = z.object({
   timingMs: TimingSchema,
   device: DeviceConfigSchema,
   formUrl: formUrlSchema,
-  formAudit: FormAuditSchema,
+  // Required by repository-owned deployment configs. Optional parsing keeps
+  // synthetic development fixtures usable; production always rejects missing evidence.
+  formAudit: FormAuditSchema.optional(),
   logging: z.object({
     directory: safeRelativeDirectory,
     includeAbortedInOrderBalancing: z.boolean(),
@@ -170,16 +171,6 @@ export const ExperimentConfigSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["network", "allowExternalRuntimeRequests"],
       message: "External runtime requests are prohibited by the experiment protocol.",
-    });
-  }
-  if (
-    config.formAudit.status === "approved"
-    && config.formAudit.reviewedUrl !== config.formUrl
-  ) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["formAudit", "reviewedUrl"],
-      message: "reviewedUrl must exactly match formUrl.",
     });
   }
 });

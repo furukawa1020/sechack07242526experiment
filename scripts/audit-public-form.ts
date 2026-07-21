@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 import { isApprovedGoogleFormsUrl } from "./preflight.js";
@@ -16,6 +17,8 @@ export interface PublicFormAuditReport {
   readonly requestedUrl: string;
   readonly finalUrl: string;
   readonly title: string;
+  /** SHA-256 of the stable FB_PUBLIC_LOAD_DATA_ payload, not the dynamic HTML shell. */
+  readonly contentSha256: string;
   readonly findings: readonly PublicFormAuditFinding[];
 }
 
@@ -105,12 +108,16 @@ export function inspectPublicFormPayload(
   source: string,
 ): PublicFormAuditReport {
   const decoded = decodePublicFormPayload(source);
+  const publicPayload = /FB_PUBLIC_LOAD_DATA_\s*=\s*(.*?);\s*<\/script>/su.exec(source)?.[1] ?? null;
+  const contentSha256 = publicPayload === null
+    ? ""
+    : createHash("sha256").update(publicPayload, "utf8").digest("hex");
   const title = /<title[^>]*>([^<]*)<\/title>/iu.exec(decoded)?.[1]?.trim() ?? "(title not found)";
   const internalMappings = [
-    /A[：:]\s*クラウド/gu,
-    /B[：:]\s*(?:ローカル|端末内)/gu,
-    /C[：:]\s*(?:ローカル|端末内)/gu,
-    /D[：:]\s*クラウド/gu,
+    /A[：:=＝]\s*クラウド/gu,
+    /B[：:=＝]\s*(?:ローカル|端末内)/gu,
+    /C[：:=＝]\s*(?:ローカル|端末内)/gu,
+    /D[：:=＝]\s*クラウド/gu,
   ].reduce((total, pattern) => total + occurrences(decoded, pattern), 0);
   const legacyThree = occurrences(decoded, /3種類/gu);
   const currentFour = occurrences(decoded, /4種類/gu);
@@ -125,7 +132,15 @@ export function inspectPublicFormPayload(
     requestedUrl,
     finalUrl,
     title,
+    contentSha256,
     findings: Object.freeze([
+      finding(
+        "canonical-public-payload",
+        publicPayload === null ? "fail" : "pass",
+        publicPayload === null
+          ? "安定した公開内容payloadを抽出できませんでした。"
+          : `公開内容payloadのSHA-256は${contentSha256}です。`,
+      ),
       finding(
         "internal-condition-mapping",
         internalMappings === 0 ? "pass" : "fail",
@@ -202,6 +217,7 @@ export function renderPublicFormAudit(
   writeLine(`対象URL: ${report.requestedUrl}`);
   writeLine(`最終URL: ${report.finalUrl}`);
   writeLine(`タイトル: ${report.title}`);
+  writeLine(`公開内容SHA-256: ${report.contentSha256 || "(抽出失敗)"}`);
   writeLine("");
   for (const item of report.findings) {
     const marker = item.status === "pass" ? "PASS" : item.status === "warning" ? "WARN" : "FAIL";

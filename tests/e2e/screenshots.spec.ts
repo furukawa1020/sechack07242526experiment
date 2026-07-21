@@ -199,6 +199,98 @@ async function expectChildrenCenteredWithin(
   if (axes.vertical) expect(Math.abs(geometry.verticalDelta)).toBeLessThanOrEqual(2);
 }
 
+async function openStableParticipantPhase(
+  page: Page,
+  phase: "handling" | "processing",
+  processing: "cloud" | "local",
+): Promise<void> {
+  await page.addInitScript(() => {
+    class StableDisplaySocket extends EventTarget {
+      static readonly CONNECTING = 0;
+      static readonly OPEN = 1;
+      static readonly CLOSING = 2;
+      static readonly CLOSED = 3;
+      readonly url: string;
+      readyState = StableDisplaySocket.CONNECTING;
+
+      constructor(url: string | URL) {
+        super();
+        this.url = String(url);
+        window.setTimeout(() => {
+          this.readyState = StableDisplaySocket.OPEN;
+          this.dispatchEvent(new Event("open"));
+        }, 0);
+      }
+
+      send(): void {}
+
+      close(): void {
+        if (this.readyState === StableDisplaySocket.CLOSED) return;
+        this.readyState = StableDisplaySocket.CLOSED;
+        this.dispatchEvent(new CloseEvent("close"));
+      }
+    }
+
+    Object.defineProperty(window, "WebSocket", {
+      configurable: true,
+      value: StableDisplaySocket,
+      writable: true,
+    });
+  });
+  await page.route("**/api/display/layout-fixture", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        phase,
+        current: { position: 1, processing, presentation: "label" },
+        fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
+        recoveryRequired: false,
+        phaseEndsAt: null,
+        serverNow: null,
+        summary: [],
+        formUrl: null,
+      },
+      status: 200,
+    });
+  });
+  await page.goto("/display/layout-fixture");
+  await expect(page.getByTestId("participant-app")).toHaveAttribute("data-phase", phase);
+}
+
+async function processingLocationAppearance(page: Page): Promise<Record<string, string | number>> {
+  return page.locator(".handling-row-location").evaluate((row) => {
+    const iconFrame = row.querySelector<HTMLElement>(".field-icon");
+    const icon = row.querySelector<SVGSVGElement>(".field-icon svg");
+    const value = row.querySelector<HTMLElement>("dd");
+    if (iconFrame === null || icon === null || value === null) {
+      throw new Error("processing location cue is incomplete");
+    }
+    const rowBounds = row.getBoundingClientRect();
+    const frameBounds = iconFrame.getBoundingClientRect();
+    const iconBounds = icon.getBoundingClientRect();
+    const rowStyle = window.getComputedStyle(row);
+    const frameStyle = window.getComputedStyle(iconFrame);
+    const iconStyle = window.getComputedStyle(icon);
+    const valueStyle = window.getComputedStyle(value);
+    return {
+      frameBackground: frameStyle.backgroundColor,
+      frameHeight: Math.round(frameBounds.height),
+      frameWidth: Math.round(frameBounds.width),
+      iconColor: iconStyle.stroke,
+      iconHeight: Math.round(iconBounds.height),
+      iconWidth: Math.round(iconBounds.width),
+      rowBackground: rowStyle.backgroundColor,
+      rowHeight: Math.round(rowBounds.height),
+      rowPaddingBottom: rowStyle.paddingBottom,
+      rowPaddingTop: rowStyle.paddingTop,
+      rowWidth: Math.round(rowBounds.width),
+      valueColor: valueStyle.color,
+      valueFontSize: valueStyle.fontSize,
+      valueFontWeight: valueStyle.fontWeight,
+    };
+  });
+}
+
 test("主要画面の承認用スクリーンショットを生成する", async ({ page, request }) => {
   test.setTimeout(90_000);
   await ensureDevice(request);
@@ -212,6 +304,10 @@ test("主要画面の承認用スクリーンショットを生成する", async
 
     await page.goto("/operator");
     await expect(page.getByTestId("operator-app")).toBeVisible();
+    await expect(page.locator(".device-mode-badge")).toContainText("装置モード: 模擬装置");
+    await expect(page.locator(".device-details")).toContainText("待機・収縮済み");
+    await expect(page.getByTestId("operator-app")).not.toContainText("Fullscreen API");
+    await expect(page.getByTestId("operator-app")).not.toContainText("Mockリハーサル");
     await capture(page, `operator-${viewport.label}`);
 
     await page.goto("/device-test");
@@ -226,6 +322,39 @@ test("主要画面の承認用スクリーンショットを生成する", async
       return record(record(await response.json()).status).state;
     }).toBe("idle");
 
+    const handlingPage = await page.context().newPage();
+    await handlingPage.setViewportSize({ width: viewport.width, height: viewport.height });
+    await openStableParticipantPhase(handlingPage, "handling", "cloud");
+    await expect(handlingPage.locator(".handling-message-panel")).toHaveText(
+      "そのまま見て、感じたことを覚えておいてください。",
+    );
+    await expect(handlingPage.locator(".neutral-orbit, .neutral-panel")).toHaveCount(0);
+    await expectParticipantSurfaceFillsViewport(handlingPage);
+    await expectChildrenCenteredWithin(handlingPage.locator(".handling-message-panel"), ":scope > p");
+    const cloudLocationAppearance = await processingLocationAppearance(handlingPage);
+    await capture(handlingPage, `participant-handling-${viewport.label}`);
+    await handlingPage.close();
+
+    const localHandlingPage = await page.context().newPage();
+    await localHandlingPage.setViewportSize({ width: viewport.width, height: viewport.height });
+    await openStableParticipantPhase(localHandlingPage, "handling", "local");
+    expect(await processingLocationAppearance(localHandlingPage)).toEqual(cloudLocationAppearance);
+    await localHandlingPage.close();
+
+    const processingPage = await page.context().newPage();
+    await processingPage.setViewportSize({ width: viewport.width, height: viewport.height });
+    await openStableParticipantPhase(processingPage, "processing", "cloud");
+    await expect(processingPage.locator(".processing-content > p")).toHaveText(
+      "身体データを処理しています…",
+    );
+    await expectParticipantSurfaceFillsViewport(processingPage);
+    await expectChildrenCenteredWithin(
+      processingPage.locator(".processing-panel"),
+      ":scope > .processing-content",
+    );
+    await capture(processingPage, `participant-processing-${viewport.label}`);
+    await processingPage.close();
+
     const labelSession = await create(request, `SH26-94${viewportIndex * 2}`, "ABDC");
     await page.goto(labelSession.displayUrl);
     await waitForDisplay(request, labelSession.id);
@@ -234,6 +363,9 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await operatorPage.setViewportSize({ width: viewport.width, height: viewport.height });
     await operatorPage.goto("/operator");
     await expect(operatorPage.getByRole("heading", { name: "進行状況" })).toBeVisible();
+    await expect(operatorPage.getByTestId("operator-app")).toContainText("全画面表示");
+    await expect(operatorPage.getByTestId("operator-app")).not.toContainText("Fullscreen API");
+    await expect(operatorPage.locator(".event-list strong").first()).not.toHaveText(/^(?:display|session|device|phase)\./u);
     await expect(operatorPage.getByRole("button", { name: /緊急停止/u })).toBeVisible();
     await operatorPage.getByRole("checkbox", { name: /全画面表示し、目視確認済み/u }).check();
     await capture(operatorPage, `operator-session-${viewport.label}`);

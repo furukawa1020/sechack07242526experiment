@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,10 +20,13 @@ import {
 import { runReleaseVerification } from "../../../scripts/verify-release.js";
 
 interface ConfigOverrides {
+  readonly allowLan?: boolean;
   readonly mode?: "mock" | "serial";
   readonly serialPath?: string;
   readonly allowMockInProduction?: boolean;
+  readonly bindHost?: string;
   readonly formUrl?: string;
+  readonly loggingDirectory?: string;
   readonly allowExternalRuntimeRequests?: boolean;
 }
 
@@ -31,6 +34,7 @@ const execFileAsync = promisify(execFile);
 const SYNTHETIC_SOURCE_COMMIT = "1".repeat(40);
 const SYNTHETIC_SOURCE_REPOSITORY = "https://github.com/example/sechack-release-fixture.git";
 const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
+const TODAY_IN_JAPAN = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
 
 function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
   const mode = overrides.mode ?? "serial";
@@ -39,7 +43,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     schemaVersion: 1,
     protocolVersion: "release-test-v1",
     studyTitle: "リリース合成設定",
-    bindHost: "127.0.0.1",
+    bindHost: overrides.bindHost ?? "127.0.0.1",
     port: 4173,
     researchIdPattern: "^TEST-[0-9]{3}$",
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
@@ -61,20 +65,41 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     },
     formUrl,
     formAudit: {
-      status: "GO",
+      status: formUrl === "" ? "NO-GO" : "GO",
       protocolVersion: "release-test-v1",
       formUrl,
-      auditedOn: new Date().toISOString().slice(0, 10),
+      auditedOn: TODAY_IN_JAPAN,
       contentSha256: "c".repeat(64),
-      twoPersonVerified: true,
+      twoPersonVerified: formUrl !== "",
     },
     logging: {
-      directory: "./data/sessions",
+      directory: overrides.loggingDirectory ?? "./data/sessions",
       includeAbortedInOrderBalancing: true,
     },
     network: {
-      allowLan: false,
+      allowLan: overrides.allowLan ?? false,
       allowExternalRuntimeRequests: overrides.allowExternalRuntimeRequests ?? false,
+    },
+  };
+}
+
+function mockRehearsalConfigSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
+  return {
+    ...configSource({
+      mode: "mock",
+      serialPath: "",
+      formUrl: "",
+      loggingDirectory: "./data/mock-sessions",
+      ...overrides,
+    }),
+    researchIdPattern: "^DEMO-[0-9]{3}$",
+    formAudit: {
+      status: "NO-GO",
+      protocolVersion: "release-test-v1",
+      formUrl: "",
+      auditedOn: TODAY_IN_JAPAN,
+      contentSha256: "0".repeat(64),
+      twoPersonVerified: false,
     },
   };
 }
@@ -152,8 +177,13 @@ async function createManifestFixture(): Promise<{
 
 async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<string> {
   const root = await newTemporaryRoot("sechack-release-");
-  await writeRelative(root, ".gitignore", "release/\n");
+  await writeRelative(root, ".gitignore", "release/\ndata/**\n");
   await writeRelative(root, "config/site-production.json", JSON.stringify(configSource(overrides)));
+  await writeRelative(
+    root,
+    "config/site-mock-rehearsal.json",
+    JSON.stringify(mockRehearsalConfigSource(overrides)),
+  );
   await writeRelative(root, "config/experiment.e2e.json", "must not be released");
   await writeRelative(root, "data/sessions/synthetic.jsonl", "must not be released");
   await writeRelative(root, "tests/private-fixture.txt", "must not be released");
@@ -164,7 +194,13 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
   await writeRelative(root, "dist/assets/app.js", "console.info('synthetic client');");
   await writeRelative(root, "dist/assets/app.css", "body { color: black; }");
   await writeRelative(root, "dist/assets/app.js.map", "must not be released");
-  for (const name of ["index", "preflight", "healthcheck", "verify-release"] as const) {
+  for (const name of [
+    "index",
+    "rehearsal",
+    "preflight",
+    "healthcheck",
+    "verify-release",
+  ] as const) {
     await writeRelative(
       root,
       `dist-server/${name}.js`,
@@ -227,6 +263,7 @@ describe("release argument validation", () => {
       parseCreateReleaseArguments(["--config", "config/site.json", "--output=release/site"]),
     ).toEqual({
       help: false,
+      mockRehearsal: false,
       configPath: "config/site.json",
       outputPath: "release/site",
     });
@@ -234,8 +271,13 @@ describe("release argument validation", () => {
       parseCreateReleaseArguments(["--config=config/site.json", "--output", "release/site"]),
     ).toEqual({
       help: false,
+      mockRehearsal: false,
       configPath: "config/site.json",
       outputPath: "release/site",
+    });
+    expect(parseCreateReleaseArguments(["--mock-rehearsal"])).toEqual({
+      help: false,
+      mockRehearsal: true,
     });
   });
 
@@ -246,6 +288,9 @@ describe("release argument validation", () => {
       "only be specified once",
     );
     expect(() => parseCreateReleaseArguments(["--output=a", "--output=b"])).toThrow(
+      "only be specified once",
+    );
+    expect(() => parseCreateReleaseArguments(["--mock-rehearsal", "--mock-rehearsal"])).toThrow(
       "only be specified once",
     );
     expect(() => parseCreateReleaseArguments(["--allow-mock"])).toThrow("Unknown option");
@@ -420,6 +465,143 @@ describe("release creation", () => {
       }),
     ).rejects.toThrow(expectedFailure);
     expect(await pathExists(join(root, "release", "rejected"))).toBe(false);
+  });
+
+  it("never treats a Mock rehearsal config as production without explicit opt-in", async () => {
+    const root = await createReleaseSource();
+    await expect(
+      createRelease({
+        rootDirectory: root,
+        configPath: "config/site-mock-rehearsal.json",
+        outputPath: "release/not-production",
+        installDependencies: false,
+        writeLine: () => undefined,
+      }),
+    ).rejects.toThrow("Production preflight failed: device.mode");
+    expect(await pathExists(join(root, "release", "not-production"))).toBe(false);
+  });
+
+  it("never treats a production config as an opted-in Mock rehearsal", async () => {
+    const root = await createReleaseSource();
+    await expect(
+      createRelease({
+        rootDirectory: root,
+        configPath: "config/site-production.json",
+        outputPath: "release/not-mock",
+        releaseKind: "mock-rehearsal",
+        installDependencies: false,
+        writeLine: () => undefined,
+      }),
+    ).rejects.toThrow("Mock rehearsal release gate failed: device.mode");
+    expect(await pathExists(join(root, "release", "not-mock"))).toBe(false);
+  });
+
+  it.each([
+    [
+      "LAN binding",
+      { bindHost: "0.0.0.0", allowLan: true } satisfies ConfigOverrides,
+      "bindHost, network.allowLan",
+    ],
+    ["a configured form", { formUrl: STUDY_FORM_URL } satisfies ConfigOverrides, "formUrl"],
+    [
+      "the production log directory",
+      { loggingDirectory: "./data/sessions" } satisfies ConfigOverrides,
+      "logging.directory",
+    ],
+    [
+      "external runtime requests",
+      { allowExternalRuntimeRequests: true } satisfies ConfigOverrides,
+      "allowExternalRuntimeRequests",
+    ],
+    [
+      "production Mock permission",
+      { allowMockInProduction: true } satisfies ConfigOverrides,
+      "device.allowMockInProduction",
+    ],
+  ])("rejects Mock rehearsal packaging with %s", async (_label, overrides, expectedFailure) => {
+    const root = await createReleaseSource(overrides);
+    await expect(
+      createRelease({
+        rootDirectory: root,
+        configPath: "config/site-mock-rehearsal.json",
+        outputPath: "release/rejected-mock",
+        releaseKind: "mock-rehearsal",
+        installDependencies: false,
+        writeLine: () => undefined,
+      }),
+    ).rejects.toThrow(expectedFailure);
+    expect(await pathExists(join(root, "release", "rejected-mock"))).toBe(false);
+  });
+
+  it("creates a separately named sealed Mock rehearsal payload", async () => {
+    const root = await createReleaseSource();
+    const outputLines: string[] = [];
+    const output = await createRelease({
+      rootDirectory: root,
+      configPath: "config/site-mock-rehearsal.json",
+      releaseKind: "mock-rehearsal",
+      installDependencies: false,
+      writeLine: (line) => outputLines.push(line),
+    });
+
+    expect(basename(output)).toMatch(/^sechack-mock-rehearsal-9\.8\.7-/u);
+    expect(await listFiles(output)).toEqual(
+      [
+        ".npmrc",
+        "CHECK_MOCK_HEALTH.cmd",
+        "config/experiment.mock-rehearsal.json",
+        "data/mock-sessions/.gitkeep",
+        "DEPLOYMENT_MANIFEST.json",
+        "dist/assets/app.css",
+        "dist/assets/app.js",
+        "dist/index.html",
+        "dist-server/healthcheck.js",
+        "dist-server/rehearsal.js",
+        "dist-server/verify-release.js",
+        "package-lock.json",
+        "package.json",
+        "START_MOCK_DEMO.cmd",
+        "VERIFY_MOCK_RELEASE.cmd",
+      ].sort((left, right) => left.localeCompare(right)),
+    );
+
+    const releasedConfig = JSON.parse(
+      await readFile(join(output, "config", "experiment.mock-rehearsal.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(releasedConfig).toEqual(mockRehearsalConfigSource());
+    const runtimePackage = JSON.parse(
+      await readFile(join(output, "package.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(runtimePackage.scripts).toEqual({
+      healthcheck:
+        "node dist-server/healthcheck.js --config config/experiment.mock-rehearsal.json",
+      "release:verify": "node dist-server/verify-release.js",
+      start: "node dist-server/rehearsal.js",
+    });
+    expect(await verifyReleaseDirectory(output)).toEqual([]);
+
+    const launcher = await readFile(join(output, "START_MOCK_DEMO.cmd"), "utf8");
+    expect(launcher).toContain(
+      "EXPERIMENT_CONFIG_PATH=config\\experiment.mock-rehearsal.json",
+    );
+    expect(launcher).toContain("DATA_DIRECTORY=data\\mock-sessions");
+    expect(launcher).toContain("http://127.0.0.1:4173/operator");
+    expect(launcher).toContain("dist-server\\healthcheck.js");
+    expect(launcher).not.toContain("Invoke-WebRequest");
+    expect(launcher).toContain("Start-Process $operator");
+    expect(launcher).toContain("Press Ctrl+C once");
+    expect(launcher).not.toContain("START_PRODUCTION");
+    expect(launcher).not.toContain('start "SecHack Mock Rehearsal Server"');
+    expect(launcher.indexOf("node dist-server\\verify-release.js")).toBeLessThan(
+      launcher.indexOf("node dist-server\\rehearsal.js"),
+    );
+    expect(launcher.indexOf("dist-server\\healthcheck.js")).toBeLessThan(
+      launcher.indexOf("node dist-server\\rehearsal.js"),
+    );
+    expect(outputLines).toContainEqual(expect.stringContaining("Mock rehearsal release created"));
+    expect(outputLines).toContainEqual(
+      expect.stringContaining("not a production research release"),
+    );
   });
 
   it("creates only the approved offline payload and a self-consistent manifest", async () => {
