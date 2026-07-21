@@ -8,6 +8,7 @@ app_file: index.html
 pinned: false
 fullWidth: true
 header: mini
+disable_embedding: true
 short_description: 実機・入力・保存を使わないSecHack365実験提示UIの公開Mockデモ
 ---
 

@@ -11,11 +11,13 @@ export interface ReleaseManifestFile {
 }
 
 export interface ReleaseManifest {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly appVersion: string;
   readonly protocolVersion: string;
   readonly configHash: string;
   readonly configFileHash: string;
+  readonly sourceCommit: string;
+  readonly sourceRepository?: string;
   readonly createdAt: string;
   readonly buildRuntime: {
     readonly node: string;
@@ -24,6 +26,16 @@ export interface ReleaseManifest {
   };
   readonly files: readonly ReleaseManifestFile[];
 }
+
+export interface ReleaseVerificationResult {
+  readonly errors: readonly string[];
+  readonly manifestSha256: string | null;
+  readonly sourceCommit: string | null;
+  readonly sourceRepository?: string;
+}
+
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 
 function toManifestPath(value: string): string {
   return value.split(sep).join("/");
@@ -44,6 +56,34 @@ function isIgnoredRuntimeFile(path: string): boolean {
 async function sha256File(path: string): Promise<string> {
   const source = await readFile(path);
   return createHash("sha256").update(source).digest("hex");
+}
+
+function sha256Bytes(source: Uint8Array): string {
+  return createHash("sha256").update(source).digest("hex");
+}
+
+export function isCredentialFreeSourceRepository(value: string): boolean {
+  if (value.length === 0 || value.trim() !== value || /[\u0000-\u001f\u007f]/u.test(value)) {
+    return false;
+  }
+  if (/^git@[a-z0-9.-]+:[a-z0-9._~/-]+$/iu.test(value)) return true;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (!["https:", "ssh:", "git:"].includes(parsed.protocol)) return false;
+  if (
+    parsed.hostname.length === 0
+    || parsed.password.length > 0
+    || parsed.search.length > 0
+    || parsed.hash.length > 0
+  ) {
+    return false;
+  }
+  if (parsed.protocol === "https:" && parsed.username.length > 0) return false;
+  return parsed.pathname.length > 1;
 }
 
 async function listRegularFiles(rootDirectory: string, currentDirectory = rootDirectory): Promise<readonly string[]> {
@@ -73,11 +113,20 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
   if (value === null || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   if (
-    candidate.schemaVersion !== 1
+    candidate.schemaVersion !== 2
     || typeof candidate.appVersion !== "string"
     || typeof candidate.protocolVersion !== "string"
-    || !/^[a-f0-9]{64}$/u.test(String(candidate.configHash))
-    || !/^[a-f0-9]{64}$/u.test(String(candidate.configFileHash))
+    || !SHA256_PATTERN.test(String(candidate.configHash))
+    || !SHA256_PATTERN.test(String(candidate.configFileHash))
+    || typeof candidate.sourceCommit !== "string"
+    || !SOURCE_COMMIT_PATTERN.test(candidate.sourceCommit)
+    || (
+      candidate.sourceRepository !== undefined
+      && (
+        typeof candidate.sourceRepository !== "string"
+        || !isCredentialFreeSourceRepository(candidate.sourceRepository)
+      )
+    )
     || typeof candidate.createdAt !== "string"
     || !Array.isArray(candidate.files)
   ) {
@@ -102,14 +151,31 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
       && Number.isSafeInteger(record.bytes)
       && record.bytes >= 0
       && typeof record.sha256 === "string"
-      && /^[a-f0-9]{64}$/u.test(record.sha256);
+      && SHA256_PATTERN.test(record.sha256);
   });
 }
 
 export async function createReleaseManifest(
   releaseDirectory: string,
-  metadata: Pick<ReleaseManifest, "appVersion" | "protocolVersion" | "configHash" | "configFileHash">,
+  metadata: Pick<
+    ReleaseManifest,
+    | "appVersion"
+    | "protocolVersion"
+    | "configHash"
+    | "configFileHash"
+    | "sourceCommit"
+    | "sourceRepository"
+  >,
 ): Promise<ReleaseManifest> {
+  if (!SOURCE_COMMIT_PATTERN.test(metadata.sourceCommit)) {
+    throw new Error("Release source commit must be a full lowercase 40-character Git commit ID.");
+  }
+  if (
+    metadata.sourceRepository !== undefined
+    && !isCredentialFreeSourceRepository(metadata.sourceRepository)
+  ) {
+    throw new Error("Release source repository is not a credential-free supported Git URL.");
+  }
   const rootDirectory = resolve(releaseDirectory);
   const paths = await listRegularFiles(rootDirectory);
   const files: ReleaseManifestFile[] = [];
@@ -127,11 +193,15 @@ export async function createReleaseManifest(
     }));
   }
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     appVersion: metadata.appVersion,
     protocolVersion: metadata.protocolVersion,
     configHash: metadata.configHash,
     configFileHash: metadata.configFileHash,
+    sourceCommit: metadata.sourceCommit,
+    ...(metadata.sourceRepository === undefined
+      ? {}
+      : { sourceRepository: metadata.sourceRepository }),
     createdAt: new Date().toISOString(),
     buildRuntime: Object.freeze({
       node: process.version,
@@ -140,6 +210,10 @@ export async function createReleaseManifest(
     }),
     files: Object.freeze(files),
   });
+}
+
+export async function sha256ReleaseManifest(releaseDirectory: string): Promise<string> {
+  return sha256File(resolve(releaseDirectory, RELEASE_MANIFEST_NAME));
 }
 
 export async function writeReleaseManifest(
@@ -153,18 +227,32 @@ export async function writeReleaseManifest(
   );
 }
 
-export async function verifyReleaseDirectory(releaseDirectory: string): Promise<readonly string[]> {
+export async function verifyReleaseDirectoryDetailed(
+  releaseDirectory: string,
+): Promise<ReleaseVerificationResult> {
   const rootDirectory = resolve(releaseDirectory);
+  let manifestSource: Uint8Array;
+  let manifestSha256: string | null = null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(resolve(rootDirectory, RELEASE_MANIFEST_NAME), "utf8")) as unknown;
+    manifestSource = await readFile(resolve(rootDirectory, RELEASE_MANIFEST_NAME));
+    manifestSha256 = sha256Bytes(manifestSource);
+    parsed = JSON.parse(new TextDecoder().decode(manifestSource)) as unknown;
   } catch (error) {
-    return Object.freeze([
-      `Deployment manifest could not be read: ${error instanceof Error ? error.message : "unknown error"}`,
-    ]);
+    return Object.freeze({
+      errors: Object.freeze([
+        `Deployment manifest could not be read: ${error instanceof Error ? error.message : "unknown error"}`,
+      ]),
+      manifestSha256,
+      sourceCommit: null,
+    });
   }
   if (!isReleaseManifest(parsed)) {
-    return Object.freeze(["Deployment manifest has an invalid structure."]);
+    return Object.freeze({
+      errors: Object.freeze(["Deployment manifest has an invalid structure."]),
+      manifestSha256,
+      sourceCommit: null,
+    });
   }
 
   const errors: string[] = [];
@@ -202,5 +290,16 @@ export async function verifyReleaseDirectory(releaseDirectory: string): Promise<
       errors.push(`Missing or unreadable file: ${file.path} (${error instanceof Error ? error.message : "error"})`);
     }
   }
-  return Object.freeze(errors);
+  return Object.freeze({
+    errors: Object.freeze(errors),
+    manifestSha256,
+    sourceCommit: parsed.sourceCommit,
+    ...(parsed.sourceRepository === undefined
+      ? {}
+      : { sourceRepository: parsed.sourceRepository }),
+  });
+}
+
+export async function verifyReleaseDirectory(releaseDirectory: string): Promise<readonly string[]> {
+  return (await verifyReleaseDirectoryDetailed(releaseDirectory)).errors;
 }

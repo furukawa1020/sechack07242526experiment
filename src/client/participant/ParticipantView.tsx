@@ -162,8 +162,8 @@ export function ResultPanel({
 
 function AwaitingPanel(): React.JSX.Element {
   return (
-    <section className="condition-panel neutral-panel" aria-hidden="true">
-      <div className="neutral-orbit"><span /><span /><span /></div>
+    <section className="condition-panel handling-message-panel" aria-live="polite">
+      <p>{UI_COPY.footer.remember}</p>
     </section>
   );
 }

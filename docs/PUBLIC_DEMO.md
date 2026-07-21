@@ -51,3 +51,7 @@ https://furukawa1020-sechack-experiment-demo.static.hf.space/
 ```
 
 公開後は全6画面、1366×768と1920×1080の収まり、実機なし表示、入力・フォーム・QRがないこと、HTML・JS・CSS以外の通信が発生しないことを確認する。公開デモのデプロイ成功は、本番実験のGO判定を意味しない。
+
+画面証跡は`npm.cmd run test:public-demo`で毎回再生成する。導入、クラウド×状態ラベル、端末内×状態ラベル、クラウド×フグ、端末内×フグ、サマリーの6画面を、1366×768と1920×1080で`artifacts/screenshots/`へ保存する。古い画像を手作業で流用しない。
+
+静的HTMLのmeta CSPには、meta配信で有効なディレクティブだけを記載する。`frame-ancestors`はHTTPレスポンスヘッダーでのみ有効なためmetaへ記載せず、ブラウザに無視される設定を安全対策として扱わない。Hugging Face SpaceではREADME front matterの`disable_embedding: true`を設定する。この公開デモには入力、認証、研究データ、フォーム導線を含めない。厳密なHTTPヘッダーによる埋め込み禁止が必要な別配信先では、ホスティング側のGETレスポンスへ`Content-Security-Policy: frame-ancestors 'none'`を設定して確認する。

@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { loadExperimentConfig } from "../src/shared/config-loader.js";
 import {
   formatConfigError,
+  STUDY_FORM_URL,
   type ExperimentConfig,
 } from "../src/shared/schemas.js";
 import { ExperimentLogger } from "../src/server/logging/experiment-log.js";
@@ -46,6 +47,10 @@ export interface PreflightReport {
   readonly fixedLabel: string;
   readonly pufferLevel: number;
   readonly formUrl: string;
+  readonly formAuditStatus: ExperimentConfig["formAudit"]["status"];
+  readonly formAuditReviewedUrl: string;
+  readonly formAuditReviewedAt: string | null;
+  readonly formAuditReviewerCount: number;
   readonly bindHost: string;
   readonly port: number;
   readonly allowLan: boolean;
@@ -205,14 +210,29 @@ export function evaluatePreflightGates(
   });
 
   const approvedFormUrl = isApprovedGoogleFormsUrl(config.formUrl);
+  const expectedFormUrl = config.formUrl === STUDY_FORM_URL;
   checks.push({
     name: "formUrl",
-    status: approvedFormUrl ? "pass" : production ? "fail" : "warning",
-    detail: approvedFormUrl
-      ? "許可されたGoogle Forms HTTPS URL形式です（内容の二名照合は別途必要です）。"
+    status: approvedFormUrl && expectedFormUrl ? "pass" : production ? "fail" : "warning",
+    detail: approvedFormUrl && expectedFormUrl
+      ? "指定された研究用Google Forms URLと完全一致しています。"
       : production
-        ? "本番では承認済みGoogle Forms URLが必須です。"
-        : "開発確認のためGoogle Forms URL未設定を許可しました。",
+        ? `本番ではformUrlを${STUDY_FORM_URL}と完全一致させる必要があります。`
+        : "開発確認のため、指定フォームURLとの不一致または未設定を警告扱いにしました。",
+  });
+
+  const approvedFormAudit = config.formAudit.status === "approved"
+    && config.formAudit.reviewedUrl === config.formUrl
+    && config.formAudit.reviewedUrl === STUDY_FORM_URL
+    && config.formAudit.reviewerCount === 2;
+  checks.push({
+    name: "formAudit",
+    status: approvedFormAudit ? "pass" : production ? "fail" : "warning",
+    detail: approvedFormAudit
+      ? `フォーム内容の二名監査承認を確認しました（${config.formAudit.reviewedAt}）。`
+      : production
+        ? "本番では修正後フォームの二名監査を完了し、formAuditをapprovedにする必要があります。"
+        : "フォーム監査は未承認です。開発用Mock確認には影響しませんが、本番リリースは生成できません。",
   });
 
   checks.push({
@@ -384,6 +404,10 @@ export async function collectPreflightReport(
     fixedLabel: config.fixedState.label,
     pufferLevel: config.fixedState.pufferLevel,
     formUrl: config.formUrl,
+    formAuditStatus: config.formAudit.status,
+    formAuditReviewedUrl: config.formAudit.reviewedUrl,
+    formAuditReviewedAt: config.formAudit.reviewedAt,
+    formAuditReviewerCount: config.formAudit.reviewerCount,
     bindHost: config.bindHost,
     port: config.port,
     allowLan: config.network.allowLan,
@@ -428,6 +452,10 @@ export function renderPreflightReport(
   writeLine(`  allowMockInProduction: ${String(report.allowMockInProduction)}`);
   writeLine(`  固定状態: score=${report.fixedScore}, label=${report.fixedLabel}, pufferLevel=${report.pufferLevel}`);
   writeLine(`  Google Forms URL: ${report.formUrl === "" ? "(未設定)" : report.formUrl}`);
+  writeLine(`  フォーム監査: ${report.formAuditStatus}`);
+  writeLine(`  監査対象URL: ${report.formAuditReviewedUrl === "" ? "(未設定)" : report.formAuditReviewedUrl}`);
+  writeLine(`  監査完了日時: ${report.formAuditReviewedAt ?? "(未設定)"}`);
+  writeLine(`  監査確認者数: ${String(report.formAuditReviewerCount)}名`);
   writeLine(`  bind: ${report.bindHost}:${report.port}`);
   writeLine(`  allowLan: ${String(report.allowLan)}`);
   writeLine(`  allowExternalRuntimeRequests: ${String(report.allowExternalRuntimeRequests)}`);

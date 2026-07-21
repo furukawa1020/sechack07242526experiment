@@ -1,6 +1,6 @@
 # Windowsローカル本番デプロイ
 
-対象プロトコル: `R8-010-2x2-mock-v2`
+対象プロトコル: `R8-010-2x2-mock-v3`
 
 この手順は、実験会場のWindows PCへ、外部通信を行わないローカルWebアプリとして配置するためのものです。公開クラウドや一般公開Webサーバへデプロイしません。
 
@@ -56,7 +56,7 @@ productionサーバは`device.mode=mock`を無条件に拒否します。`allowM
 npm.cmd run deploy:prepare -- --config config/experiment.production.json
 ```
 
-このコマンドは、Lint、型検査、単体・統合テスト、現行8ケースのE2E、ビルド、本番preflightを順に実行します。その後、`release/`の新しいディレクトリへ許可ファイルだけをコピーし、lockfileからproduction依存関係を導入します。2026-07-20の最終ソフトウェア試験は17ファイル・163テスト、E2E 8テストが成功し、カバレッジはStatements 92.83%、Branches 86.16%、Functions 93.77%、Lines 93.36%でした。実測値は[テスト報告](TEST_REPORT.md)へ記録しています。
+このコマンドは、Lint、型検査、単体・統合テスト、現行8ケースのE2E、ビルド、本番preflightを順に実行します。その後、`release/`の新しいディレクトリへ許可ファイルだけをコピーし、lockfileからproduction依存関係を導入します。2026-07-20の最終ソフトウェア試験は18ファイル・168テスト、E2E 8テストが成功し、カバレッジはStatements 92.83%、Branches 86.16%、Functions 93.77%、Lines 93.36%でした。実測値は[テスト報告](TEST_REPORT.md)へ記録しています。
 
 成果物には次が含まれます。
 

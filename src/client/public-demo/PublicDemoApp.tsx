@@ -3,16 +3,15 @@ import { useState } from "react";
 import {
   PUBLIC_DEMO_CONDITIONS,
   PUBLIC_DEMO_COPY,
+  PUBLIC_DEMO_FIRST_PRESENTATION_STEP,
   PUBLIC_DEMO_FIXED_STATE,
+  PUBLIC_DEMO_INTRO_STEP,
+  PUBLIC_DEMO_SUMMARY_STEP,
+  PUBLIC_DEMO_TOTAL_STEPS,
+  publicDemoStepLabel,
   type DemoProcessingLocation,
   type PublicDemoCondition,
 } from "./content.js";
-
-const INTRO_STEP = 0;
-const FIRST_PRESENTATION_STEP = 1;
-const LAST_PRESENTATION_STEP = PUBLIC_DEMO_CONDITIONS.length;
-const SUMMARY_STEP = LAST_PRESENTATION_STEP + 1;
-const TOTAL_STEPS = SUMMARY_STEP + 1;
 
 type HandlingIconKind = DemoProcessingLocation | "storage" | "audience";
 
@@ -44,7 +43,7 @@ function HandlingIcon({ kind }: { readonly kind: HandlingIconKind }): React.JSX.
   );
 }
 
-function DemoNotice(): React.JSX.Element {
+export function DemoNotice(): React.JSX.Element {
   return (
     <header className="public-demo-notice" aria-label="公開デモについて">
       <strong>{PUBLIC_DEMO_COPY.notice.title}</strong>
@@ -212,23 +211,17 @@ function SummaryScene(): React.JSX.Element {
   );
 }
 
-function Scene({ step }: { readonly step: number }): React.JSX.Element {
-  if (step === INTRO_STEP) return <IntroScene />;
-  if (step === SUMMARY_STEP) return <SummaryScene />;
+export function Scene({ step }: { readonly step: number }): React.JSX.Element {
+  if (step === PUBLIC_DEMO_INTRO_STEP) return <IntroScene />;
+  if (step === PUBLIC_DEMO_SUMMARY_STEP) return <SummaryScene />;
 
-  const condition = PUBLIC_DEMO_CONDITIONS[step - FIRST_PRESENTATION_STEP];
+  const condition = PUBLIC_DEMO_CONDITIONS[step - PUBLIC_DEMO_FIRST_PRESENTATION_STEP];
   if (condition === undefined) throw new RangeError(`Public demo step is out of range: ${step}`);
   return <PresentationScene condition={condition} position={step} />;
 }
 
-function stepLabel(step: number): string {
-  if (step === INTRO_STEP) return PUBLIC_DEMO_COPY.navigation.intro;
-  if (step === SUMMARY_STEP) return PUBLIC_DEMO_COPY.navigation.summary;
-  return PUBLIC_DEMO_COPY.presentation.position(step);
-}
-
 export function PublicDemoApp(): React.JSX.Element {
-  const [step, setStep] = useState(INTRO_STEP);
+  const [step, setStep] = useState(PUBLIC_DEMO_INTRO_STEP);
 
   return (
     <div className="public-demo-app" data-testid="public-demo-app">
@@ -243,18 +236,18 @@ export function PublicDemoApp(): React.JSX.Element {
       <nav className="public-demo-controls" aria-label="公開デモの画面操作">
         <button
           type="button"
-          disabled={step === INTRO_STEP}
-          onClick={() => setStep((current) => Math.max(INTRO_STEP, current - 1))}
+          disabled={step === PUBLIC_DEMO_INTRO_STEP}
+          onClick={() => setStep((current) => Math.max(PUBLIC_DEMO_INTRO_STEP, current - 1))}
         >
           {PUBLIC_DEMO_COPY.navigation.previous}
         </button>
         <output>
-          {stepLabel(step)}（{step + 1} / {TOTAL_STEPS}画面）
+          {publicDemoStepLabel(step)}（{step + 1} / {PUBLIC_DEMO_TOTAL_STEPS}画面）
         </output>
         <button
           type="button"
-          disabled={step === SUMMARY_STEP}
-          onClick={() => setStep((current) => Math.min(SUMMARY_STEP, current + 1))}
+          disabled={step === PUBLIC_DEMO_SUMMARY_STEP}
+          onClick={() => setStep((current) => Math.min(PUBLIC_DEMO_SUMMARY_STEP, current + 1))}
         >
           {PUBLIC_DEMO_COPY.navigation.next}
         </button>

@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { ORDER_CODES } from "./conditions.js";
 
+export const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
+
 const singleLineText = z.string().min(1).max(200).refine(
   (value) => !/[\r\n]/u.test(value),
   "Line breaks are not allowed.",
@@ -101,6 +103,28 @@ const formUrlSchema = z.string().max(2_048).superRefine((value, context) => {
   }
 });
 
+const PendingFormAuditSchema = z.object({
+  status: z.literal("pending"),
+  reviewedUrl: z.literal(""),
+  reviewedAt: z.null(),
+  reviewerCount: z.literal(0),
+}).strict();
+
+const ApprovedFormAuditSchema = z.object({
+  status: z.literal("approved"),
+  reviewedUrl: formUrlSchema.refine(
+    (value) => value !== "",
+    "reviewedUrl is required for an approved form audit.",
+  ),
+  reviewedAt: z.string().datetime({ offset: true }),
+  reviewerCount: z.literal(2),
+}).strict();
+
+export const FormAuditSchema = z.discriminatedUnion("status", [
+  PendingFormAuditSchema,
+  ApprovedFormAuditSchema,
+]);
+
 export const ExperimentConfigSchema = z.object({
   schemaVersion: z.literal(1),
   protocolVersion: singleLineText,
@@ -123,6 +147,7 @@ export const ExperimentConfigSchema = z.object({
   timingMs: TimingSchema,
   device: DeviceConfigSchema,
   formUrl: formUrlSchema,
+  formAudit: FormAuditSchema,
   logging: z.object({
     directory: safeRelativeDirectory,
     includeAbortedInOrderBalancing: z.boolean(),
@@ -147,12 +172,23 @@ export const ExperimentConfigSchema = z.object({
       message: "External runtime requests are prohibited by the experiment protocol.",
     });
   }
+  if (
+    config.formAudit.status === "approved"
+    && config.formAudit.reviewedUrl !== config.formUrl
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["formAudit", "reviewedUrl"],
+      message: "reviewedUrl must exactly match formUrl.",
+    });
+  }
 });
 
 export type FixedState = Readonly<z.infer<typeof FixedStateSchema>>;
 export type TimingConfig = Readonly<z.infer<typeof TimingSchema>>;
 export type DeviceConfig = Readonly<z.infer<typeof DeviceConfigSchema>>;
 export type DeviceMode = DeviceConfig["mode"];
+export type FormAudit = Readonly<z.infer<typeof FormAuditSchema>>;
 
 type ParsedExperimentConfig = z.infer<typeof ExperimentConfigSchema>;
 

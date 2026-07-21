@@ -48,7 +48,7 @@ function newSession(): Session {
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
     deviceMode: "mock",
     configHash: "a".repeat(64),
-    protocolVersion: "R8-010-2x2-mock-v2",
+    protocolVersion: "R8-010-2x2-mock-v3",
     wallClockIso: iso(0),
     monotonicMs: 0,
     consentConfirmed: true,

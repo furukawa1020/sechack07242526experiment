@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -9,7 +11,9 @@ import { createRelease, parseCreateReleaseArguments } from "../../../scripts/cre
 import {
   createReleaseManifest,
   RELEASE_MANIFEST_NAME,
+  sha256ReleaseManifest,
   verifyReleaseDirectory,
+  verifyReleaseDirectoryDetailed,
   writeReleaseManifest,
   type ReleaseManifest,
 } from "../../../scripts/release-manifest.js";
@@ -23,8 +27,14 @@ interface ConfigOverrides {
   readonly allowExternalRuntimeRequests?: boolean;
 }
 
+const execFileAsync = promisify(execFile);
+const SYNTHETIC_SOURCE_COMMIT = "1".repeat(40);
+const SYNTHETIC_SOURCE_REPOSITORY = "https://github.com/example/sechack-release-fixture.git";
+const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
+
 function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
   const mode = overrides.mode ?? "serial";
+  const formUrl = overrides.formUrl ?? STUDY_FORM_URL;
   return {
     schemaVersion: 1,
     protocolVersion: "release-test-v1",
@@ -49,7 +59,15 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
       ackTimeout: 1_000,
       allowMockInProduction: overrides.allowMockInProduction ?? false,
     },
-    formUrl: overrides.formUrl ?? "https://docs.google.com/forms/d/example/viewform",
+    formUrl,
+    formAudit: {
+      status: "GO",
+      protocolVersion: "release-test-v1",
+      formUrl,
+      auditedOn: new Date().toISOString().slice(0, 10),
+      contentSha256: "c".repeat(64),
+      twoPersonVerified: true,
+    },
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -73,6 +91,15 @@ async function writeRelative(root: string, path: string, contents: string): Prom
   const destination = join(root, ...path.split("/"));
   await mkdir(dirname(destination), { recursive: true });
   await writeFile(destination, contents, "utf8");
+}
+
+async function runGit(root: string, arguments_: readonly string[]): Promise<string> {
+  const result = await execFileAsync("git", arguments_, {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return result.stdout.trim();
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -116,6 +143,8 @@ async function createManifestFixture(): Promise<{
     protocolVersion: "release-test-v1",
     configHash: "a".repeat(64),
     configFileHash: "b".repeat(64),
+    sourceCommit: SYNTHETIC_SOURCE_COMMIT,
+    sourceRepository: SYNTHETIC_SOURCE_REPOSITORY,
   });
   await writeReleaseManifest(root, manifest);
   return { root, manifest };
@@ -123,6 +152,7 @@ async function createManifestFixture(): Promise<{
 
 async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<string> {
   const root = await newTemporaryRoot("sechack-release-");
+  await writeRelative(root, ".gitignore", "release/\n");
   await writeRelative(root, "config/site-production.json", JSON.stringify(configSource(overrides)));
   await writeRelative(root, "config/experiment.e2e.json", "must not be released");
   await writeRelative(root, "data/sessions/synthetic.jsonl", "must not be released");
@@ -174,6 +204,12 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
   // Intentionally not a usable lockfile: release creation can only succeed when
   // installDependencies:false really avoids npm and all external resolution.
   await writeRelative(root, "package-lock.json", "synthetic offline lockfile\n");
+  await runGit(root, ["init", "--quiet"]);
+  await runGit(root, ["config", "user.name", "Release Fixture"]);
+  await runGit(root, ["config", "user.email", "release-fixture@example.invalid"]);
+  await runGit(root, ["add", "--all"]);
+  await runGit(root, ["commit", "--quiet", "-m", "Create release fixture"]);
+  await runGit(root, ["remote", "add", "origin", SYNTHETIC_SOURCE_REPOSITORY]);
   return root;
 }
 

@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { verifyReleaseDirectory } from "./release-manifest.js";
+import { verifyReleaseDirectoryDetailed } from "./release-manifest.js";
 
 export interface RunReleaseVerificationOptions {
   readonly directory?: string;
@@ -13,13 +13,22 @@ export async function runReleaseVerification(
 ): Promise<number> {
   const writeLine = options.writeLine ?? console.info;
   const directory = resolve(options.directory ?? process.cwd());
-  const errors = await verifyReleaseDirectory(directory);
-  if (errors.length === 0) {
+  const verification = await verifyReleaseDirectoryDetailed(directory);
+  if (verification.manifestSha256 !== null) {
+    writeLine(`Deployment manifest SHA-256: ${verification.manifestSha256}`);
+  }
+  if (verification.sourceCommit !== null) {
+    writeLine(`Source commit: ${verification.sourceCommit}`);
+  }
+  if (verification.sourceRepository !== undefined) {
+    writeLine(`Source repository: ${verification.sourceRepository}`);
+  }
+  if (verification.errors.length === 0) {
     writeLine(`結果: PASS (${directory})`);
     return 0;
   }
-  writeLine(`結果: FAIL (${errors.length}件)`);
-  for (const error of errors) writeLine(`  [FAIL] ${error}`);
+  writeLine(`結果: FAIL (${verification.errors.length}件)`);
+  for (const error of verification.errors) writeLine(`  [FAIL] ${error}`);
   return 1;
 }
 

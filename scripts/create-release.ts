@@ -17,11 +17,23 @@ import { pathToFileURL } from "node:url";
 import { collectPreflightReport } from "./preflight.js";
 import {
   createReleaseManifest,
-  verifyReleaseDirectory,
+  isCredentialFreeSourceRepository,
+  verifyReleaseDirectoryDetailed,
   writeReleaseManifest,
 } from "./release-manifest.js";
 
 const DEFAULT_CONFIG_PATH = "config/experiment.json";
+const MAX_GIT_OUTPUT_BYTES = 1024 * 1024;
+
+interface SourceProvenance {
+  readonly sourceCommit: string;
+  readonly sourceRepository?: string;
+}
+
+interface GitCommandResult {
+  readonly exitCode: number;
+  readonly stdout: string;
+}
 
 export interface CreateReleaseArguments {
   readonly configPath?: string;
@@ -44,6 +56,103 @@ function usage(): readonly string[] {
     "",
     "The config must pass every production preflight gate. Existing output is never overwritten.",
   ]);
+}
+
+async function runGit(
+  rootDirectory: string,
+  arguments_: readonly string[],
+): Promise<GitCommandResult> {
+  return new Promise<GitCommandResult>((resolveCommand, rejectCommand) => {
+    const child = spawn("git", arguments_, {
+      cwd: rootDirectory,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let tooLarge = false;
+    let settled = false;
+    const rejectOnce = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      rejectCommand(error);
+    };
+    child.stdout.on("data", (chunk: Buffer) => {
+      bytes += chunk.byteLength;
+      if (bytes > MAX_GIT_OUTPUT_BYTES) {
+        tooLarge = true;
+        child.kill();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    // Drain stderr without retaining it: remote URLs or local paths must never be
+    // copied into an error message.
+    child.stderr.resume();
+    child.once("error", () => rejectOnce(new Error("Git could not be started.")));
+    child.once("close", (code) => {
+      if (settled) return;
+      if (tooLarge) {
+        rejectOnce(new Error("Git returned more output than the release safety limit."));
+        return;
+      }
+      settled = true;
+      resolveCommand({
+        exitCode: code ?? 1,
+        stdout: Buffer.concat(chunks).toString("utf8").trim(),
+      });
+    });
+  });
+}
+
+function samePath(left: string, right: string): boolean {
+  return process.platform === "win32"
+    ? left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US")
+    : left === right;
+}
+
+async function collectSourceProvenance(rootDirectory: string): Promise<SourceProvenance> {
+  const topLevelResult = await runGit(rootDirectory, ["rev-parse", "--show-toplevel"]);
+  if (topLevelResult.exitCode !== 0 || topLevelResult.stdout.length === 0) {
+    throw new Error("Release source must be a Git worktree with at least one commit.");
+  }
+  const [actualRoot, gitRoot] = await Promise.all([
+    realpath(rootDirectory),
+    realpath(topLevelResult.stdout),
+  ]);
+  if (!samePath(actualRoot, gitRoot)) {
+    throw new Error("Release source directory must be the Git worktree root.");
+  }
+
+  const commitResult = await runGit(rootDirectory, ["rev-parse", "--verify", "HEAD^{commit}"]);
+  if (commitResult.exitCode !== 0 || !/^[a-f0-9]{40}$/u.test(commitResult.stdout)) {
+    throw new Error("Release source must have a full 40-character Git commit ID.");
+  }
+  const statusResult = await runGit(rootDirectory, [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--ignore-submodules=none",
+  ]);
+  if (statusResult.exitCode !== 0) {
+    throw new Error("Git worktree status could not be checked.");
+  }
+  if (statusResult.stdout.length > 0) {
+    throw new Error(
+      "Release source worktree must be clean; commit, stash, or remove all tracked and untracked changes.",
+    );
+  }
+
+  const remoteResult = await runGit(rootDirectory, ["remote", "get-url", "origin"]);
+  const sourceRepository =
+    remoteResult.exitCode === 0 && isCredentialFreeSourceRepository(remoteResult.stdout)
+      ? remoteResult.stdout
+      : undefined;
+  return Object.freeze({
+    sourceCommit: commitResult.stdout,
+    ...(sourceRepository === undefined ? {} : { sourceRepository }),
+  });
 }
 
 function readOptionValue(args: readonly string[], index: number, name: string): string {
@@ -237,6 +346,7 @@ async function installProductionDependencies(directory: string): Promise<void> {
 export async function createRelease(options: CreateReleaseOptions = {}): Promise<string> {
   const writeLine = options.writeLine ?? console.info;
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
+  const sourceProvenance = await collectSourceProvenance(rootDirectory);
   const releaseRoot = resolve(rootDirectory, "release");
   const configPath = options.configPath ?? DEFAULT_CONFIG_PATH;
   const report = await collectPreflightReport({
@@ -290,6 +400,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     throw new Error("release/ must be a normal directory inside the repository root.");
   }
   const stagingDirectory = resolve(releaseRoot, `.staging-${randomUUID()}`);
+  let manifestSha256: string | null = null;
   await mkdir(stagingDirectory, { recursive: false });
   try {
     await copyDirectoryWithoutMaps(
@@ -352,16 +463,35 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       await installProductionDependencies(stagingDirectory);
     }
 
+    const finalProvenance = await collectSourceProvenance(rootDirectory);
+    if (
+      finalProvenance.sourceCommit !== sourceProvenance.sourceCommit
+      || finalProvenance.sourceRepository !== sourceProvenance.sourceRepository
+    ) {
+      throw new Error("Git source provenance changed while the release was being generated.");
+    }
+
     const manifest = await createReleaseManifest(stagingDirectory, {
       appVersion,
       protocolVersion: report.protocolVersion,
       configHash: report.configHash,
       configFileHash: report.configFileHash,
+      sourceCommit: sourceProvenance.sourceCommit,
+      ...(sourceProvenance.sourceRepository === undefined
+        ? {}
+        : { sourceRepository: sourceProvenance.sourceRepository }),
     });
     await writeReleaseManifest(stagingDirectory, manifest);
-    const verificationErrors = await verifyReleaseDirectory(stagingDirectory);
-    if (verificationErrors.length > 0) {
-      throw new Error(`Generated release failed verification: ${verificationErrors.join("; ")}`);
+    const verification = await verifyReleaseDirectoryDetailed(stagingDirectory);
+    manifestSha256 = verification.manifestSha256;
+    if (verification.errors.length > 0) {
+      throw new Error(`Generated release failed verification: ${verification.errors.join("; ")}`);
+    }
+    if (
+      manifestSha256 === null
+      || verification.sourceCommit !== sourceProvenance.sourceCommit
+    ) {
+      throw new Error("Generated release provenance could not be verified.");
     }
     await rename(stagingDirectory, outputDirectory);
   } catch (error) {
@@ -376,6 +506,11 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
 
   writeLine(`Release created: ${outputDirectory}`);
   writeLine(`Config SHA-256: ${report.configHash}`);
+  writeLine(`Source commit: ${sourceProvenance.sourceCommit}`);
+  if (sourceProvenance.sourceRepository !== undefined) {
+    writeLine(`Source repository: ${sourceProvenance.sourceRepository}`);
+  }
+  writeLine(`Deployment manifest SHA-256: ${String(manifestSha256)}`);
   writeLine("Next: run VERIFY_RELEASE.cmd, then START_PRODUCTION.cmd.");
   return outputDirectory;
 }

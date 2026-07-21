@@ -13,12 +13,13 @@ import {
   formatConfigError,
   isResearchIdValid,
   parseExperimentConfig,
+  STUDY_FORM_URL,
 } from "../../../src/shared/schemas.js";
 
 function validConfig(): Record<string, unknown> {
   return {
     schemaVersion: 1,
-    protocolVersion: "R8-010-2x2-mock-v2",
+    protocolVersion: "R8-010-2x2-mock-v3",
     studyTitle: "身体状態の提示実験",
     bindHost: "127.0.0.1",
     port: 4173,
@@ -41,6 +42,12 @@ function validConfig(): Record<string, unknown> {
       allowMockInProduction: false,
     },
     formUrl: "",
+    formAudit: {
+      status: "pending",
+      reviewedUrl: "",
+      reviewedAt: null,
+      reviewerCount: 0,
+    },
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -56,6 +63,7 @@ describe("experiment config schema", () => {
     expect(Object.isFrozen(config)).toBe(true);
     expect(Object.isFrozen(config.fixedState)).toBe(true);
     expect(Object.isFrozen(config.orders)).toBe(true);
+    expect(Object.isFrozen(config.formAudit)).toBe(true);
     expect(isResearchIdValid(config, "SH26-001")).toBe(true);
     expect(isResearchIdValid(config, "SH26-01")).toBe(false);
     expect(isResearchIdValid(config, "SH26-001\nmail@example.test")).toBe(false);
@@ -105,6 +113,50 @@ describe("experiment config schema", () => {
       .toThrow(/regular expression/iu);
   });
 
+  it("accepts only internally consistent pending or two-person approved form audits", () => {
+    const approved = parseExperimentConfig({
+      ...validConfig(),
+      formUrl: STUDY_FORM_URL,
+      formAudit: {
+        status: "approved",
+        reviewedUrl: STUDY_FORM_URL,
+        reviewedAt: "2026-07-21T12:00:00+09:00",
+        reviewerCount: 2,
+      },
+    });
+    expect(approved.formAudit.status).toBe("approved");
+
+    expect(() => parseExperimentConfig({
+      ...validConfig(),
+      formAudit: {
+        status: "pending",
+        reviewedUrl: "",
+        reviewedAt: null,
+        reviewerCount: 2,
+      },
+    })).toThrow(/reviewerCount/iu);
+    expect(() => parseExperimentConfig({
+      ...validConfig(),
+      formUrl: STUDY_FORM_URL,
+      formAudit: {
+        status: "approved",
+        reviewedUrl: "https://docs.google.com/forms/d/e/different/viewform",
+        reviewedAt: "2026-07-21T12:00:00+09:00",
+        reviewerCount: 2,
+      },
+    })).toThrow(/exactly match formUrl/iu);
+    expect(() => parseExperimentConfig({
+      ...validConfig(),
+      formUrl: STUDY_FORM_URL,
+      formAudit: {
+        status: "approved",
+        reviewedUrl: STUDY_FORM_URL,
+        reviewedAt: "2026-07-21",
+        reviewerCount: 2,
+      },
+    })).toThrow(/formAudit\.reviewedAt/iu);
+  });
+
   it("formats validation errors without exposing an exception object", () => {
     const parsed = ExperimentConfigSchema.safeParse({});
     expect(parsed.success).toBe(false);
@@ -119,7 +171,7 @@ describe("experiment config schema", () => {
 describe("config file loading", () => {
   it("loads the repository config and returns a stable SHA-256", async () => {
     const loaded = await loadExperimentConfig();
-    expect(loaded.config.protocolVersion).toBe("R8-010-2x2-mock-v2");
+    expect(loaded.config.protocolVersion).toBe("R8-010-2x2-mock-v3");
     expect(loaded.configHash).toMatch(/^[a-f0-9]{64}$/u);
     expect(hashExperimentConfig(loaded.config)).toBe(loaded.configHash);
   });

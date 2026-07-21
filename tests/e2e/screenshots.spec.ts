@@ -133,11 +133,70 @@ async function expectRenderedLineCount(locator: Locator, expected: number): Prom
   expect(lineCount).toBe(expected);
 }
 
-async function expectHeadingInUpperLeftReadingArea(locator: Locator): Promise<void> {
-  const box = await locator.boundingBox();
-  expect(box).not.toBeNull();
-  expect(box?.x).toBeLessThan(160);
-  expect(box?.y).toBeLessThan(160);
+async function expectParticipantSurfaceFillsViewport(page: Page): Promise<void> {
+  const geometry = await page.getByTestId("participant-app").evaluate((element) => {
+    const surface = element.getBoundingClientRect();
+    const footerElement = element.querySelector<HTMLElement>(".participant-footer");
+    const footer = footerElement?.getBoundingClientRect();
+    const sceneElement = [...element.children]
+      .find((child): child is HTMLElement => child instanceof HTMLElement && child !== footerElement);
+    const scene = sceneElement?.getBoundingClientRect();
+    return {
+      footerBottom: footer?.bottom ?? null,
+      footerTop: footer?.top ?? null,
+      height: surface.height,
+      left: surface.left,
+      sceneBottom: scene?.bottom ?? null,
+      sceneLeft: scene?.left ?? null,
+      sceneTop: scene?.top ?? null,
+      sceneWidth: scene?.width ?? null,
+      top: surface.top,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
+      width: surface.width,
+    };
+  });
+
+  expect(geometry.left).toBeCloseTo(0, 1);
+  expect(geometry.top).toBeCloseTo(0, 1);
+  expect(geometry.width).toBeCloseTo(geometry.viewportWidth, 1);
+  expect(geometry.height).toBeCloseTo(geometry.viewportHeight, 1);
+  expect(geometry.footerBottom).toBeCloseTo(geometry.viewportHeight, 1);
+  expect(geometry.sceneLeft).toBeCloseTo(0, 1);
+  expect(geometry.sceneTop).toBeCloseTo(0, 1);
+  expect(geometry.sceneWidth).toBeCloseTo(geometry.viewportWidth, 1);
+  expect(geometry.sceneBottom).toBeCloseTo(geometry.footerTop ?? Number.NaN, 1);
+}
+
+async function expectChildrenCenteredWithin(
+  container: Locator,
+  childSelector: string,
+  axes: Readonly<{ horizontal: boolean; vertical: boolean }> = {
+    horizontal: true,
+    vertical: true,
+  },
+): Promise<void> {
+  const geometry = await container.evaluate((element, selector) => {
+    const children = [...element.querySelectorAll<HTMLElement>(selector)]
+      .map((child) => child.getBoundingClientRect())
+      .filter((rect) => rect.width > 0 && rect.height > 0);
+    if (children.length === 0) throw new Error(`No visible centered content matched ${selector}`);
+
+    const bounds = element.getBoundingClientRect();
+    const content = {
+      bottom: Math.max(...children.map((rect) => rect.bottom)),
+      left: Math.min(...children.map((rect) => rect.left)),
+      right: Math.max(...children.map((rect) => rect.right)),
+      top: Math.min(...children.map((rect) => rect.top)),
+    };
+    return {
+      horizontalDelta: (content.left + content.right - bounds.left - bounds.right) / 2,
+      verticalDelta: (content.top + content.bottom - bounds.top - bounds.bottom) / 2,
+    };
+  }, childSelector);
+
+  if (axes.horizontal) expect(Math.abs(geometry.horizontalDelta)).toBeLessThanOrEqual(2);
+  if (axes.vertical) expect(Math.abs(geometry.verticalDelta)).toBeLessThanOrEqual(2);
 }
 
 test("主要画面の承認用スクリーンショットを生成する", async ({ page, request }) => {
@@ -184,21 +243,30 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await expect(introHeading).toBeVisible();
     await expect(page.locator(".message-eyebrow")).toHaveCount(0);
     await expectRenderedLineCount(introHeading, 1);
-    await expectHeadingInUpperLeftReadingArea(introHeading);
+    await expectParticipantSurfaceFillsViewport(page);
+    await expectChildrenCenteredWithin(page.locator(".participant-intro"), ":scope > .intro-card");
+    await expect(page.locator(".intro-card")).toHaveCSS("text-align", "center");
     await capture(page, `participant-intro-${viewport.label}`);
 
     await sessionAction(request, labelSession.id, "start");
     await expect(page.getByTestId("participant-app")).toHaveAttribute("data-phase", "result", {
       timeout: 5_000,
     });
+    await expectParticipantSurfaceFillsViewport(page);
+    await expectChildrenCenteredWithin(page.locator(".label-result"), ":scope > *");
     await capture(page, `participant-label-result-${viewport.label}`);
     const summaryHeading = page.getByRole("heading", { name: "4つの提示は終了しました" });
     await expect(summaryHeading).toBeVisible({
       timeout: 15_000,
     });
     await expect(page.locator(".message-eyebrow")).toHaveCount(0);
-    await expectHeadingInUpperLeftReadingArea(summaryHeading);
     await expect(page.getByRole("img", { name: "Googleフォームを開くQRコード" })).toBeVisible();
+    await expectParticipantSurfaceFillsViewport(page);
+    await expectChildrenCenteredWithin(
+      page.locator(".participant-summary"),
+      ":scope > *",
+      { horizontal: false, vertical: true },
+    );
     await capture(page, `participant-summary-${viewport.label}`);
     await sessionAction(request, labelSession.id, "confirm-form-complete");
     await operatorPage.close();
@@ -218,6 +286,8 @@ test("主要画面の承認用スクリーンショットを生成する", async
       timeout: 5_000,
     });
     await expectRenderedLineCount(page.locator(".puffer-result > p"), 2);
+    await expectParticipantSurfaceFillsViewport(page);
+    await expectChildrenCenteredWithin(page.locator(".puffer-result"), ":scope > *");
     await capture(page, `participant-puffer-result-${viewport.label}`);
     await sessionAction(request, pufferSession.id, "abort");
     await pufferOperatorPage.close();
