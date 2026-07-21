@@ -6,6 +6,20 @@ import { defineConfig, type Plugin } from "vite";
 const projectRoot = import.meta.dirname;
 const publicDemoRoot = resolve(projectRoot, "public-demo");
 const publicDemoSourceSegment = "/src/client/public-demo/";
+const publicDemoHtmlInputs = Object.freeze({
+  index: resolve(publicDemoRoot, "index.html"),
+  operator: resolve(publicDemoRoot, "operator", "index.html"),
+  displayDemo: resolve(publicDemoRoot, "display", "demo", "index.html"),
+  deviceTest: resolve(publicDemoRoot, "device-test", "index.html"),
+  healthz: resolve(publicDemoRoot, "healthz", "index.html"),
+});
+const expectedHtmlArtifacts = new Set([
+  "index.html",
+  "operator/index.html",
+  "display/demo/index.html",
+  "device-test/index.html",
+  "healthz/index.html",
+]);
 const forbiddenSourcePatterns = [
   { label: "network API", pattern: /fetch\s*\(|XMLHttpRequest|\bWebSocket\b|EventSource|sendBeacon/u },
   { label: "browser persistence", pattern: /localStorage|sessionStorage|document\.cookie/iu },
@@ -25,6 +39,7 @@ const forbiddenArtifactPatterns = [
 function verifyPublicDemoArtifact(): Plugin {
   return {
     name: "verify-public-demo-artifact",
+    enforce: "post",
     transform(source, id) {
       const normalizedId = id.replaceAll("\\", "/").split("?", 1)[0] ?? id;
       if (!normalizedId.includes(publicDemoSourceSegment)) return null;
@@ -41,7 +56,7 @@ function verifyPublicDemoArtifact(): Plugin {
         if (fileName.endsWith(".map")) {
           throw new Error(`Source map is forbidden in the public demo artifact: ${fileName}`);
         }
-        if (fileName !== "index.html" && !fileName.startsWith("assets/")) {
+        if (!expectedHtmlArtifacts.has(fileName) && !fileName.startsWith("assets/")) {
           throw new Error(`Unexpected public demo artifact: ${fileName}`);
         }
 
@@ -59,6 +74,12 @@ function verifyPublicDemoArtifact(): Plugin {
           }
         }
       }
+
+      for (const expectedHtml of expectedHtmlArtifacts) {
+        if (!(expectedHtml in bundle)) {
+          throw new Error(`Required public review route is missing: ${expectedHtml}`);
+        }
+      }
     },
   };
 }
@@ -73,7 +94,7 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     rollupOptions: {
-      input: resolve(publicDemoRoot, "index.html"),
+      input: publicDemoHtmlInputs,
     },
   },
 });
