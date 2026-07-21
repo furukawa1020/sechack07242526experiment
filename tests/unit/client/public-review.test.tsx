@@ -54,6 +54,10 @@ describe("public review routes", () => {
     fireEvent.click(within(operator.container).getByRole("button", { name: "第1提示" }));
 
     expect(within(display.container).getByText("第1提示 / 4")).toBeInTheDocument();
+    expect(within(display.container).getByRole("main", {
+      name: "読み取り専用の参加者表示レビュー",
+    })).toBeInTheDocument();
+    expect(display.container.querySelectorAll("main")).toHaveLength(1);
     expect(within(display.container).getByText("クラウド", { exact: true })).toBeInTheDocument();
     expect(within(display.container).queryByRole("button")).not.toBeInTheDocument();
     expect(within(display.container).queryByRole("link")).not.toBeInTheDocument();

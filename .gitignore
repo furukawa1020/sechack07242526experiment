@@ -1,5 +1,7 @@
 node_modules/
 .venv-deploy/
+**/__pycache__/
+*.py[cod]
 dist/
 dist-public-demo/
 dist-server/

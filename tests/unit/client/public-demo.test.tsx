@@ -221,6 +221,7 @@ describe("public demo", () => {
       expect(stage).toHaveAttribute("data-rehearsal-phase", "handling");
       advance(1);
       expect(stage).toHaveAttribute("data-rehearsal-phase", "processing");
+      expect(document.querySelector(".public-demo-rehearsal-spinner")).toBeNull();
       advance(3_000);
       expect(stage).toHaveAttribute("data-rehearsal-phase", "result");
       advance(15_000);

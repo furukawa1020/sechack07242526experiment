@@ -11,7 +11,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { collectPreflightReport, type PreflightReport } from "./preflight.js";
@@ -50,6 +50,8 @@ export interface CreateReleaseOptions {
   readonly configPath?: string;
   readonly outputPath?: string;
   readonly releaseKind?: ReleaseKind;
+  /** Tests may reuse synthetic build fixtures; the CLI always rebuilds before sealing. */
+  readonly buildArtifacts?: boolean;
   /** Tests may disable dependency installation; the CLI always installs production dependencies. */
   readonly installDependencies?: boolean;
   readonly writeLine?: (line: string) => void;
@@ -279,12 +281,14 @@ async function runtimePackageJson(
           preflight: "node dist-server/preflight.js",
           healthcheck: "node dist-server/healthcheck.js",
           "release:verify": "node dist-server/verify-release.js",
-          start: "node dist-server/index.js",
+          start:
+            "node dist-server/verify-release.js && node dist-server/preflight.js && node dist-server/index.js",
         }
       : {
           healthcheck: "node dist-server/healthcheck.js --config config/experiment.mock-rehearsal.json",
           "release:verify": "node dist-server/verify-release.js",
-          start: "node dist-server/rehearsal.js",
+          start:
+            "node dist-server/verify-release.js && node dist-server/rehearsal.js --mock-rehearsal",
         };
   const output = {
     ...source,
@@ -348,7 +352,7 @@ function mockRehearsalWindowsLaunchers(
       `start "" /b powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "$operator='${operatorUrl}'; 1..60 | ForEach-Object { & node 'dist-server\\healthcheck.js' --config 'config\\experiment.mock-rehearsal.json' *> $null; if ($LASTEXITCODE -eq 0) { Start-Process $operator; exit 0 }; Start-Sleep -Milliseconds 500 }; exit 1"`,
       "echo Mock rehearsal starts without a physical device. Keep this window open.",
       "echo Press Ctrl+C once here to run the safe STOP/DEFLATE shutdown path.",
-      "node dist-server\\rehearsal.js",
+      "node dist-server\\rehearsal.js --mock-rehearsal",
       "exit /b %errorlevel%",
     ],
     "CHECK_MOCK_HEALTH.cmd": [
@@ -434,6 +438,35 @@ async function installProductionDependencies(directory: string): Promise<void> {
   });
 }
 
+async function buildReleaseArtifacts(rootDirectory: string): Promise<void> {
+  await new Promise<void>((resolveBuild, rejectBuild) => {
+    const child =
+      process.platform === "win32"
+        ? spawn("npm.cmd run build", [], {
+            cwd: rootDirectory,
+            shell: true,
+            stdio: "inherit",
+          })
+        : spawn("npm", ["run", "build"], {
+            cwd: rootDirectory,
+            shell: false,
+            stdio: "inherit",
+          });
+    child.once("error", rejectBuild);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolveBuild();
+        return;
+      }
+      rejectBuild(
+        new Error(
+          `Release build failed (${signal === null ? `exit ${String(code)}` : `signal ${signal}`}).`,
+        ),
+      );
+    });
+  });
+}
+
 export async function createRelease(options: CreateReleaseOptions = {}): Promise<string> {
   const writeLine = options.writeLine ?? console.info;
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
@@ -458,6 +491,18 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     assertMockRehearsalReleaseConfig(report, rootDirectory);
   }
 
+  if (options.buildArtifacts ?? true) {
+    writeLine("Building release artifacts from the recorded clean source commit...");
+    await buildReleaseArtifacts(rootDirectory);
+    const postBuildProvenance = await collectSourceProvenance(rootDirectory);
+    if (
+      postBuildProvenance.sourceCommit !== sourceProvenance.sourceCommit ||
+      postBuildProvenance.sourceRepository !== sourceProvenance.sourceRepository
+    ) {
+      throw new Error("Git source provenance changed while release artifacts were built.");
+    }
+  }
+
   const packageSource = JSON.parse(
     await readFile(resolve(rootDirectory, "package.json"), "utf8"),
   ) as unknown;
@@ -476,9 +521,9 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     options.outputPath === undefined
       ? resolve(releaseRoot, defaultName)
       : resolve(rootDirectory, options.outputPath);
-  if (!isInside(releaseRoot, outputDirectory)) {
+  if (!isInside(releaseRoot, outputDirectory) || dirname(outputDirectory) !== releaseRoot) {
     throw new Error(
-      `Release output must be a child directory of release/ (resolved: ${relative(releaseRoot, outputDirectory)}).`,
+      `Release output must be a direct child directory of release/ (resolved: ${relative(releaseRoot, outputDirectory)}).`,
     );
   }
 
@@ -500,6 +545,12 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   ]);
   if (releaseRootStat.isSymbolicLink() || !isInside(realRootDirectory, realReleaseRoot)) {
     throw new Error("release/ must be a normal directory inside the repository root.");
+  }
+  try {
+    await lstat(outputDirectory);
+    throw new Error(`Release output already exists: ${outputDirectory}`);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
   }
   const stagingDirectory = resolve(releaseRoot, `.staging-${randomUUID()}`);
   let manifestSha256: string;

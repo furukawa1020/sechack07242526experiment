@@ -370,26 +370,11 @@ output {
 }
 
 .public-demo-rehearsal-status p {
-  margin: 26px 0 0;
+  margin: 0;
   color: #3f4e63;
   font-size: clamp(24px, 2vw, 34px);
   font-weight: 800;
   line-height: 1.55;
-}
-
-.public-demo-rehearsal-spinner {
-  width: 66px;
-  aspect-ratio: 1;
-  border: 6px solid #d8e1ed;
-  border-top-color: #557ba8;
-  border-radius: 50%;
-  animation: public-demo-processing-spin 1s linear infinite;
-}
-
-@keyframes public-demo-processing-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .public-demo-rehearsal-reset {
@@ -437,7 +422,7 @@ output {
   border-top: 1px solid #d8dde6;
   color: #566176;
   background: #fff;
-  font-size: clamp(12px, 0.92vw, 15px);
+  font-size: clamp(16px, 1.1vw, 18px);
 }
 
 .public-demo-participant-footer strong {
@@ -1132,7 +1117,7 @@ output {
     display: grid;
     gap: 7px;
     padding: 16px 18px;
-    font-size: 13px;
+    font-size: 16px;
     line-height: 1.5;
     text-align: center;
   }
@@ -1266,5 +1251,21 @@ output {
   .public-review-health a {
     width: 100%;
     min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-demo-puffer[data-puffer-motion="inflating"] {
+    animation: none;
+    transform: scale(1);
+  }
+
+  .public-demo-puffer[data-puffer-motion="deflating"] {
+    animation: none;
+    transform: scale(0.62);
+  }
+
+  .public-review-device-figure::before {
+    transition: none;
   }
 }

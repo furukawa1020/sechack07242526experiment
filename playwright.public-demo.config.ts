@@ -1,6 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PUBLIC_DEMO_ORIGIN = "http://127.0.0.1:4180";
+const PUBLIC_DEMO_PORT = Number.parseInt(process.env.PUBLIC_DEMO_PORT ?? "4180", 10);
+if (!Number.isInteger(PUBLIC_DEMO_PORT) || PUBLIC_DEMO_PORT < 1 || PUBLIC_DEMO_PORT > 65_535) {
+  throw new Error("PUBLIC_DEMO_PORT must be an integer between 1 and 65535.");
+}
+const PUBLIC_DEMO_ORIGIN = `http://127.0.0.1:${String(PUBLIC_DEMO_PORT)}`;
 
 export default defineConfig({
   testDir: "./tests/public-demo",

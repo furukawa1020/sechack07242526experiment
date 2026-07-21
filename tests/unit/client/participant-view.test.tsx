@@ -261,8 +261,10 @@ describe("participant presentation invariants", () => {
       summary,
       formUrl: null,
     })} />);
-    expect(screen.getByText(UI_COPY.rehearsal.summary)).toBeInTheDocument();
-    expect(screen.queryByText(UI_COPY.summary.body)).not.toBeInTheDocument();
+    expect(view.container.querySelector(".summary-heading")).toHaveTextContent(
+      UI_COPY.rehearsal.summary.replace("\n", " "),
+    );
+    expect(view.container).not.toHaveTextContent("お手元のGoogleフォームへ戻り");
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(view.container).not.toHaveTextContent("Googleフォームへ戻り");
 

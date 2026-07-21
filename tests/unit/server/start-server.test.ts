@@ -47,6 +47,7 @@ async function createRehearsalFixture(overrides: {
   readonly allowMockInProduction?: boolean;
   readonly formUrl?: string;
   readonly loggingDirectory?: string;
+  readonly researchIdPattern?: string;
 } = {}): Promise<string> {
   const source = record(JSON.parse(
     await readFile(resolve("config", "experiment.e2e.json"), "utf8"),
@@ -71,7 +72,7 @@ async function createRehearsalFixture(overrides: {
     join(root, "config", "rehearsal.json"),
     `${JSON.stringify({
       ...source,
-      researchIdPattern: "^DEMO-[0-9]{3}$",
+      researchIdPattern: overrides.researchIdPattern ?? "^DEMO-[0-9]{3}$",
       bindHost: overrides.bindHost ?? "127.0.0.1",
       port: await reservePort(),
       timingMs: {
@@ -236,5 +237,12 @@ describe("startServer production safeguards", () => {
       configPath: "config/rehearsal.json",
       mode: "rehearsal",
     })).rejects.toThrow(/isolated data\/mock-sessions log directory/iu);
+
+    const idRoot = await createRehearsalFixture({ researchIdPattern: "^SH26-[0-9]{3}$" });
+    await expect(startServer({
+      rootDirectory: idRoot,
+      configPath: "config/rehearsal.json",
+      mode: "rehearsal",
+    })).rejects.toThrow(/DEMO-001 research ID format/iu);
   });
 });

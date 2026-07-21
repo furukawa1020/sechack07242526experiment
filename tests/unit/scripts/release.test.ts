@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createRelease, parseCreateReleaseArguments } from "../../../scripts/create-release.js";
 import {
   createReleaseManifest,
+  isCredentialFreeSourceRepository,
   RELEASE_MANIFEST_NAME,
   sha256ReleaseManifest,
   verifyReleaseDirectory,
@@ -28,6 +29,7 @@ interface ConfigOverrides {
   readonly formUrl?: string;
   readonly loggingDirectory?: string;
   readonly allowExternalRuntimeRequests?: boolean;
+  readonly researchIdPattern?: string;
 }
 
 const execFileAsync = promisify(execFile);
@@ -45,7 +47,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     studyTitle: "リリース合成設定",
     bindHost: overrides.bindHost ?? "127.0.0.1",
     port: 4173,
-    researchIdPattern: "^TEST-[0-9]{3}$",
+    researchIdPattern: overrides.researchIdPattern ?? "^TEST-[0-9]{3}$",
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
     timingMs: {
@@ -90,9 +92,9 @@ function mockRehearsalConfigSource(overrides: ConfigOverrides = {}): Record<stri
       serialPath: "",
       formUrl: "",
       loggingDirectory: "./data/mock-sessions",
+      researchIdPattern: "^DEMO-[0-9]{3}$",
       ...overrides,
     }),
-    researchIdPattern: "^DEMO-[0-9]{3}$",
     formAudit: {
       status: "NO-GO",
       protocolVersion: "release-test-v1",
@@ -298,6 +300,15 @@ describe("release argument validation", () => {
 });
 
 describe("deployment manifest verification", () => {
+  it("accepts only credential-free Git repository URLs", () => {
+    expect(isCredentialFreeSourceRepository("https://github.com/example/project.git")).toBe(true);
+    expect(isCredentialFreeSourceRepository("git@github.com:example/project.git")).toBe(true);
+    expect(isCredentialFreeSourceRepository("ssh://git@github.com/example/project.git")).toBe(true);
+    expect(isCredentialFreeSourceRepository("ssh://alice@github.com/example/project.git")).toBe(false);
+    expect(isCredentialFreeSourceRepository("git://alice@github.com/example/project.git")).toBe(false);
+    expect(isCredentialFreeSourceRepository("https://alice@github.com/example/project.git")).toBe(false);
+  });
+
   it("creates a sorted manifest and verifies an unchanged release", async () => {
     const { root, manifest } = await createManifestFixture();
     expect(manifest.schemaVersion).toBe(2);
@@ -433,6 +444,7 @@ describe("release creation", () => {
         rootDirectory: root,
         configPath: "config/site-production.json",
         outputPath: "release/dirty",
+        buildArtifacts: false,
         installDependencies: false,
         writeLine: () => undefined,
       }),
@@ -460,6 +472,7 @@ describe("release creation", () => {
         rootDirectory: root,
         configPath: "config/site-production.json",
         outputPath: "release/rejected",
+        buildArtifacts: false,
         installDependencies: false,
         writeLine: () => undefined,
       }),
@@ -474,6 +487,7 @@ describe("release creation", () => {
         rootDirectory: root,
         configPath: "config/site-mock-rehearsal.json",
         outputPath: "release/not-production",
+        buildArtifacts: false,
         installDependencies: false,
         writeLine: () => undefined,
       }),
@@ -489,6 +503,7 @@ describe("release creation", () => {
         configPath: "config/site-production.json",
         outputPath: "release/not-mock",
         releaseKind: "mock-rehearsal",
+        buildArtifacts: false,
         installDependencies: false,
         writeLine: () => undefined,
       }),
@@ -518,6 +533,11 @@ describe("release creation", () => {
       { allowMockInProduction: true } satisfies ConfigOverrides,
       "device.allowMockInProduction",
     ],
+    [
+      "a non-demo ID pattern",
+      { researchIdPattern: "^SH26-[0-9]{3}$" } satisfies ConfigOverrides,
+      "researchIdPattern",
+    ],
   ])("rejects Mock rehearsal packaging with %s", async (_label, overrides, expectedFailure) => {
     const root = await createReleaseSource(overrides);
     await expect(
@@ -526,6 +546,7 @@ describe("release creation", () => {
         configPath: "config/site-mock-rehearsal.json",
         outputPath: "release/rejected-mock",
         releaseKind: "mock-rehearsal",
+        buildArtifacts: false,
         installDependencies: false,
         writeLine: () => undefined,
       }),
@@ -540,6 +561,7 @@ describe("release creation", () => {
       rootDirectory: root,
       configPath: "config/site-mock-rehearsal.json",
       releaseKind: "mock-rehearsal",
+      buildArtifacts: false,
       installDependencies: false,
       writeLine: (line) => outputLines.push(line),
     });
@@ -576,7 +598,8 @@ describe("release creation", () => {
       healthcheck:
         "node dist-server/healthcheck.js --config config/experiment.mock-rehearsal.json",
       "release:verify": "node dist-server/verify-release.js",
-      start: "node dist-server/rehearsal.js",
+      start:
+        "node dist-server/verify-release.js && node dist-server/rehearsal.js --mock-rehearsal",
     });
     expect(await verifyReleaseDirectory(output)).toEqual([]);
 
@@ -590,13 +613,14 @@ describe("release creation", () => {
     expect(launcher).not.toContain("Invoke-WebRequest");
     expect(launcher).toContain("Start-Process $operator");
     expect(launcher).toContain("Press Ctrl+C once");
+    expect(launcher).toContain("node dist-server\\rehearsal.js --mock-rehearsal");
     expect(launcher).not.toContain("START_PRODUCTION");
     expect(launcher).not.toContain('start "SecHack Mock Rehearsal Server"');
     expect(launcher.indexOf("node dist-server\\verify-release.js")).toBeLessThan(
-      launcher.indexOf("node dist-server\\rehearsal.js"),
+      launcher.indexOf("node dist-server\\rehearsal.js --mock-rehearsal"),
     );
     expect(launcher.indexOf("dist-server\\healthcheck.js")).toBeLessThan(
-      launcher.indexOf("node dist-server\\rehearsal.js"),
+      launcher.indexOf("node dist-server\\rehearsal.js --mock-rehearsal"),
     );
     expect(outputLines).toContainEqual(expect.stringContaining("Mock rehearsal release created"));
     expect(outputLines).toContainEqual(
@@ -612,6 +636,7 @@ describe("release creation", () => {
       rootDirectory: root,
       configPath: "config/site-production.json",
       outputPath: "release/approved",
+      buildArtifacts: false,
       installDependencies: false,
       writeLine: (line) => outputLines.push(line),
     });
@@ -659,7 +684,8 @@ describe("release creation", () => {
       preflight: "node dist-server/preflight.js",
       healthcheck: "node dist-server/healthcheck.js",
       "release:verify": "node dist-server/verify-release.js",
-      start: "node dist-server/index.js",
+      start:
+        "node dist-server/verify-release.js && node dist-server/preflight.js && node dist-server/index.js",
     });
 
     const manifest = JSON.parse(
@@ -685,17 +711,30 @@ describe("release creation", () => {
     );
   });
 
-  it("rejects output outside release and never overwrites an existing release", async () => {
+  it("rejects output outside or below a nested release path and never overwrites an existing release", async () => {
     const root = await createReleaseSource();
     await expect(
       createRelease({
         rootDirectory: root,
         configPath: "config/site-production.json",
         outputPath: "outside-release",
+        buildArtifacts: false,
         installDependencies: false,
         writeLine: () => undefined,
       }),
-    ).rejects.toThrow("must be a child directory of release");
+    ).rejects.toThrow("must be a direct child directory of release");
+
+    await expect(
+      createRelease({
+        rootDirectory: root,
+        configPath: "config/site-production.json",
+        outputPath: "release/nested/output",
+        buildArtifacts: false,
+        installDependencies: false,
+        writeLine: () => undefined,
+      }),
+    ).rejects.toThrow("must be a direct child directory of release");
+    expect(await pathExists(join(root, "release", "nested"))).toBe(false);
 
     const existingOutput = join(root, "release", "approved");
     await mkdir(existingOutput, { recursive: true });
@@ -705,10 +744,11 @@ describe("release creation", () => {
         rootDirectory: root,
         configPath: "config/site-production.json",
         outputPath: "release/approved",
+        buildArtifacts: false,
         installDependencies: false,
         writeLine: () => undefined,
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow("Release output already exists");
     await expect(readFile(join(existingOutput, "sentinel.txt"), "utf8")).resolves.toBe(
       "preserve me",
     );

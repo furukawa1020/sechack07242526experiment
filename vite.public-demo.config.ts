@@ -6,25 +6,26 @@ import { defineConfig, type Plugin } from "vite";
 const projectRoot = import.meta.dirname;
 const publicDemoRoot = resolve(projectRoot, "public-demo");
 const publicDemoSourceSegment = "/src/client/public-demo/";
-const publicDemoHtmlInputs = Object.freeze({
-  index: resolve(publicDemoRoot, "index.html"),
-  operator: resolve(publicDemoRoot, "operator.html"),
-  displayDemo: resolve(publicDemoRoot, "display-demo.html"),
-  deviceTest: resolve(publicDemoRoot, "device-test.html"),
-  healthz: resolve(publicDemoRoot, "healthz.html"),
-});
+const publicDemoHtmlInputs = Object.freeze([
+  resolve(publicDemoRoot, "index.html"),
+  resolve(publicDemoRoot, "operator", "index.html"),
+  resolve(publicDemoRoot, "display", "demo", "index.html"),
+  resolve(publicDemoRoot, "device-test", "index.html"),
+  resolve(publicDemoRoot, "healthz", "index.html"),
+]);
 const expectedHtmlArtifacts = new Set([
   "index.html",
-  "operator.html",
-  "display-demo.html",
-  "device-test.html",
-  "healthz.html",
+  "operator/index.html",
+  "display/demo/index.html",
+  "device-test/index.html",
+  "healthz/index.html",
 ]);
 const forbiddenSourcePatterns = [
   { label: "network API", pattern: /fetch\s*\(|XMLHttpRequest|\bWebSocket\b|EventSource|sendBeacon/u },
   { label: "browser persistence", pattern: /localStorage|sessionStorage|document\.cookie/iu },
 ] as const;
 const forbiddenArtifactPatterns = [
+  { label: "network API", pattern: /fetch\s*\(|XMLHttpRequest|\bWebSocket\b|EventSource|sendBeacon/u },
   { label: "form destination", pattern: /forms\.gle|docs\.google\.com\/forms|Googleフォーム/iu },
   { label: "QR implementation", pattern: /qrcode|QRコード/iu },
   { label: "research API route", pattern: /\/api(?:\/|\b)/u },
@@ -91,10 +92,11 @@ export default defineConfig({
   plugins: [react(), verifyPublicDemoArtifact()],
   build: {
     outDir: resolve(projectRoot, "dist-public-demo"),
-    emptyOutDir: true,
+    emptyOutDir: false,
+    modulePreload: { polyfill: false },
     sourcemap: false,
     rollupOptions: {
-      input: publicDemoHtmlInputs,
+      input: [...publicDemoHtmlInputs],
     },
   },
 });

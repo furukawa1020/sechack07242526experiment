@@ -249,14 +249,9 @@ function RehearsalStatusPanel({
 }): React.JSX.Element {
   const processing = phase === "processing";
   return (
-    <section
-      aria-live={processing ? "polite" : undefined}
-      className="public-demo-panel public-demo-rehearsal-status"
-      data-testid="rehearsal-status-panel"
-    >
+    <section className="public-demo-panel public-demo-rehearsal-status" data-testid="rehearsal-status-panel">
       <h2>{PUBLIC_DEMO_COPY.result.title}</h2>
       <div>
-        {processing ? <span aria-hidden="true" className="public-demo-rehearsal-spinner" /> : null}
         <p>
           {processing ? PUBLIC_DEMO_COPY.rehearsal.processing : PUBLIC_DEMO_COPY.rehearsal.handling}
         </p>
@@ -490,7 +485,6 @@ export function PublicDemoApp({
           rehearsalFrame === null ? undefined : rehearsalFrame.conditionIndex + 1
         }
         aria-label="固定模擬データの表示確認"
-        aria-live="polite"
       >
         {rehearsalFrame === null ? (
           <Scene step={step} />

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 from pathlib import Path
+import re
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
@@ -12,6 +13,10 @@ DEFAULT_REPO_ID = "furukawa1020/sechack-experiment-demo"
 DEFAULT_PUBLIC_URL = "https://furukawa1020-sechack-experiment-demo.static.hf.space/"
 PRESERVED_REMOTE_FILES = frozenset({".gitattributes"})
 ALLOWED_ASSET_SUFFIXES = frozenset({".css", ".js"})
+HTML_TITLE_PATTERN = re.compile(rb"<title>[^<]+</title>")
+HTML_ASSET_PATTERN = re.compile(
+    rb'(?:href|src)="(?P<path>(?:\.\.?/)+assets/[^"?#]+)"'
+)
 REQUIRED_HTML_PATHS = frozenset(
     {
         "index.html",
@@ -127,8 +132,6 @@ def verify_committed_files(
 def public_url_for_path(base: str, remote_path: str) -> str:
     if remote_path == "index.html":
         return base
-    if remote_path.endswith("/index.html"):
-        return urljoin(base, remote_path.removesuffix("index.html"))
     return urljoin(base, remote_path)
 
 
@@ -159,6 +162,35 @@ def verify_live_files(
     last_error = "未実行"
     while time.monotonic() < deadline:
         try:
+            revision_request = Request(
+                urljoin(base, "index.html"),
+                headers={
+                    "Cache-Control": "no-cache",
+                    "User-Agent": "SecHack-public-deploy-audit/1",
+                },
+                method="HEAD",
+            )
+            with urlopen(revision_request, timeout=15) as revision_response:
+                revision_parts = urlsplit(revision_response.geturl())
+                if (
+                    revision_parts.scheme != base_parts.scheme
+                    or revision_parts.netloc != base_parts.netloc
+                ):
+                    raise RuntimeError(
+                        "index.html redirected outside the public Space: "
+                        f"{revision_response.geturl()}"
+                    )
+                if revision_response.status != 200:
+                    raise RuntimeError(
+                        f"index.html HEAD returned HTTP {revision_response.status}"
+                    )
+                live_revision = revision_response.headers.get("X-Repo-Commit")
+                if live_revision != revision:
+                    raise RuntimeError(
+                        f"Space is not served from revision {revision}: "
+                        f"X-Repo-Commit={live_revision!r}"
+                    )
+
             for remote_path, local_path in sorted(live_files.items()):
                 remaining_seconds = deadline - time.monotonic()
                 if remaining_seconds <= 0:
@@ -183,14 +215,45 @@ def verify_live_files(
                     body = response.read()
                     if response.status != 200:
                         raise RuntimeError(f"{remote_path} returned HTTP {response.status}")
-                    live_sha256 = hashlib.sha256(body).hexdigest()
-                    local_sha256 = sha256_file(local_path)
-                    if live_sha256 != local_sha256:
-                        raise RuntimeError(
-                            f"{remote_path} SHA-256 mismatch: live={live_sha256}, local={local_sha256}"
-                        )
+                    if local_path.suffix.lower() == ".html":
+                        local_body = local_path.read_bytes()
+                        expected_title = HTML_TITLE_PATTERN.search(local_body)
+                        if expected_title is None:
+                            raise RuntimeError(f"{remote_path} has no title in the local artifact")
+                        expected_assets = {
+                            match.group("path")
+                            for match in HTML_ASSET_PATTERN.finditer(local_body)
+                        }
+                        if not expected_assets:
+                            raise RuntimeError(
+                                f"{remote_path} has no built asset reference in the local artifact"
+                            )
+                        required_markers = {
+                            b'<div id="root"></div>',
+                            expected_title.group(0),
+                            *expected_assets,
+                        }
+                        missing_markers = [
+                            marker.decode("utf-8")
+                            for marker in required_markers
+                            if marker not in body
+                        ]
+                        if missing_markers:
+                            raise RuntimeError(
+                                f"{remote_path} returned the wrong HTML document; "
+                                f"missing={missing_markers}"
+                            )
+                    else:
+                        live_sha256 = hashlib.sha256(body).hexdigest()
+                        local_sha256 = sha256_file(local_path)
+                        if live_sha256 != local_sha256:
+                            raise RuntimeError(
+                                f"{remote_path} SHA-256 mismatch: "
+                                f"live={live_sha256}, local={local_sha256}"
+                            )
             print(
-                f"live files and SHA-256: PASS ({base}, {len(live_files)} files, revision {revision})"
+                f"live revision, HTML markers, and asset SHA-256: PASS "
+                f"({base}, {len(live_files)} files, revision {revision})"
             )
             return
         except (HTTPError, URLError, TimeoutError, RuntimeError) as error:
