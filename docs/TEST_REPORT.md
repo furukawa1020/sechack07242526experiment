@@ -111,11 +111,11 @@ E2Eスイート8ケースはすべて成功した。E2Eでは高速MockDeviceを
 https://furukawa1020-sechack-experiment-demo.static.hf.space/
 ```
 
-前回記録された公開commitは`d7ea7ca537e009d8d2df441b20781a22ee62e2c5`である。この値は、現行の5経路と自動リハーサルを追加する前の既存公開版を識別する参照値であり、現行成果物の再デプロイ済み証明として使用しない。現行版の公開commitと成果物SHA-256は、再デプロイ後の外部確認を完了してから本節へ追記する。
+現行版はHugging Face Static Spaceのcommit `b6e9fba6c1c005a8286f118850aebf4495881815`へデプロイ済みである。配布スクリプトによる許可ファイル一覧とSHA-256の照合、配信commit・固有title・application root・JS/CSS参照の照合、および全5経路のHTTP 200確認に成功した。
 
 現行ローカル成果物には`/`、`/operator/index.html`、`/display/demo/index.html`、`/device-test/index.html`、`/healthz/index.html`の5経路がある。トップの自動リハーサルは4提示を8秒・3秒・15秒・7秒で進め、フグを画面上だけで6秒膨張・保持・6秒収縮する。進行状態はページメモリだけに置き、研究用ID、同意、フォーム、ログ、API、WebSocket、ブラウザ保存、装置アダプタ、実機命令を使用しない。
 
-`npm run test:public-demo`は1366×768、1920×1080、390×844、320×568の4画面幅で16/16テストに成功し、skipは0件だった。静的デプロイのdry-runはREADME、HTML 5件、同一originのCSS/JSだけを選択した。cloud/device iconは同じ表示枠、色、線幅、寸法、背景、値の文字スタイルを使用し、可視テキストへ英語の`CLOUD`/`LOCAL`を追加していない。再デプロイ後は5経路すべてのHTTP 200、同一ブラウザ内の表示同期、実機なし表示、入力・リンク・フォーム・QR・内部コードがないこと、配信HTML・JS・CSS以外の能動的通信が0件であることを外部URLで再確認する。この公開デモは本番実験や実参加者には使用しない。
+`npm run test:public-demo`は1366×768、1920×1080、390×844、320×568の4画面幅で16/16テストに成功し、skipは0件だった。静的デプロイのdry-runはREADME、HTML 5件、同一originのCSS/JSだけを選択した。cloud/device iconは同じ表示枠、色、線幅、寸法、背景、値の文字スタイルを使用し、可視テキストへ英語の`CLOUD`/`LOCAL`を追加していない。公開後は5経路すべてのHTTP 200と実ブラウザ描画を再確認した。アプリ自身は入力、フォーム、QR、内部コード、研究ログ、実機制御、および能動的な外部通信を持たない。この公開デモは本番実験や実参加者には使用しない。
 
 ## 本番設定の前提
 

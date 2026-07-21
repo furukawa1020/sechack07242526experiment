@@ -59,6 +59,18 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 - ヘルスチェック: `http://127.0.0.1:4173/healthz`
 - 参加者画面: セッション作成後にスタッフ画面へ表示される`/display/:token`
 
+## 公開レビュー版（実機不要）
+
+画面確認専用の静的な模擬版は、次のURLで公開しています。固定模擬データだけを使い、研究用ID、フォーム、ログ、API、WebSocket、USBシリアル、実機命令を含みません。本番実験や実参加者には使用しないでください。
+
+- [6画面の手動確認・自動リハーサル](https://furukawa1020-sechack-experiment-demo.static.hf.space/)
+- [公開レビュー進行画面](https://furukawa1020-sechack-experiment-demo.static.hf.space/operator/index.html)
+- [読み取り専用の参加者表示](https://furukawa1020-sechack-experiment-demo.static.hf.space/display/demo/index.html)
+- [模擬装置確認](https://furukawa1020-sechack-experiment-demo.static.hf.space/device-test/index.html)
+- [公開版の稼働確認](https://furukawa1020-sechack-experiment-demo.static.hf.space/healthz/index.html)
+
+公開版の配信commitは`b6e9fba6c1c005a8286f118850aebf4495881815`です。正式なローカル版と公開レビュー版の差は[公開デモ（模擬表示）](docs/PUBLIC_DEMO.md)を参照してください。
+
 ## MockDeviceでのデモ
 
 通常は、上記の`npm run rehearsal`を使用してください。ビルド後にスタッフ画面`http://127.0.0.1:4173/operator`を開けば、実機なしで4提示を完走できます。
