@@ -6,15 +6,27 @@ from pathlib import Path
 DEFAULT_REPO_ID = "furukawa1020/sechack-experiment-demo"
 PRESERVED_REMOTE_FILES = frozenset({".gitattributes"})
 ALLOWED_ASSET_SUFFIXES = frozenset({".css", ".js"})
+REQUIRED_HTML_PATHS = frozenset(
+    {
+        "index.html",
+        "operator/index.html",
+        "display/demo/index.html",
+        "device-test/index.html",
+        "healthz/index.html",
+    }
+)
 
 
 def collect_public_files(repository_root: Path) -> dict[str, Path]:
     readme = repository_root / "deploy" / "huggingface-space" / "README.md"
     distribution = repository_root / "dist-public-demo"
-    index = distribution / "index.html"
     assets = distribution / "assets"
+    html_files = {
+        relative_path: distribution / Path(relative_path)
+        for relative_path in REQUIRED_HTML_PATHS
+    }
 
-    required_paths = (readme, index, assets)
+    required_paths = (readme, assets, *html_files.values())
     missing = [str(path) for path in required_paths if not path.exists()]
     if missing:
         raise SystemExit(
@@ -36,7 +48,8 @@ def collect_public_files(repository_root: Path) -> dict[str, Path]:
             "公開対象外のアセットを検出しました: " + ", ".join(invalid_assets)
         )
 
-    public_files = {"README.md": readme, "index.html": index}
+    public_files = {"README.md": readme}
+    public_files.update(html_files)
     for path in asset_files:
         relative_path = path.relative_to(distribution).as_posix()
         public_files[relative_path] = path
