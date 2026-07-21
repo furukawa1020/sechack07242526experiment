@@ -52,6 +52,7 @@ async function listen(allowLan = false, operatorToken?: string) {
     config: parsedConfig,
     configHash: "0".repeat(64),
     appVersion: "1.0.0",
+    rehearsal: false,
     device: new MockPufferDevice({ timingMode: "fast", initialConnected: true }),
     logger: new EmptyLogger(),
   });
@@ -126,6 +127,17 @@ describe("server HTTP security", () => {
     await expect(invalidResearchId.json()).resolves.toEqual({
       error: "研究用IDの形式が正しくありません。",
       code: "INVALID_RESEARCH_ID",
+    });
+
+    const unavailableTestHook = await fetch(`${running.url}/api/test/mock-device/disconnect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "inflate" }),
+    });
+    expect(unavailableTestHook.status).toBe(404);
+    await expect(unavailableTestHook.json()).resolves.toEqual({
+      error: "APIが見つかりません。",
+      code: "API_NOT_FOUND",
     });
   });
 

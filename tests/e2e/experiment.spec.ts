@@ -189,6 +189,47 @@ test("フグ提示中の参加者画面切断ではセッションをerrorへ移
   await action(request, created.sessionId, "abort");
 });
 
+test("結果提示中のMock装置切断ではSTOP・収縮を試行してセッションをerrorへ移す", async ({
+  page,
+  request,
+}) => {
+  await ensureDeviceReady(request);
+  const created = await createSession(request, "SH26-895", "CDBA");
+  await openReadyDisplay(page, created.displayUrl, request, created.sessionId);
+  await action(request, created.sessionId, "prepare");
+
+  const injected = await request.post("/api/test/mock-device/disconnect", {
+    data: { command: "inflate" },
+  });
+  expect(injected.status()).toBe(202);
+  await action(request, created.sessionId, "start");
+
+  await expect(page.getByRole("heading", { name: "実験を一時停止しています" })).toBeVisible({
+    timeout: 5_000,
+  });
+  await expect.poll(async () => (await operatorSnapshot(request, created.sessionId)).phase)
+    .toBe("error");
+  const snapshot = await operatorSnapshot(request, created.sessionId);
+  expect(snapshot.errorCode).toBe("DEVICE_DISCONNECTED");
+  expect(snapshot.deviceStatus).toBe("disconnected");
+
+  const historyResponse = await request.get("/api/test/mock-device/commands");
+  expect(historyResponse.ok()).toBeTruthy();
+  const commands = asRecord(await historyResponse.json()).commands;
+  if (!Array.isArray(commands)) {
+    throw new TypeError("Mock device command history must be an array.");
+  }
+  expect(commands).toEqual(expect.arrayContaining(["inflate", "stop", "deflate"]));
+  const inflateIndex = commands.indexOf("inflate");
+  expect(commands.indexOf("stop", inflateIndex + 1)).toBeGreaterThan(inflateIndex);
+  expect(commands.indexOf("deflate", inflateIndex + 1)).toBeGreaterThan(inflateIndex);
+
+  const csv = await request.get("/api/exports/sessions.csv");
+  expect(csv.ok()).toBeTruthy();
+  expect(await csv.text()).toContain("DEVICE_DISCONNECTED");
+  await action(request, created.sessionId, "abort");
+});
+
 test("緊急停止はセッションを再開不能な中断状態へ移す", async ({ page, request }) => {
   await ensureDeviceReady(request);
   const created = await createSession(request, "SH26-893", "DACB");

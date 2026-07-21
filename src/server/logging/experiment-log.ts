@@ -18,6 +18,10 @@ import {
   PUFFER_DEVICE_STATES,
   type Session,
 } from "../../shared/experiment-machine.js";
+import {
+  assertExperimentLogEventFieldAllowlist,
+  type ExperimentLogEventAllowedField,
+} from "./log-event-allowlist.js";
 
 const safeToken = (name: string, maxLength: number): z.ZodString => z.string()
   .min(1)
@@ -29,7 +33,7 @@ const wallClockSchema = z.string().refine((value) => {
   return Number.isFinite(parsed) && /^\d{4}-\d{2}-\d{2}T/u.test(value);
 }, "wallClockIso must be an ISO 8601 timestamp.");
 
-export const ExperimentLogEventSchema = z.object({
+const experimentLogEventShape = {
   schemaVersion: z.literal(1),
   protocolVersion: safeToken("protocolVersion", 200),
   appVersion: safeToken("appVersion", 80),
@@ -51,7 +55,9 @@ export const ExperimentLogEventSchema = z.object({
   deviceStatus: z.enum(PUFFER_DEVICE_STATES).optional(),
   result: z.enum(["ok", "aborted", "error"]).optional(),
   errorCode: safeToken("errorCode", 100).optional(),
-}).strict().superRefine((event, context) => {
+} satisfies Record<ExperimentLogEventAllowedField, z.ZodType>;
+
+export const ExperimentLogEventSchema = z.object(experimentLogEventShape).strict().superRefine((event, context) => {
   if (event.conditionCode !== undefined) {
     const expected = CONDITIONS[event.conditionCode];
     if (event.processing !== undefined && event.processing !== expected.processing) {
@@ -140,10 +146,11 @@ export function createLogEvent(input: CreateLogEventInput): ExperimentLogEvent {
       ? {}
       : { errorCode: input.errorCode ?? session.errorCode ?? "UNKNOWN_ERROR" }),
   };
-  return Object.freeze(ExperimentLogEventSchema.parse(candidate));
+  return parseLogEvent(candidate);
 }
 
 export function parseLogEvent(input: unknown): ExperimentLogEvent {
+  assertExperimentLogEventFieldAllowlist(input);
   return Object.freeze(ExperimentLogEventSchema.parse(input));
 }
 

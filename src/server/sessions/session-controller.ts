@@ -49,6 +49,8 @@ export interface SessionControllerOptions {
   readonly config: ServerExperimentConfig;
   readonly configHash: string;
   readonly appVersion: string;
+  /** True only for the explicit, loopback-only hardware-free rehearsal entry point. */
+  readonly rehearsal: boolean;
   readonly device: PufferDevice;
   readonly logger: SessionLogWriter;
   readonly random?: () => number;
@@ -81,6 +83,7 @@ export class SessionController {
   private readonly config: ServerExperimentConfig;
   private readonly configHash: string;
   private readonly appVersion: string;
+  private readonly rehearsal: boolean;
   private readonly device: PufferDevice;
   private readonly logger: SessionLogWriter;
   private readonly random: () => number;
@@ -116,6 +119,7 @@ export class SessionController {
     this.config = options.config;
     this.configHash = options.configHash;
     this.appVersion = options.appVersion;
+    this.rehearsal = options.rehearsal;
     this.device = options.device;
     this.logger = options.logger;
     this.random = options.random ?? Math.random;
@@ -1162,7 +1166,7 @@ export class SessionController {
         )
       : [];
     const base: PublicSessionSnapshot = {
-      rehearsal: this.config.device.mode === "mock" && this.config.formUrl === "",
+      rehearsal: this.rehearsal,
       phase: session.phase,
       sequenceIndex: session.sequenceIndex,
       current,

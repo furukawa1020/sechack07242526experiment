@@ -126,6 +126,10 @@ describe("participant presentation invariants", () => {
       "handling-row",
       "handling-row",
     ]);
+    for (const row of localPanel.querySelectorAll("dl > div")) {
+      expect([...row.children].map(({ tagName }) => tagName)).toEqual(["DT", "DD"]);
+      expect(row.querySelector("dt > .field-icon")).not.toBeNull();
+    }
   });
 
   it("never renders internal condition codes or participant controls on a result", () => {
@@ -265,6 +269,8 @@ describe("participant presentation invariants", () => {
       UI_COPY.rehearsal.summary.replace("\n", " "),
     );
     expect(view.container).not.toHaveTextContent("お手元のGoogleフォームへ戻り");
+    expect(view.container).not.toHaveTextContent("同じ数字を複数の提示に選んでも構いません");
+    expect(view.container).not.toHaveTextContent("答えたくない項目は空欄のままにできます");
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(view.container).not.toHaveTextContent("Googleフォームへ戻り");
 

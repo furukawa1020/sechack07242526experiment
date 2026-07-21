@@ -72,7 +72,7 @@ async function reserveAvailablePort(): Promise<number> {
 }
 
 async function buildAndStartProductionServer(): Promise<RunningBuiltServer> {
-  await runNodeScript(resolve(WORKSPACE, "node_modules/vite/bin/vite.js"), ["build"]);
+  await runNodeScript(resolve(WORKSPACE, "scripts/build-vite.mjs"), ["client"]);
   await runNodeScript(resolve(WORKSPACE, "scripts/build-server.mjs"));
 
   const port = await reserveAvailablePort();

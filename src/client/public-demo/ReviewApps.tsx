@@ -135,7 +135,9 @@ export function PublicOperatorApp(): React.JSX.Element {
 
 export function PublicDisplayApp(): React.JSX.Element {
   const [step, setStep] = useState(PUBLIC_DEMO_INTRO_STEP);
-  const channelAvailable = typeof BroadcastChannel !== "undefined";
+  const [connectionState, setConnectionState] = useState<"unsupported" | "waiting" | "connected">(
+    typeof BroadcastChannel === "undefined" ? "unsupported" : "waiting",
+  );
 
   useEffect(() => {
     const channel = createReviewChannel();
@@ -143,7 +145,10 @@ export function PublicDisplayApp(): React.JSX.Element {
 
     channel.onmessage = (event: MessageEvent<unknown>): void => {
       const message = parseReviewMessage(event.data);
-      if (message?.type === "review.step") setStep(message.step);
+      if (message?.type === "review.step") {
+        setStep(message.step);
+        setConnectionState("connected");
+      }
     };
     channel.postMessage({ type: "review.ready" } satisfies ReviewReadyMessage);
 
@@ -159,8 +164,12 @@ export function PublicDisplayApp(): React.JSX.Element {
       >
         <Scene step={step} />
       </main>
-      {channelAvailable ? null : (
-        <p className="public-review-display-note">{PUBLIC_DEMO_COPY.review.display.waiting}</p>
+      {connectionState === "connected" ? null : (
+        <p className="public-review-display-note">
+          {connectionState === "unsupported"
+            ? PUBLIC_DEMO_COPY.review.display.unsupported
+            : PUBLIC_DEMO_COPY.review.display.waiting}
+        </p>
       )}
     </ReviewShell>
   );
@@ -178,6 +187,7 @@ export function PublicDeviceTestApp(): React.JSX.Element {
     stopped: copy.stopped,
   };
   const connected = state !== "disconnected";
+  const operational = state === "idle" || state === "holding";
 
   return (
     <ReviewShell>
@@ -197,13 +207,13 @@ export function PublicDeviceTestApp(): React.JSX.Element {
           <button disabled={connected} onClick={() => setState("idle")} type="button">
             {copy.connect}
           </button>
-          <button disabled={!connected} onClick={() => setState("holding")} type="button">
+          <button disabled={!operational} onClick={() => setState("holding")} type="button">
             {copy.inflate}
           </button>
-          <button disabled={!connected} onClick={() => setState("idle")} type="button">
+          <button disabled={!operational} onClick={() => setState("idle")} type="button">
             {copy.deflate}
           </button>
-          <button disabled={!connected} onClick={() => setState("stopped")} type="button">
+          <button disabled={!operational} onClick={() => setState("stopped")} type="button">
             {copy.stop}
           </button>
         </div>

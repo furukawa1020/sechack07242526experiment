@@ -11,7 +11,7 @@ data/**
 artifacts/coverage/
 artifacts/coverage-*/
 artifacts/playwright-report/
-artifacts/test-results/
+artifacts/test-results*/
 artifacts/screenshots/
 playwright/.cache/
 *.log

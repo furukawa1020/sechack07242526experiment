@@ -25,6 +25,9 @@ export const ORDER_CODES = ["ABDC", "BCAD", "CDBA", "DACB"] as const;
 export type OrderCode = (typeof ORDER_CODES)[number];
 export type SequenceIndex = 0 | 1 | 2 | 3;
 
+type ConditionSequence = readonly [ConditionCode, ConditionCode, ConditionCode, ConditionCode];
+type MutablePositionCounts = Record<ConditionCode, [number, number, number, number]>;
+
 export const SEQUENCE_INDICES = [0, 1, 2, 3] as const satisfies readonly SequenceIndex[];
 
 export interface OrderDesignValidation {
@@ -65,7 +68,7 @@ export function conditionsForOrder(orderCode: OrderCode): readonly ConditionCode
 
 export function validateOrderDesign(orders: readonly string[]): OrderDesignValidation {
   const errors: string[] = [];
-  const positionCounts: Record<ConditionCode, number[]> = {
+  const positionCounts: MutablePositionCounts = {
     A: [0, 0, 0, 0],
     B: [0, 0, 0, 0],
     C: [0, 0, 0, 0],
@@ -93,16 +96,19 @@ export function validateOrderDesign(orders: readonly string[]): OrderDesignValid
       continue;
     }
 
-    codes.forEach((code, position) => {
-      if (isConditionCode(code)) {
-        const counts = positionCounts[code];
-        counts[position] = (counts[position] ?? 0) + 1;
-      }
-    });
-
-    for (let position = 0; position < codes.length - 1; position += 1) {
-      adjacentPairs.push(`${codes[position] ?? ""}${codes[position + 1] ?? ""}`);
+    // The length and membership checks above establish this tuple at runtime.
+    // Keeping the narrowed tuple separate avoids defensive fallbacks that could
+    // silently turn a future validation regression into incorrect counts.
+    const validatedCodes = codes as unknown as ConditionSequence;
+    for (const position of SEQUENCE_INDICES) {
+      const code = validatedCodes[position];
+      positionCounts[code][position] += 1;
     }
+    adjacentPairs.push(
+      `${validatedCodes[0]}${validatedCodes[1]}`,
+      `${validatedCodes[1]}${validatedCodes[2]}`,
+      `${validatedCodes[2]}${validatedCodes[3]}`,
+    );
   }
 
   for (const code of CONDITION_CODES) {
@@ -143,10 +149,7 @@ export function assertBalancedOrderDesign(orders: readonly string[]): asserts or
   if (!validation.valid) {
     throw new Error(`Invalid experiment order design: ${validation.errors.join(" ")}`);
   }
-  if (
-    orders.some((order) => !isOrderCode(order))
-    || ORDER_CODES.some((order) => !orders.includes(order))
-  ) {
+  if (!orders.every(isOrderCode)) {
     throw new Error("Experiment orders must be exactly ABDC, BCAD, CDBA and DACB.");
   }
 }
@@ -189,11 +192,8 @@ export function allocateOrder(
   if (!Number.isFinite(sample) || sample < 0 || sample >= 1) {
     throw new RangeError("The random source must return a finite value in [0, 1)." );
   }
-  const selected = candidates[Math.floor(sample * candidates.length)];
-  if (selected === undefined) {
-    throw new Error("No order is available for allocation.");
-  }
-  return selected;
+  // ORDER_CODES is non-empty, so at least one count always equals `minimum`.
+  return candidates[Math.floor(sample * candidates.length)] as OrderCode;
 }
 
 export function orderImbalanceAfterSelection(

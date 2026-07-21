@@ -8,6 +8,11 @@ interface NetworkAudit {
   readonly webSockets: string[];
 }
 
+const PUBLIC_DEMO_PORT = Number.parseInt(process.env.PUBLIC_DEMO_PORT ?? "4180", 10);
+const EXPECTED_PUBLIC_DEMO_ORIGIN = new URL(
+  process.env.PUBLIC_DEMO_ORIGIN ?? `http://127.0.0.1:${String(PUBLIC_DEMO_PORT)}`,
+).origin;
+
 function monitorNetwork(page: Page): NetworkAudit {
   const audit: NetworkAudit = { externalRequests: [], activeRequests: [], webSockets: [] };
   page.on("request", (request) => {
@@ -15,8 +20,7 @@ function monitorNetwork(page: Page): NetworkAudit {
     if (request.resourceType() === "fetch" || request.resourceType() === "xhr") {
       audit.activeRequests.push(requestUrl);
     }
-    const hostname = new URL(requestUrl).hostname;
-    if (hostname !== "127.0.0.1" && hostname !== "localhost") {
+    if (new URL(requestUrl).origin !== EXPECTED_PUBLIC_DEMO_ORIGIN) {
       audit.externalRequests.push(requestUrl);
     }
   });
@@ -46,7 +50,7 @@ async function viewportDimensions(page: Page): Promise<ViewportDimensions> {
 async function expectResponsiveViewportState(page: Page): Promise<void> {
   const dimensions = await viewportDimensions(page);
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
-  if (dimensions.viewportWidth > 640) {
+  if (dimensions.viewportWidth > 640 && dimensions.viewportHeight > 700) {
     expect(dimensions.documentHeight).toBeLessThanOrEqual(dimensions.viewportHeight);
   }
 }
@@ -351,6 +355,7 @@ test("画面幅に応じて二列または一列で、横にはみ出さず操�
   const viewport = page.viewportSize();
   if (viewport === null) throw new Error("Public demo viewport is unavailable.");
   const narrow = viewport.width <= 640;
+  const short = viewport.height <= 700;
 
   await page.goto("/", { waitUntil: "networkidle" });
   const notice = page.locator(".public-demo-notice");
@@ -381,7 +386,7 @@ test("画面幅に応じて二列または一列で、横にはみ出さず操�
   }
 
   const dimensions = await viewportDimensions(page);
-  if (narrow) {
+  if (narrow || short) {
     expect(dimensions.documentHeight).toBeGreaterThan(dimensions.viewportHeight);
   } else {
     expect(dimensions.documentHeight).toBeLessThanOrEqual(dimensions.viewportHeight);
@@ -499,6 +504,9 @@ test("公開レビュー用の固定経路を実機なしで開き、同じブ�
   await expect(page.getByText("膨張状態を模擬中", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^停止$/u }).click();
   await expect(page.getByText("停止済み", { exact: true })).toBeVisible();
+  for (const actionName of ["模擬装置を接続", "膨張を模擬", "収縮を模擬", "停止"]) {
+    await expect(page.getByRole("button", { name: actionName, exact: true })).toBeDisabled();
+  }
   await expectResponsiveViewportState(page);
 
   await page.goto("/healthz/index.html", { waitUntil: "networkidle" });

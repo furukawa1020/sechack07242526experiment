@@ -16,6 +16,14 @@ const CreateSessionSchema = z
   })
   .strict();
 const InflateSchema = z.object({ level: z.number().min(0).max(1).optional() }).strict();
+const TestDisconnectSchema = z.object({
+  command: z.enum(["status", "inflate", "deflate"]),
+}).strict();
+
+export interface ApiTestHooks {
+  injectUnexpectedMockDisconnect(command: "status" | "inflate" | "deflate"): void;
+  readMockDeviceCommands(): readonly string[];
+}
 
 type AsyncHandler = (request: Request, response: Response) => Promise<void>;
 
@@ -36,6 +44,7 @@ function assertEmptyBody(request: Request): void {
 export function createApiRouter(
   controller: SessionController,
   config: ServerExperimentConfig,
+  testHooks?: ApiTestHooks,
 ): Router {
   const router = Router();
   const withDeviceMode = <Status extends object>(status: Status): Status & { mode: "mock" | "serial" } => ({
@@ -181,6 +190,20 @@ export function createApiRouter(
       response.json(deviceResponse(result.status, result.ack));
     }),
   );
+
+  if (testHooks !== undefined) {
+    router.post(
+      "/test/mock-device/disconnect",
+      asyncHandler(async (request, response) => {
+        const input = TestDisconnectSchema.parse(request.body ?? {});
+        testHooks.injectUnexpectedMockDisconnect(input.command);
+        response.status(202).json({ injected: true, command: input.command });
+      }),
+    );
+    router.get("/test/mock-device/commands", (_request, response) => {
+      response.json({ commands: testHooks.readMockDeviceCommands() });
+    });
+  }
 
   return router;
 }

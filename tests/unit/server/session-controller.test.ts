@@ -204,6 +204,7 @@ function makeController(
     readonly logger?: MemoryLogger;
     readonly device?: MockPufferDevice;
     readonly formUrl?: string;
+    readonly rehearsal?: boolean;
   } = {},
 ) {
   const device = options.device ?? new MockPufferDevice({ timingMode: "fast", initialConnected: true });
@@ -212,6 +213,7 @@ function makeController(
     config: testConfig(options.formUrl),
     configHash: CONFIG_HASH,
     appVersion: "1.0.0",
+    rehearsal: options.rehearsal ?? false,
     device,
     logger,
     random: () => orderSample,
@@ -276,6 +278,26 @@ describe("SessionController", () => {
     expect(completed.phase).toBe("completed");
     expect(completed.result).toBe("ok");
     controller.dispose();
+  });
+
+  it("marks participant state as rehearsal only for an explicit rehearsal server", async () => {
+    const regular = makeController();
+    const regularSession = await regular.controller.create({
+      researchId: "SH26-001",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    expect(regular.controller.getPublicSnapshot(regularSession.displayToken).rehearsal).toBe(false);
+    regular.controller.dispose();
+
+    const rehearsal = makeController(0, { rehearsal: true });
+    const rehearsalSession = await rehearsal.controller.create({
+      researchId: "SH26-002",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    expect(rehearsal.controller.getPublicSnapshot(rehearsalSession.displayToken).rehearsal).toBe(true);
+    rehearsal.controller.dispose();
   });
 
   it("pauses a label phase on display loss and resumes only after an explicit command", async () => {

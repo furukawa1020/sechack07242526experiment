@@ -12,6 +12,7 @@ import {
   ORDER_CODES,
   orderImbalanceAfterSelection,
   validateOrderDesign,
+  type OrderCode,
   type OrderUsageRecord,
 } from "../../../src/shared/conditions.js";
 
@@ -29,6 +30,9 @@ describe("experimental conditions", () => {
   it("uses exactly the four protocol orders", () => {
     expect(ORDER_CODES).toEqual(["ABDC", "BCAD", "CDBA", "DACB"]);
     expect(conditionsForOrder("ABDC")).toEqual(["A", "B", "D", "C"]);
+    expect(() => conditionsForOrder("ABXC" as OrderCode)).toThrow(
+      "Invalid condition code in order: X",
+    );
     expect(isConditionCode("C")).toBe(true);
     expect(isConditionCode("X")).toBe(false);
     expect(isConditionCode(1)).toBe(false);
@@ -59,8 +63,18 @@ describe("experimental conditions", () => {
       expect.stringContaining("12 directed"),
     ]));
     expect(validateOrderDesign(["AAAA", "BCAD", "CDBA", "DACB"]).valid).toBe(false);
+    expect(validateOrderDesign(["ABCD", "ABCD", "DCBA", "DCBA"]).errors).toContain(
+      "The design must contain each of the 12 directed adjacent pairs exactly once.",
+    );
     expect(() => assertBalancedOrderDesign(["ABCD", "BCDA", "CDAB", "DABC"]))
-      .toThrow(/Invalid experiment order design|exactly ABDC/iu);
+      .toThrow("Invalid experiment order design");
+  });
+
+  it("rejects a balanced design that is not the fixed protocol order set", () => {
+    const renamedBalancedDesign = ["BADC", "ACBD", "CDAB", "DBCA"] as const;
+    expect(validateOrderDesign(renamedBalancedDesign).valid).toBe(true);
+    expect(() => assertBalancedOrderDesign(renamedBalancedDesign))
+      .toThrow("Experiment orders must be exactly ABDC, BCAD, CDBA and DACB.");
   });
 });
 
@@ -87,6 +101,11 @@ describe("order allocation", () => {
       includeAbortedInOrderBalancing: true,
       random: () => 0.999,
     })).toBe("CDBA");
+    expect(ORDER_CODES).toContain(
+      allocateOrder([], {
+        includeAbortedInOrderBalancing: true,
+      }),
+    );
     expect(orderImbalanceAfterSelection([], "ABDC", true)).toBe(1);
   });
 

@@ -126,8 +126,10 @@ export function HandlingPanel({ processing }: { readonly processing: ProcessingL
             className={`handling-row${row.key === "processing" ? " handling-row-location" : ""}`}
             key={row.key}
           >
-            <span className="field-icon"><FieldIcon kind={row.icon} /></span>
-            <dt>{row.label}</dt>
+            <dt>
+              <span className="field-icon"><FieldIcon kind={row.icon} /></span>
+              {row.label}
+            </dt>
             <dd>{row.value}</dd>
           </div>
         ))}
@@ -266,7 +268,7 @@ function Summary({ snapshot }: { readonly snapshot: ParticipantSnapshot }): Reac
           </li>
         ))}
       </ol>
-      <p className="summary-note">{UI_COPY.summary.note}</p>
+      {snapshot.rehearsal ? null : <p className="summary-note">{UI_COPY.summary.note}</p>}
       {snapshot.formUrl === null ? null : <FormQr url={snapshot.formUrl} />}
     </main>
   );

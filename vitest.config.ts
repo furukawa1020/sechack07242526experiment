@@ -32,7 +32,21 @@ export default defineConfig({
         lines: 90,
         functions: 90,
         statements: 90,
-        branches: 85
+        branches: 85,
+        "src/shared/conditions.ts": { 100: true },
+        "src/shared/experiment-machine.ts": {
+          lines: 90,
+          functions: 90,
+          statements: 90,
+          branches: 90,
+        },
+        "src/server/devices/**/*.ts": {
+          lines: 90,
+          functions: 90,
+          statements: 90,
+          branches: 90,
+        },
+        "src/server/logging/log-event-allowlist.ts": { 100: true },
       }
     }
   }

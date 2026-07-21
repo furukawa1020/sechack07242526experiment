@@ -61,6 +61,7 @@ async function start(operatorToken?: string): Promise<RunningWebSocketTestServer
     config,
     configHash: "0".repeat(64),
     appVersion: "1.0.0",
+    rehearsal: false,
     device: new MockPufferDevice({ timingMode: "fast", initialConnected: true }),
     logger: new EmptyLogger(),
   });

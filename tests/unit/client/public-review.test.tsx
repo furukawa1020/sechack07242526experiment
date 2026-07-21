@@ -51,6 +51,7 @@ describe("public review routes", () => {
     const operator = render(<PublicOperatorApp />);
     const display = render(<PublicDisplayApp />);
 
+    expect(within(display.container).queryByText(/接続を待っています/u)).not.toBeInTheDocument();
     fireEvent.click(within(operator.container).getByRole("button", { name: "第1提示" }));
 
     expect(within(display.container).getByText("第1提示 / 4")).toBeInTheDocument();
@@ -73,6 +74,17 @@ describe("public review routes", () => {
     expect(within(view.container).getByText("膨張状態を模擬中", { exact: true })).toBeInTheDocument();
     fireEvent.click(within(view.container).getByRole("button", { name: /^停止$/u }));
     expect(within(view.container).getByText("停止済み", { exact: true })).toBeInTheDocument();
+    for (const button of within(view.container).getAllByRole("button")) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it("shows an accurate fallback when tab synchronization is unavailable", () => {
+    vi.unstubAllGlobals();
+    vi.stubGlobal("BroadcastChannel", undefined);
+    const view = render(<PublicDisplayApp />);
+
+    expect(within(view.container).getByText(/タブ間同期を利用できません/u)).toBeInTheDocument();
   });
 
   it("renders a static health page without collecting input", () => {

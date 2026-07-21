@@ -182,9 +182,20 @@ export async function startServer(
       config,
       configHash: loaded.configHash,
       appVersion,
+      rehearsal: mode === "rehearsal",
       device,
       logger,
     });
+    const testHooks = mode === "test" && device instanceof MockPufferDevice
+      ? {
+          injectUnexpectedMockDisconnect(command: "status" | "inflate" | "deflate"): void {
+            device.inject({ kind: "disconnect", command });
+          },
+          readMockDeviceCommands(): readonly string[] {
+            return device.commandHistory.map(({ command }) => command);
+          },
+        }
+      : undefined;
     const application = await createApplication({
       controller,
       config,
@@ -193,6 +204,7 @@ export async function startServer(
       mode: options.serveBuiltAssets === true ? "production" : mode,
       rootDirectory,
       ...(operatorToken === null ? {} : { operatorToken }),
+      ...(testHooks === undefined ? {} : { testHooks }),
     });
     const httpServer = createServer(application.app);
     const webSocketHub = new WebSocketHub(httpServer, controller, {

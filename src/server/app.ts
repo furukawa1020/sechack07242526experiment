@@ -6,7 +6,7 @@ import { ZodError } from "zod";
 
 import type { ServerExperimentConfig } from "./contracts.js";
 import { HttpError } from "./api/http-error.js";
-import { createApiRouter } from "./api/router.js";
+import { createApiRouter, type ApiTestHooks } from "./api/router.js";
 import { securityMiddleware } from "./security/http-security.js";
 import type { SessionController } from "./sessions/session-controller.js";
 import { PufferDeviceError } from "./devices/index.js";
@@ -17,6 +17,8 @@ export interface ApiAppOptions {
   readonly configHash: string;
   readonly appVersion: string;
   readonly operatorToken?: string;
+  /** Present only in an explicitly started test server; never mounted in production or rehearsal. */
+  readonly testHooks?: ApiTestHooks;
 }
 
 export interface ApplicationOptions extends ApiAppOptions {
@@ -83,7 +85,7 @@ export function createApiApp(options: ApiAppOptions): Express {
       deviceMode: options.config.device.mode,
     });
   });
-  app.use("/api", createApiRouter(options.controller, options.config));
+  app.use("/api", createApiRouter(options.controller, options.config, options.testHooks));
   app.use("/api", ((_request, response) => {
     response.status(404).json({ error: "APIが見つかりません。", code: "API_NOT_FOUND" });
   }) satisfies RequestHandler);

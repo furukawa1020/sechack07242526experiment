@@ -186,6 +186,6 @@ E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認
 - [テスト報告](docs/TEST_REPORT.md)
 - [Googleフォーム公開内容監査](docs/FORM_AUDIT.md)
 - [プロトコル変更履歴](docs/PROTOCOL_CHANGELOG.md)
-- [合成サンプルログ](docs/examples/sample-session.jsonl)
+- [専用Mockリハーサル設定に紐付く合成サンプルログ](docs/examples/sample-session.jsonl)
 
 正式実施前に、固定模擬データ方式が承認済み研究計画と一致していることを研究責任者が確認してください。実センサ連携はこの版の対象外です。

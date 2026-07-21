@@ -12,6 +12,10 @@ if (!Number.isInteger(PUBLIC_DEMO_PORT) || PUBLIC_DEMO_PORT < 1 || PUBLIC_DEMO_P
  * teardown can await Vite's close() instead of terminating a cmd.exe tree.
  */
 export default async function globalSetup(): Promise<() => Promise<void>> {
+  if (process.env.PUBLIC_DEMO_ORIGIN !== undefined) {
+    return async (): Promise<void> => {};
+  }
+
   const server = await preview({
     configFile: resolve(import.meta.dirname, "../../vite.public-demo.config.ts"),
     logLevel: "error",

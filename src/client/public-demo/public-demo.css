@@ -949,6 +949,68 @@ output {
   }
 }
 
+@media (min-width: 641px) and (max-height: 700px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+
+  .public-demo-app {
+    display: block;
+    height: auto;
+    min-height: 100svh;
+    padding-bottom: 62px;
+    overflow: visible;
+  }
+
+  .public-demo-notice {
+    position: sticky;
+    top: 0;
+    min-height: 92px;
+  }
+
+  .public-demo-stage,
+  .public-demo-presentation,
+  .public-review-display-stage {
+    height: auto;
+    overflow: visible;
+  }
+
+  .public-demo-intro,
+  .public-demo-presentation,
+  .public-demo-summary {
+    min-height: calc(100svh - 154px);
+  }
+
+  .public-demo-controls {
+    position: fixed;
+    z-index: 20;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    min-height: 62px;
+  }
+
+  .public-review-shell {
+    display: block;
+    height: auto;
+    min-height: 100svh;
+    overflow: visible;
+  }
+
+  .public-review-operator,
+  .public-review-device,
+  .public-review-health {
+    min-height: calc(100svh - 92px);
+  }
+}
+
 @media (max-width: 640px) {
   html,
   body,

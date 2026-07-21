@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readdir, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, parse } from "node:path";
+import { join, parse, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +14,7 @@ import {
   type ExperimentLogEvent,
   type SessionLogSummary,
 } from "../../../../src/server/logging/experiment-log.js";
+import { loadExperimentConfig } from "../../../../src/shared/config-loader.js";
 import { createSession, type Session } from "../../../../src/shared/experiment-machine.js";
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
@@ -85,6 +86,20 @@ describe("ExperimentLogEvent allowlist", () => {
     expect(() => parseLogEvent({ ...valid, processing: "local" })).toThrow(/does not match/iu);
     expect(() => parseLogEvent({ ...valid, presentation: "puffer" })).toThrow(/does not match/iu);
     expect(() => ExperimentLogEventSchema.parse({ ...valid, configHash: "not-a-hash" })).toThrow();
+  });
+
+  it("keeps the synthetic sample tied to the dedicated mock rehearsal config", async () => {
+    const loaded = await loadExperimentConfig("config/experiment.mock-rehearsal.json");
+    const source = await readFile(resolve("docs", "examples", "sample-session.jsonl"), "utf8");
+    const events = source.trim().split(/\r?\n/u).map((line) => parseLogEvent(JSON.parse(line)));
+
+    expect(events).toHaveLength(3);
+    expect(events.every((sample) => sample.protocolVersion === loaded.config.protocolVersion))
+      .toBe(true);
+    expect(events.every((sample) => sample.configHash === loaded.configHash)).toBe(true);
+    expect(events.every((sample) => sample.researchId === "DEMO-000")).toBe(true);
+    expect(events.every((sample) => sample.deviceMode === "mock")).toBe(true);
+    expect(new RegExp(loaded.config.researchIdPattern, "u").test("DEMO-000")).toBe(true);
   });
 });
 
