@@ -33,6 +33,51 @@ const PHASE_LABELS: Readonly<Record<ExperimentPhase, string>> = {
   recovery: "復旧確認待ち",
 };
 
+const DEVICE_MODE_LABELS: Readonly<Record<DeviceStatus["mode"], string>> = {
+  mock: "模擬装置",
+  serial: "実機（シリアル接続）",
+  unknown: "未確認",
+};
+
+const DEVICE_STATE_LABELS: Readonly<Record<DeviceStatus["state"], string>> = {
+  disconnected: "未接続",
+  connecting: "接続中",
+  idle: "待機・収縮済み",
+  inflating: "膨張中",
+  holding: "膨張保持中",
+  deflating: "収縮中",
+  stopped: "停止済み",
+  fault: "異常停止",
+  unknown: "未確認",
+};
+
+const EVENT_LABELS: Readonly<Record<string, string>> = {
+  "session.created": "セッションを作成",
+  "session.resumed": "セッションを再開",
+  "session.deleted": "セッションを削除",
+  "session.completed": "セッションを完了",
+  "session.aborted": "実験を中止",
+  "session.error": "セッションで異常を検知",
+  "session.recoveryRequired": "復旧確認が必要",
+  "display.ready": "参加者画面の準備完了",
+  "display.disconnected": "参加者画面が切断",
+  "device.connect.issued": "装置へ接続を指示",
+  "device.connect.ack": "装置接続を確認",
+  "device.disconnect.issued": "装置へ切断を指示",
+  "device.disconnect.ack": "装置切断を確認",
+  "device.ping.issued": "装置へ応答確認を送信",
+  "device.ping.ack": "装置の応答を確認",
+  "device.inflate.issued": "装置へ膨張を指示",
+  "device.inflate.ack": "膨張指示の受理を確認",
+  "device.deflate.issued": "装置へ収縮を指示",
+  "device.deflate.ack": "収縮指示の受理を確認",
+  "device.deflate.complete": "装置の収縮完了を確認",
+  "device.stop.issued": "装置へ停止を指示",
+  "device.stop.ack": "停止指示の受理を確認",
+  "device.status": "装置状態を更新",
+  "device.safetyCommandFailed": "安全停止命令に失敗",
+};
+
 const PROCESSING_LABELS: Readonly<Record<ProcessingLocation, string>> = {
   cloud: "クラウド",
   local: "この端末内",
@@ -57,8 +102,20 @@ function connectionLabel(status: RealtimeStatus): string {
 }
 
 function deviceLabel(device: DeviceStatus): string {
-  const mode = device.mode === "mock" ? "Mock" : device.mode === "serial" ? "Serial" : "未確認";
-  return `${mode} / ${device.state}`;
+  return `${DEVICE_MODE_LABELS[device.mode]} / ${DEVICE_STATE_LABELS[device.state]}`;
+}
+
+function eventLabel(type: string): string {
+  if (type.startsWith("phase.")) {
+    const phase = type.slice("phase.".length);
+    if (phase in PHASE_LABELS) return `フェーズ: ${PHASE_LABELS[phase as ExperimentPhase]}`;
+  }
+  return EVENT_LABELS[type] ?? "システムイベント";
+}
+
+function eventDetail(detail: string): string {
+  if (detail in DEVICE_STATE_LABELS) return DEVICE_STATE_LABELS[detail as DeviceStatus["state"]];
+  return detail;
 }
 
 interface StatusItemProps {
@@ -206,7 +263,7 @@ function SessionOverview({
         <StatusItem label="フグ目標レベル" value={session.fixedState.pufferLevel.toFixed(2)} />
         <StatusItem label="参加者画面" value={session.displayConnected ? "接続済み" : "未接続"} />
         <StatusItem
-          label="Fullscreen API"
+          label="全画面表示"
           value={session.displayFullscreen === null ? "未通知" : session.displayFullscreen ? "全画面" : "通常表示"}
         />
         <StatusItem label="リアルタイム同期" value={connectionLabel(realtimeStatus)} />
@@ -278,7 +335,7 @@ function ActionPanel({
             <ul aria-label="開始条件">
               <li data-ready={session.displayConnected}>参加者画面: {session.displayConnected ? "接続済み" : "接続待ち"}</li>
               <li data-ready={session.device.connected}>装置: {session.device.connected ? "接続済み" : "接続待ち"}</li>
-              <li data-ready={session.device.state === "idle"}>装置状態: {session.device.state}</li>
+              <li data-ready={session.device.state === "idle"}>装置状態: {DEVICE_STATE_LABELS[session.device.state]}</li>
               <li data-ready={(session.device.level ?? 0) === 0}>収縮状態: {(session.device.level ?? 0) === 0 ? "確認済み" : "未完了"}</li>
             </ul>
             <label className="check-row compact-check">
@@ -287,7 +344,7 @@ function ActionPanel({
                 checked={fullscreenConfirmed}
                 onChange={(event) => onFullscreenConfirmed(event.target.checked)}
               />
-              参加者画面をF11またはkioskで全画面表示し、目視確認済み
+              参加者画面をF11またはキオスクモードで全画面表示し、目視確認済み
             </label>
             <button type="button" className="primary-button" onClick={() => onAction("prepare")} disabled={busy || !readyForIntro}>
               共通導入を表示
@@ -361,10 +418,10 @@ function DeviceAndEvents({
     <aside className="operator-side-column">
       <section className="operator-card compact-card" aria-labelledby="device-status-title">
         <div className="card-heading compact-heading"><div><h2 id="device-status-title">装置状態</h2></div></div>
-        <p className="device-mode-badge">装置モード: {device.mode === "mock" ? "Mock" : "Serial"}</p>
+        <p className="device-mode-badge">装置モード: {DEVICE_MODE_LABELS[device.mode]}</p>
         <dl className="device-details">
           <StatusItem label="接続" value={device.connected ? "接続済み" : "未接続"} />
-          <StatusItem label="状態" value={device.state} />
+          <StatusItem label="状態" value={DEVICE_STATE_LABELS[device.state]} />
           <StatusItem label="レベル" value={device.level === null ? "—" : device.level.toFixed(2)} />
           <StatusItem label="異常" value={device.fault ?? "なし"} />
         </dl>
@@ -381,8 +438,8 @@ function DeviceAndEvents({
             {[...events].reverse().map((event, index) => (
               <li key={`${event.at}-${event.type}-${index}`}>
                 <time>{event.at.length === 0 ? "—" : new Date(event.at).toLocaleTimeString("ja-JP")}</time>
-                <strong>{event.type}</strong>
-                {event.detail.length === 0 ? null : <span>{event.detail}</span>}
+                <strong>{eventLabel(event.type)}<code>{event.type}</code></strong>
+                {event.detail.length === 0 ? null : <span>{eventDetail(event.detail)}</span>}
               </li>
             ))}
           </ol>

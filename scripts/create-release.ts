@@ -465,8 +465,8 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
 
     const finalProvenance = await collectSourceProvenance(rootDirectory);
     if (
-      finalProvenance.sourceCommit !== sourceProvenance.sourceCommit
-      || finalProvenance.sourceRepository !== sourceProvenance.sourceRepository
+      finalProvenance.sourceCommit !== sourceProvenance.sourceCommit ||
+      finalProvenance.sourceRepository !== sourceProvenance.sourceRepository
     ) {
       throw new Error("Git source provenance changed while the release was being generated.");
     }
@@ -487,10 +487,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     if (verification.errors.length > 0) {
       throw new Error(`Generated release failed verification: ${verification.errors.join("; ")}`);
     }
-    if (
-      manifestSha256 === null
-      || verification.sourceCommit !== sourceProvenance.sourceCommit
-    ) {
+    if (manifestSha256 === null || verification.sourceCommit !== sourceProvenance.sourceCommit) {
       throw new Error("Generated release provenance could not be verified.");
     }
     await rename(stagingDirectory, outputDirectory);

@@ -20,7 +20,7 @@ export interface ApiAppOptions {
 }
 
 export interface ApplicationOptions extends ApiAppOptions {
-  readonly mode: "development" | "production" | "test";
+  readonly mode: "development" | "production" | "rehearsal" | "test";
   readonly rootDirectory?: string;
 }
 
@@ -107,7 +107,7 @@ export async function createApplication(options: ApplicationOptions): Promise<Ap
     });
     app.use(vite.middlewares);
     close = async () => vite.close();
-  } else if (options.mode === "production") {
+  } else if (options.mode === "production" || options.mode === "rehearsal") {
     const clientDirectory = resolve(rootDirectory, "dist");
     const indexPath = resolve(clientDirectory, "index.html");
     if (!existsSync(indexPath)) {

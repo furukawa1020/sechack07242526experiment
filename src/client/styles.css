@@ -983,6 +983,8 @@ button:disabled {
 .event-list { max-height: 340px; overflow-y: auto; }
 .event-list li { display: grid; grid-template-columns: 74px 1fr; gap: 4px 9px; padding: 10px 3px; border-top: 1px solid #e1e5ec; font-size: 12px; }
 .event-list time { color: #788396; }
+.event-list strong { display: grid; gap: 2px; }
+.event-list strong code { color: #738096; font-size: 10px; font-weight: 600; overflow-wrap: anywhere; }
 .event-list span { grid-column: 2; color: #5d6a7f; overflow-wrap: anywhere; }
 
 .operator-banner {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   PUBLIC_DEMO_CONDITIONS,
@@ -12,6 +12,58 @@ import {
   type DemoProcessingLocation,
   type PublicDemoCondition,
 } from "./content.js";
+
+export type PublicDemoRehearsalPhase = "handling" | "processing" | "result" | "reset";
+type PublicDemoConditionIndex = 0 | 1 | 2 | 3;
+type PublicDemoPufferMotion = "resting" | "inflating" | "holding" | "deflating";
+
+export interface PublicDemoRehearsalFrame {
+  readonly conditionIndex: PublicDemoConditionIndex;
+  readonly phase: PublicDemoRehearsalPhase;
+}
+
+export interface PublicDemoRehearsalTimingMs {
+  readonly handling: number;
+  readonly processing: number;
+  readonly result: number;
+  readonly reset: number;
+  readonly pufferInflate: number;
+  readonly pufferDeflate: number;
+}
+
+export const PUBLIC_DEMO_REHEARSAL_TIMING_MS = Object.freeze({
+  handling: 8_000,
+  processing: 3_000,
+  result: 15_000,
+  reset: 7_000,
+  pufferInflate: 6_000,
+  pufferDeflate: 6_000,
+} as const satisfies PublicDemoRehearsalTimingMs);
+
+const FIRST_REHEARSAL_FRAME: PublicDemoRehearsalFrame = Object.freeze({
+  conditionIndex: 0,
+  phase: "handling",
+});
+
+export function nextRehearsalFrame(
+  frame: PublicDemoRehearsalFrame,
+): PublicDemoRehearsalFrame | null {
+  switch (frame.phase) {
+    case "handling":
+      return { ...frame, phase: "processing" };
+    case "processing":
+      return { ...frame, phase: "result" };
+    case "result":
+      return { ...frame, phase: "reset" };
+    case "reset":
+      return frame.conditionIndex === PUBLIC_DEMO_CONDITIONS.length - 1
+        ? null
+        : {
+            conditionIndex: (frame.conditionIndex + 1) as PublicDemoConditionIndex,
+            phase: "handling",
+          };
+  }
+}
 
 type HandlingIconKind = DemoProcessingLocation | "storage" | "audience";
 
@@ -125,9 +177,26 @@ function HandlingPanel({
   );
 }
 
-function PufferFigure(): React.JSX.Element {
+function PufferFigure({
+  motion = "holding",
+  motionDurationMs = PUBLIC_DEMO_REHEARSAL_TIMING_MS.pufferInflate,
+}: {
+  readonly motion?: PublicDemoPufferMotion;
+  readonly motionDurationMs?: number;
+}): React.JSX.Element {
+  const motionStyle = {
+    "--public-demo-puffer-motion-duration": `${motionDurationMs}ms`,
+  } as React.CSSProperties;
+
   return (
-    <div className="public-demo-puffer" data-testid="public-demo-puffer" aria-hidden="true">
+    <div
+      aria-hidden="true"
+      className="public-demo-puffer"
+      data-motion-duration-ms={motionDurationMs}
+      data-puffer-motion={motion}
+      data-testid="public-demo-puffer"
+      style={motionStyle}
+    >
       <span className="public-demo-puffer-tail" />
       <span className="public-demo-puffer-body">
         <span className="public-demo-puffer-eye" />
@@ -139,8 +208,12 @@ function PufferFigure(): React.JSX.Element {
 
 function ResultPanel({
   condition,
+  pufferMotion = "holding",
+  pufferMotionDurationMs = PUBLIC_DEMO_REHEARSAL_TIMING_MS.pufferInflate,
 }: {
   readonly condition: PublicDemoCondition;
+  readonly pufferMotion?: PublicDemoPufferMotion;
+  readonly pufferMotionDurationMs?: number;
 }): React.JSX.Element {
   return (
     <section className="public-demo-panel public-demo-result" data-testid="result-panel">
@@ -157,7 +230,7 @@ function ResultPanel({
         </div>
       ) : (
         <div className="public-demo-puffer-result">
-          <PufferFigure />
+          <PufferFigure motion={pufferMotion} motionDurationMs={pufferMotionDurationMs} />
           <div>
             <p>{PUBLIC_DEMO_COPY.result.puffer}</p>
             <small>{PUBLIC_DEMO_COPY.result.deviceNote}</small>

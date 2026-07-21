@@ -295,25 +295,22 @@ describe("deployment manifest verification", () => {
     expect(output).toContainEqual(expect.stringContaining("結果: PASS"));
   });
 
-  it.each(["missing", "invalid"] as const)(
-    "rejects a %s source commit",
-    async (variant) => {
-      const { root } = await createManifestFixture();
-      const manifestPath = join(root, RELEASE_MANIFEST_NAME);
-      const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
-      if (variant === "missing") {
-        delete parsed.sourceCommit;
-      } else {
-        parsed.sourceCommit = "not-a-full-git-commit";
-      }
-      await writeFile(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  it.each(["missing", "invalid"] as const)("rejects a %s source commit", async (variant) => {
+    const { root } = await createManifestFixture();
+    const manifestPath = join(root, RELEASE_MANIFEST_NAME);
+    const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    if (variant === "missing") {
+      delete parsed.sourceCommit;
+    } else {
+      parsed.sourceCommit = "not-a-full-git-commit";
+    }
+    await writeFile(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
 
-      const verification = await verifyReleaseDirectoryDetailed(root);
-      expect(verification.errors).toEqual(["Deployment manifest has an invalid structure."]);
-      expect(verification.sourceCommit).toBeNull();
-      expect(verification.manifestSha256).toMatch(/^[a-f0-9]{64}$/u);
-    },
-  );
+    const verification = await verifyReleaseDirectoryDetailed(root);
+    expect(verification.errors).toEqual(["Deployment manifest has an invalid structure."]);
+    expect(verification.sourceCommit).toBeNull();
+    expect(verification.manifestSha256).toMatch(/^[a-f0-9]{64}$/u);
+  });
 
   it("detects controlled file modification even when its byte length is unchanged", async () => {
     const { root } = await createManifestFixture();
@@ -383,6 +380,21 @@ describe("deployment manifest verification", () => {
 });
 
 describe("release creation", () => {
+  it("rejects a dirty Git worktree before producing output", async () => {
+    const root = await createReleaseSource();
+    await writeRelative(root, "untracked-after-commit.txt", "not sealed\n");
+    await expect(
+      createRelease({
+        rootDirectory: root,
+        configPath: "config/site-production.json",
+        outputPath: "release/dirty",
+        installDependencies: false,
+        writeLine: () => undefined,
+      }),
+    ).rejects.toThrow("worktree must be clean");
+    expect(await pathExists(join(root, "release", "dirty"))).toBe(false);
+  });
+
   it.each([
     ["Mock device", { mode: "mock", serialPath: "" } satisfies ConfigOverrides, "device.mode"],
     [
@@ -412,12 +424,14 @@ describe("release creation", () => {
 
   it("creates only the approved offline payload and a self-consistent manifest", async () => {
     const root = await createReleaseSource();
+    const sourceCommit = await runGit(root, ["rev-parse", "HEAD"]);
+    const outputLines: string[] = [];
     const output = await createRelease({
       rootDirectory: root,
       configPath: "config/site-production.json",
       outputPath: "release/approved",
       installDependencies: false,
-      writeLine: () => undefined,
+      writeLine: (line) => outputLines.push(line),
     });
     expect(output).toBe(join(root, "release", "approved"));
 
@@ -471,8 +485,15 @@ describe("release creation", () => {
     ) as ReleaseManifest;
     expect(manifest.appVersion).toBe("9.8.7");
     expect(manifest.protocolVersion).toBe("release-test-v1");
+    expect(manifest.sourceCommit).toBe(sourceCommit);
+    expect(manifest.sourceCommit).toMatch(/^[a-f0-9]{40}$/u);
+    expect(manifest.sourceRepository).toBe(SYNTHETIC_SOURCE_REPOSITORY);
     expect(manifest.files.some((file) => file.path.startsWith("data/"))).toBe(false);
     expect(await verifyReleaseDirectory(output)).toEqual([]);
+    const manifestSha256 = await sha256ReleaseManifest(output);
+    expect(outputLines).toContain(`Source commit: ${sourceCommit}`);
+    expect(outputLines).toContain(`Source repository: ${SYNTHETIC_SOURCE_REPOSITORY}`);
+    expect(outputLines).toContain(`Deployment manifest SHA-256: ${manifestSha256}`);
 
     const launcher = await readFile(join(output, "START_PRODUCTION.cmd"), "utf8");
     expect(launcher).not.toContain("--allow-mock");

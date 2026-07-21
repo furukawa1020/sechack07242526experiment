@@ -15,15 +15,25 @@ import {
 } from "../../../scripts/preflight.js";
 import {
   parseExperimentConfig,
+  STUDY_FORM_URL,
   type ExperimentConfig,
 } from "../../../src/shared/schemas.js";
+
+const PENDING_FORM_AUDIT = Object.freeze({
+  status: "pending" as const,
+  reviewedUrl: "" as const,
+  reviewedAt: null,
+  reviewerCount: 0 as const,
+});
 
 function configSource(overrides: {
   readonly mode?: "mock" | "serial";
   readonly serialPath?: string;
   readonly allowMockInProduction?: boolean;
   readonly formUrl?: string;
+  readonly formAudit?: Record<string, unknown>;
 } = {}): Record<string, unknown> {
+  const formUrl = overrides.formUrl ?? STUDY_FORM_URL;
   return {
     schemaVersion: 1,
     protocolVersion: "test-protocol-v1",
@@ -48,7 +58,13 @@ function configSource(overrides: {
       ackTimeout: 1_000,
       allowMockInProduction: overrides.allowMockInProduction ?? false,
     },
-    formUrl: overrides.formUrl ?? "https://docs.google.com/forms/d/example/viewform",
+    formUrl,
+    formAudit: overrides.formAudit ?? {
+      status: "approved",
+      reviewedUrl: formUrl,
+      reviewedAt: "2026-07-21T12:00:00+09:00",
+      reviewerCount: 2,
+    },
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -106,11 +122,38 @@ describe("preflight production gates", () => {
       .toEqual([]);
   });
 
+  it("rejects a different Google Forms URL even when its shape and audit are valid", () => {
+    const differentUrl = "https://docs.google.com/forms/d/example/viewform";
+    const config = parseExperimentConfig(configSource({
+      formUrl: differentUrl,
+      formAudit: {
+        status: "approved",
+        reviewedUrl: differentUrl,
+        reviewedAt: "2026-07-21T12:00:00+09:00",
+        reviewerCount: 2,
+      },
+    }));
+    expect(evaluatePreflightGates(config, false).find(
+      (check) => check.name === "formUrl",
+    )?.status).toBe("fail");
+  });
+
+  it("requires two-person form audit approval for production only", () => {
+    const config = parseExperimentConfig(configSource({ formAudit: PENDING_FORM_AUDIT }));
+    expect(evaluatePreflightGates(config, false).find(
+      (check) => check.name === "formAudit",
+    )?.status).toBe("fail");
+    expect(evaluatePreflightGates(config, true).find(
+      (check) => check.name === "formAudit",
+    )?.status).toBe("warning");
+  });
+
   it("fails Mock and missing form data in production but permits development Mock checking", () => {
     const mock = parseExperimentConfig(configSource({
       mode: "mock",
       serialPath: "",
       formUrl: "",
+      formAudit: PENDING_FORM_AUDIT,
     }));
     const productionFailures = evaluatePreflightGates(mock, false)
       .filter((check) => check.status === "fail")
@@ -119,6 +162,7 @@ describe("preflight production gates", () => {
       "device.mode",
       "device.serialPath",
       "formUrl",
+      "formAudit",
     ]));
     expect(evaluatePreflightGates(mock, true).some((check) => check.status === "fail"))
       .toBe(false);
@@ -156,7 +200,12 @@ describe("preflight report safety", () => {
     await mkdir(join(root, "data"));
     await writeFile(
       join(root, "config", "experiment.json"),
-      JSON.stringify(configSource({ mode: "mock", serialPath: "", formUrl: "" })),
+      JSON.stringify(configSource({
+        mode: "mock",
+        serialPath: "",
+        formUrl: "",
+        formAudit: PENDING_FORM_AUDIT,
+      })),
       "utf8",
     );
     const output: string[] = [];
@@ -172,6 +221,7 @@ describe("preflight report safety", () => {
     expect(exitCode).toBe(0);
     expect(output.join("\n")).toContain("結果: PASS");
     expect(output.join("\n")).toContain("SHA-256");
+    expect(output.join("\n")).toContain("フォーム監査: pending");
     expect(output.join("\n")).not.toContain(secret);
   });
 });

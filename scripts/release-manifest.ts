@@ -75,10 +75,10 @@ export function isCredentialFreeSourceRepository(value: string): boolean {
   }
   if (!["https:", "ssh:", "git:"].includes(parsed.protocol)) return false;
   if (
-    parsed.hostname.length === 0
-    || parsed.password.length > 0
-    || parsed.search.length > 0
-    || parsed.hash.length > 0
+    parsed.hostname.length === 0 ||
+    parsed.password.length > 0 ||
+    parsed.search.length > 0 ||
+    parsed.hash.length > 0
   ) {
     return false;
   }
@@ -86,7 +86,10 @@ export function isCredentialFreeSourceRepository(value: string): boolean {
   return parsed.pathname.length > 1;
 }
 
-async function listRegularFiles(rootDirectory: string, currentDirectory = rootDirectory): Promise<readonly string[]> {
+async function listRegularFiles(
+  rootDirectory: string,
+  currentDirectory = rootDirectory,
+): Promise<readonly string[]> {
   const entries = await readdir(currentDirectory, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
@@ -97,7 +100,7 @@ async function listRegularFiles(rootDirectory: string, currentDirectory = rootDi
       throw new Error(`Symbolic links are not allowed in a release: ${relativePath}`);
     }
     if (entry.isDirectory()) {
-      files.push(...await listRegularFiles(rootDirectory, absolutePath));
+      files.push(...(await listRegularFiles(rootDirectory, absolutePath)));
       continue;
     }
     if (!entry.isFile()) {
@@ -113,22 +116,18 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
   if (value === null || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   if (
-    candidate.schemaVersion !== 2
-    || typeof candidate.appVersion !== "string"
-    || typeof candidate.protocolVersion !== "string"
-    || !SHA256_PATTERN.test(String(candidate.configHash))
-    || !SHA256_PATTERN.test(String(candidate.configFileHash))
-    || typeof candidate.sourceCommit !== "string"
-    || !SOURCE_COMMIT_PATTERN.test(candidate.sourceCommit)
-    || (
-      candidate.sourceRepository !== undefined
-      && (
-        typeof candidate.sourceRepository !== "string"
-        || !isCredentialFreeSourceRepository(candidate.sourceRepository)
-      )
-    )
-    || typeof candidate.createdAt !== "string"
-    || !Array.isArray(candidate.files)
+    candidate.schemaVersion !== 2 ||
+    typeof candidate.appVersion !== "string" ||
+    typeof candidate.protocolVersion !== "string" ||
+    !SHA256_PATTERN.test(String(candidate.configHash)) ||
+    !SHA256_PATTERN.test(String(candidate.configFileHash)) ||
+    typeof candidate.sourceCommit !== "string" ||
+    !SOURCE_COMMIT_PATTERN.test(candidate.sourceCommit) ||
+    (candidate.sourceRepository !== undefined &&
+      (typeof candidate.sourceRepository !== "string" ||
+        !isCredentialFreeSourceRepository(candidate.sourceRepository))) ||
+    typeof candidate.createdAt !== "string" ||
+    !Array.isArray(candidate.files)
   ) {
     return false;
   }
@@ -136,22 +135,24 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
   if (runtime === null || typeof runtime !== "object") return false;
   const runtimeRecord = runtime as Record<string, unknown>;
   if (
-    typeof runtimeRecord.node !== "string"
-    || typeof runtimeRecord.platform !== "string"
-    || typeof runtimeRecord.arch !== "string"
+    typeof runtimeRecord.node !== "string" ||
+    typeof runtimeRecord.platform !== "string" ||
+    typeof runtimeRecord.arch !== "string"
   ) {
     return false;
   }
   return candidate.files.every((file) => {
     if (file === null || typeof file !== "object") return false;
     const record = file as Record<string, unknown>;
-    return typeof record.path === "string"
-      && isSafeManifestPath(record.path)
-      && typeof record.bytes === "number"
-      && Number.isSafeInteger(record.bytes)
-      && record.bytes >= 0
-      && typeof record.sha256 === "string"
-      && SHA256_PATTERN.test(record.sha256);
+    return (
+      typeof record.path === "string" &&
+      isSafeManifestPath(record.path) &&
+      typeof record.bytes === "number" &&
+      Number.isSafeInteger(record.bytes) &&
+      record.bytes >= 0 &&
+      typeof record.sha256 === "string" &&
+      SHA256_PATTERN.test(record.sha256)
+    );
   });
 }
 
@@ -171,8 +172,8 @@ export async function createReleaseManifest(
     throw new Error("Release source commit must be a full lowercase 40-character Git commit ID.");
   }
   if (
-    metadata.sourceRepository !== undefined
-    && !isCredentialFreeSourceRepository(metadata.sourceRepository)
+    metadata.sourceRepository !== undefined &&
+    !isCredentialFreeSourceRepository(metadata.sourceRepository)
   ) {
     throw new Error("Release source repository is not a credential-free supported Git URL.");
   }
@@ -186,11 +187,13 @@ export async function createReleaseManifest(
       throw new Error(`Release file escaped the release directory: ${path}`);
     }
     const fileStat = await lstat(absolutePath);
-    files.push(Object.freeze({
-      path,
-      bytes: fileStat.size,
-      sha256: await sha256File(absolutePath),
-    }));
+    files.push(
+      Object.freeze({
+        path,
+        bytes: fileStat.size,
+        sha256: await sha256File(absolutePath),
+      }),
+    );
   }
   return Object.freeze({
     schemaVersion: 2,
@@ -257,10 +260,14 @@ export async function verifyReleaseDirectoryDetailed(
 
   const errors: string[] = [];
   if (parsed.buildRuntime.node !== process.version) {
-    errors.push(`Node runtime mismatch: expected ${parsed.buildRuntime.node}, got ${process.version}`);
+    errors.push(
+      `Node runtime mismatch: expected ${parsed.buildRuntime.node}, got ${process.version}`,
+    );
   }
   if (parsed.buildRuntime.platform !== process.platform) {
-    errors.push(`Platform mismatch: expected ${parsed.buildRuntime.platform}, got ${process.platform}`);
+    errors.push(
+      `Platform mismatch: expected ${parsed.buildRuntime.platform}, got ${process.platform}`,
+    );
   }
   if (parsed.buildRuntime.arch !== process.arch) {
     errors.push(`Architecture mismatch: expected ${parsed.buildRuntime.arch}, got ${process.arch}`);
@@ -270,7 +277,9 @@ export async function verifyReleaseDirectoryDetailed(
   try {
     actualPaths = await listRegularFiles(rootDirectory);
   } catch (error) {
-    errors.push(error instanceof Error ? error.message : "Release contents could not be enumerated.");
+    errors.push(
+      error instanceof Error ? error.message : "Release contents could not be enumerated.",
+    );
   }
   for (const path of actualPaths) {
     if (!expectedPaths.has(path)) errors.push(`Unexpected controlled file: ${path}`);
@@ -287,16 +296,16 @@ export async function verifyReleaseDirectoryDetailed(
       const digest = await sha256File(absolutePath);
       if (digest !== file.sha256) errors.push(`SHA-256 mismatch: ${file.path}`);
     } catch (error) {
-      errors.push(`Missing or unreadable file: ${file.path} (${error instanceof Error ? error.message : "error"})`);
+      errors.push(
+        `Missing or unreadable file: ${file.path} (${error instanceof Error ? error.message : "error"})`,
+      );
     }
   }
   return Object.freeze({
     errors: Object.freeze(errors),
     manifestSha256,
     sourceCommit: parsed.sourceCommit,
-    ...(parsed.sourceRepository === undefined
-      ? {}
-      : { sourceRepository: parsed.sourceRepository }),
+    ...(parsed.sourceRepository === undefined ? {} : { sourceRepository: parsed.sourceRepository }),
   });
 }
 
