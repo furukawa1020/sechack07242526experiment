@@ -123,7 +123,7 @@ https://furukawa1020-sechack-experiment-demo.static.hf.space/
 
 現行版はHugging Face Static Spaceのcommit `f0d3c97f9422b11c892994d159ed38a2bbbc8437`へデプロイ済みである。配布スクリプトによる許可ファイル一覧とSHA-256の照合、配信commit・固有title・application root・JS/CSS参照の照合、および全5経路のHTTP 200確認に成功した。公開HTTPSを対象にしたPlaywright 20ケースもすべて成功した。
 
-現行ローカル成果物には`/`、`/operator/index.html`、`/display/demo/index.html`、`/device-test/index.html`、`/healthz/index.html`の5経路がある。トップの自動リハーサルは4提示を8秒・3秒・15秒・7秒で進め、フグを画面上だけで6秒膨張・保持・6秒収縮する。進行状態はページメモリだけに置き、研究用ID、同意、フォーム、ログ、API、WebSocket、ブラウザ保存、装置アダプタ、実機命令を使用しない。
+公開静的版の現行ローカルビルド成果物には`/`、`/operator/index.html`、`/display/demo/index.html`、`/device-test/index.html`、`/healthz/index.html`の5経路がある。トップの自動リハーサルは4提示を8秒・3秒・15秒・7秒で進め、フグを画面上だけで6秒膨張・保持・6秒収縮する。進行状態はページメモリだけに置き、研究用ID、同意、フォーム、ログ、API、WebSocket、ブラウザ保存、装置アダプタ、実機命令を使用しない。
 
 `npm run test:public-demo`は1366×768、1920×1080、390×844、320×568、844×390の5画面幅で20/20テストに成功し、skipは0件だった。静的デプロイのdry-runはREADME、HTML 5件、同一originのCSS/JSだけを選択した。cloud/device iconは同じ表示枠、色、線幅、寸法、背景、値の文字スタイルを使用し、可視テキストへ英語の`CLOUD`/`LOCAL`を追加していない。公開後は5経路すべてのHTTP 200と実ブラウザ描画、同一ブラウザ内の表示同期、模擬装置操作を再確認し、外部originへのリクエストとWebSocketはいずれも0件だった。アプリ自身は入力、フォーム、QR、内部コード、研究ログ、実機制御、および能動的な外部通信を持たない。この公開デモは本番実験や実参加者には使用しない。
 

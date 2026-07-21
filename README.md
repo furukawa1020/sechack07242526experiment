@@ -171,7 +171,7 @@ npm run test:e2e
 npm run build
 ```
 
-E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認します。スクリーンショットは`npm run screenshots`で`artifacts/screenshots/`へ生成します。
+E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認します。スクリーンショットは`npm run screenshots`で`artifacts/screenshots/`へローカル生成し、Gitおよび公開・本番成果物には含めません。
 
 ## 仕様
 
