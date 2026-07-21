@@ -23,6 +23,12 @@
     "allowMockInProduction": true
   },
   "formUrl": "https://docs.google.com/forms/d/e/TEST_FORM_ID/viewform",
+  "formAudit": {
+    "status": "pending",
+    "reviewedUrl": "",
+    "reviewedAt": null,
+    "reviewerCount": 0
+  },
   "logging": { "directory": "./data/e2e-sessions", "includeAbortedInOrderBalancing": true },
   "network": { "allowLan": false, "allowExternalRuntimeRequests": false }
 }
