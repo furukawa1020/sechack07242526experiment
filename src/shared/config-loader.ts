@@ -146,6 +146,11 @@ export async function loadExperimentConfig(
         `Production form integration policy rejected the config (${productionPolicy.formIssues.join(", ")}).`,
       );
     }
+    if (productionPolicy.networkIssues.length > 0) {
+      throw new Error(
+        `Production network policy rejected the config (${productionPolicy.networkIssues.join(", ")}).`,
+      );
+    }
     if (!productionPolicy.goEvidence.approved) {
       throw new Error(
         `Production GO evidence gate rejected the config (${productionPolicy.goEvidence.issues.join(", ")}).`,

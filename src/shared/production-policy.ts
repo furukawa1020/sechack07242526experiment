@@ -26,6 +26,12 @@ export type ProductionFormPolicyIssueCode =
   | "production-form-url-not-empty"
   | "production-form-audit-present";
 
+export type ProductionNetworkPolicyIssueCode =
+  | "production-bind-host-not-127-0-0-1"
+  | "production-port-not-4173"
+  | "production-lan-access-enabled"
+  | "production-external-runtime-requests-enabled";
+
 export const SCREEN_PRODUCTION_FIXED_STATE = Object.freeze({
   score: 72,
   label: "高ストレス",
@@ -49,12 +55,15 @@ export const SCREEN_PRODUCTION_ORDERS = Object.freeze([
 ] as const);
 
 export const SCREEN_PRODUCTION_RESEARCH_ID_PATTERN = "^SH26-[0-9]{3}$";
+export const SCREEN_PRODUCTION_BIND_HOST = "127.0.0.1";
+export const SCREEN_PRODUCTION_PORT = 4_173;
 
 export interface ProductionPolicyAssessment {
   readonly approved: boolean;
   readonly deviceIssues: readonly ProductionDevicePolicyIssueCode[];
   readonly protocolIssues: readonly ProductionProtocolPolicyIssueCode[];
   readonly formIssues: readonly ProductionFormPolicyIssueCode[];
+  readonly networkIssues: readonly ProductionNetworkPolicyIssueCode[];
   readonly goEvidence: ProductionGoEvidenceAssessment;
 }
 
@@ -72,14 +81,17 @@ export interface ProductionGoEvidenceAssessment {
 export type ProductionPolicySubject = Pick<
   ExperimentConfig,
   | "device"
+  | "bindHost"
   | "fixedState"
   | "formAudit"
   | "formUrl"
   | "goEvidence"
   | "orders"
+  | "port"
   | "protocolVersion"
   | "researchIdPattern"
   | "timingMs"
+  | "network"
 >;
 
 const DAY_MS = 86_400_000;
@@ -354,6 +366,7 @@ export function assessProductionPolicy(
   const deviceIssues: ProductionDevicePolicyIssueCode[] = [];
   const protocolIssues: ProductionProtocolPolicyIssueCode[] = [];
   const formIssues: ProductionFormPolicyIssueCode[] = [];
+  const networkIssues: ProductionNetworkPolicyIssueCode[] = [];
 
   if (subject.device.mode === "mock") {
     deviceIssues.push("mock-device-not-allowed");
@@ -419,6 +432,19 @@ export function assessProductionPolicy(
   if (subject.formAudit !== undefined) {
     formIssues.push("production-form-audit-present");
   }
+
+  if (subject.bindHost !== SCREEN_PRODUCTION_BIND_HOST) {
+    networkIssues.push("production-bind-host-not-127-0-0-1");
+  }
+  if (subject.port !== SCREEN_PRODUCTION_PORT) {
+    networkIssues.push("production-port-not-4173");
+  }
+  if (subject.network.allowLan) {
+    networkIssues.push("production-lan-access-enabled");
+  }
+  if (subject.network.allowExternalRuntimeRequests) {
+    networkIssues.push("production-external-runtime-requests-enabled");
+  }
   const goEvidence = assessProductionGoEvidence(
     subject.goEvidence,
     subject.protocolVersion,
@@ -430,10 +456,12 @@ export function assessProductionPolicy(
     approved: deviceIssues.length === 0
       && protocolIssues.length === 0
       && formIssues.length === 0
+      && networkIssues.length === 0
       && goEvidence.approved,
     deviceIssues: Object.freeze(deviceIssues),
     protocolIssues: Object.freeze(protocolIssues),
     formIssues: Object.freeze(formIssues),
+    networkIssues: Object.freeze(networkIssues),
     goEvidence,
   });
 }

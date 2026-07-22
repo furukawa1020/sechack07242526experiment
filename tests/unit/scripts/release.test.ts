@@ -46,6 +46,7 @@ interface ConfigOverrides {
   readonly formAudit?: Readonly<Record<string, unknown>>;
   readonly loggingDirectory?: string;
   readonly allowExternalRuntimeRequests?: boolean;
+  readonly port?: number;
   readonly researchIdPattern?: string;
 }
 
@@ -69,7 +70,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     protocolVersion,
     studyTitle: "リリース合成設定",
     bindHost: overrides.bindHost ?? "127.0.0.1",
-    port: 4173,
+    port: overrides.port ?? 4173,
     researchIdPattern: overrides.researchIdPattern
       ?? (mode === "screen" ? "^SH26-[0-9]{3}$" : "^TEST-[0-9]{3}$"),
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
@@ -994,9 +995,24 @@ describe("release creation", () => {
       "formAudit",
     ],
     [
+      "non-canonical production host",
+      { bindHost: "localhost" } satisfies ConfigOverrides,
+      "production-bind-host-not-127-0-0-1",
+    ],
+    [
+      "non-canonical production port",
+      { port: 4_174 } satisfies ConfigOverrides,
+      "production-port-not-4173",
+    ],
+    [
+      "LAN access",
+      { allowLan: true } satisfies ConfigOverrides,
+      "production-lan-access-enabled",
+    ],
+    [
       "external runtime requests",
       { allowExternalRuntimeRequests: true } satisfies ConfigOverrides,
-      "allowExternalRuntimeRequests",
+      "production-external-runtime-requests-enabled",
     ],
   ])("rejects %s before producing output", async (_label, overrides, expectedFailure) => {
     const root = await createReleaseSource(overrides);

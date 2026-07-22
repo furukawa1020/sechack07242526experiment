@@ -21,9 +21,11 @@ import {
 } from "../../../src/shared/schemas.js";
 
 interface ConfigOverrides {
+  readonly allowExternalRuntimeRequests?: boolean;
   readonly bindHost?: string;
   readonly allowLan?: boolean;
   readonly deviceMode?: "mock" | "serial" | "screen";
+  readonly port?: number;
   readonly protocolVersion?: string;
 }
 
@@ -42,7 +44,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     protocolVersion,
     studyTitle: "ヘルスチェック合成設定",
     bindHost: overrides.bindHost ?? "127.0.0.1",
-    port: 4173,
+    port: overrides.port ?? 4173,
     researchIdPattern: deviceMode === "screen" ? "^SH26-[0-9]{3}$" : "^TEST-[0-9]{3}$",
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
@@ -68,7 +70,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     },
     network: {
       allowLan: overrides.allowLan ?? false,
-      allowExternalRuntimeRequests: false,
+      allowExternalRuntimeRequests: overrides.allowExternalRuntimeRequests ?? false,
     },
   };
   if (deviceMode !== "screen") return source;
@@ -326,6 +328,42 @@ describe("health payload validation", () => {
       mockRehearsal: true,
       fetchImplementation: healthResponse({}),
     })).rejects.toThrow(/device\.mode/iu);
+  });
+
+  it.each([
+    [
+      "bindHost",
+      { bindHost: "localhost" },
+      "production-bind-host-not-127-0-0-1",
+    ],
+    ["port", { port: 4_174 }, "production-port-not-4173"],
+    [
+      "network.allowLan",
+      { allowLan: true },
+      "production-lan-access-enabled",
+    ],
+    [
+      "network.allowExternalRuntimeRequests",
+      { allowExternalRuntimeRequests: true },
+      "production-external-runtime-requests-enabled",
+    ],
+  ] as const)("rejects a modified production %s boundary before fetching", async (
+    _label,
+    overrides,
+    issueCode,
+  ) => {
+    const root = await createConfigRoot(overrides);
+    let fetchCalled = false;
+    await expect(checkHealth({
+      configPath: "config/experiment.json",
+      rootDirectory: root,
+      timeoutMs: 500,
+      fetchImplementation: (async () => {
+        fetchCalled = true;
+        return new Response();
+      }) as typeof fetch,
+    })).rejects.toThrow(issueCode);
+    expect(fetchCalled).toBe(false);
   });
 
 

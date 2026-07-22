@@ -300,6 +300,20 @@ export function evaluatePreflightGates(
   });
 
   checks.push({
+    name: "network.productionBoundary",
+    status: productionPolicy.networkIssues.length === 0
+      ? "pass"
+      : production
+        ? "fail"
+        : "warning",
+    detail: productionPolicy.networkIssues.length === 0
+      ? "正式productionの待受は127.0.0.1:4173に固定され、LAN公開と外部runtime通信は禁止されています。"
+      : production
+        ? `正式productionのネットワーク境界が固定値と一致しません（${productionPolicy.networkIssues.join(", ")}）。`
+        : "開発用Mockのネットワーク設定は正式productionの固定境界とは異なり、本番には使用できません。",
+  });
+
+  checks.push({
     name: "network.allowExternalRuntimeRequests",
     status: config.network.allowExternalRuntimeRequests ? "fail" : "pass",
     detail: config.network.allowExternalRuntimeRequests

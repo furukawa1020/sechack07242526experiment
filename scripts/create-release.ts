@@ -26,6 +26,7 @@ import {
   loadExperimentConfig,
 } from "../src/shared/config-loader.js";
 import {
+  assessProductionPolicy,
   SCREEN_PRODUCTION_FIXED_STATE,
   SCREEN_PRODUCTION_RESEARCH_ID_PATTERN,
 } from "../src/shared/production-policy.js";
@@ -812,6 +813,14 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       configSnapshot.path,
       configSnapshot.sourceBytes,
     );
+    const productionPolicy = assessProductionPolicy(configSnapshot.config, new Date(), {
+      criticalConfigSha256: hashProductionCriticalConfig(configSnapshot.config),
+    });
+    if (productionPolicy.networkIssues.length > 0) {
+      throw new Error(
+        `Production network policy rejected the release config (${productionPolicy.networkIssues.join(", ")}).`,
+      );
+    }
   }
   const report = await collectPreflightReport({
     rootDirectory,

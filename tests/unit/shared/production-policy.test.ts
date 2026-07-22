@@ -7,9 +7,12 @@ import {
   assessProductionPolicy,
   isWindowsComPath,
   SCREEN_PRODUCTION_FIXED_STATE,
+  SCREEN_PRODUCTION_BIND_HOST,
   SCREEN_PRODUCTION_ORDERS,
+  SCREEN_PRODUCTION_PORT,
   SCREEN_PRODUCTION_RESEARCH_ID_PATTERN,
   SCREEN_PRODUCTION_TIMING_MS,
+  type ProductionNetworkPolicyIssueCode,
   type ProductionProtocolPolicyIssueCode,
 } from "../../../src/shared/production-policy.js";
 import {
@@ -65,6 +68,29 @@ const SCREEN_PROTOCOL_MUTATIONS: readonly [
     ...base,
     researchIdPattern: "^[A-Za-z0-9_-]+$",
   } as ExperimentConfig), "screen-research-id-pattern-mismatch"],
+];
+
+const PRODUCTION_NETWORK_MUTATIONS: readonly [
+  string,
+  PolicyMutation,
+  ProductionNetworkPolicyIssueCode,
+][] = [
+  ["bindHost", (base) => ({
+    ...base,
+    bindHost: "localhost",
+  } as ExperimentConfig), "production-bind-host-not-127-0-0-1"],
+  ["port", (base) => ({
+    ...base,
+    port: 4_174,
+  } as ExperimentConfig), "production-port-not-4173"],
+  ["network.allowLan", (base) => ({
+    ...base,
+    network: { ...base.network, allowLan: true },
+  } as ExperimentConfig), "production-lan-access-enabled"],
+  ["network.allowExternalRuntimeRequests", (base) => ({
+    ...base,
+    network: { ...base.network, allowExternalRuntimeRequests: true },
+  } as ExperimentConfig), "production-external-runtime-requests-enabled"],
 ];
 
 function productionConfig(mode: "mock" | "serial" | "screen"): ExperimentConfig {
@@ -451,6 +477,8 @@ describe("shared production policy", () => {
     });
     expect(SCREEN_PRODUCTION_ORDERS).toEqual(["ABDC", "BCAD", "CDBA", "DACB"]);
     expect(SCREEN_PRODUCTION_RESEARCH_ID_PATTERN).toBe("^SH26-[0-9]{3}$");
+    expect(SCREEN_PRODUCTION_BIND_HOST).toBe("127.0.0.1");
+    expect(SCREEN_PRODUCTION_PORT).toBe(4_173);
     expect(Object.isFrozen(SCREEN_PRODUCTION_FIXED_STATE)).toBe(true);
     expect(Object.isFrozen(SCREEN_PRODUCTION_TIMING_MS)).toBe(true);
     expect(Object.isFrozen(SCREEN_PRODUCTION_ORDERS)).toBe(true);
@@ -462,6 +490,15 @@ describe("shared production policy", () => {
       const assessment = assess(mutate(productionConfig("screen")));
       expect(assessment.approved).toBe(false);
       expect(assessment.protocolIssues).toContain(issueCode);
+    },
+  );
+
+  it.each(PRODUCTION_NETWORK_MUTATIONS)(
+    "rejects a modified formal production %s boundary",
+    (_label, mutate, issueCode) => {
+      const assessment = assess(mutate(productionConfig("screen")));
+      expect(assessment.approved).toBe(false);
+      expect(assessment.networkIssues).toEqual([issueCode]);
     },
   );
 

@@ -12,6 +12,7 @@ import {
   type LoadedExperimentConfig,
 } from "../shared/config-loader.js";
 import {
+  assessProductionPolicy,
   SCREEN_PRODUCTION_FIXED_STATE,
   SCREEN_PRODUCTION_ORDERS,
   SCREEN_PRODUCTION_TIMING_MS,
@@ -697,6 +698,14 @@ export async function startProductionReleaseCli(
     rootDirectory: releaseDirectory,
     production: true,
   });
+  const productionPolicy = assessProductionPolicy(loadedConfig.config, new Date(), {
+    criticalConfigSha256: hashProductionCriticalConfig(loadedConfig.config),
+  });
+  if (productionPolicy.networkIssues.length > 0) {
+    throw new Error(
+      `Production network policy rejected the verified startup config (${productionPolicy.networkIssues.join(", ")}).`,
+    );
+  }
   const bindingMismatches = [
     loadedConfig.configFileHash === verification.manifest.configFileHash
       ? null

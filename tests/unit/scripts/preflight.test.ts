@@ -43,7 +43,11 @@ function goFormAudit(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 function configSource(overrides: {
+  readonly allowExternalRuntimeRequests?: boolean;
+  readonly allowLan?: boolean;
+  readonly bindHost?: string;
   readonly mode?: "mock" | "serial" | "screen";
+  readonly port?: number;
   readonly protocolVersion?: string;
   readonly serialPath?: string;
   readonly allowMockInProduction?: boolean;
@@ -60,8 +64,8 @@ function configSource(overrides: {
     schemaVersion: 1,
     protocolVersion,
     studyTitle: "合成テスト設定",
-    bindHost: "127.0.0.1",
-    port: 4173,
+    bindHost: overrides.bindHost ?? "127.0.0.1",
+    port: overrides.port ?? 4173,
     researchIdPattern: mode === "screen" ? "^SH26-[0-9]{3}$" : "^TEST-[0-9]{3}$",
     orders: ["ABDC", "BCAD", "CDBA", "DACB"],
     fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
@@ -86,8 +90,8 @@ function configSource(overrides: {
       includeAbortedInOrderBalancing: true,
     },
     network: {
-      allowLan: false,
-      allowExternalRuntimeRequests: false,
+      allowLan: overrides.allowLan ?? false,
+      allowExternalRuntimeRequests: overrides.allowExternalRuntimeRequests ?? false,
     },
   };
   if (overrides.formAudit !== undefined && overrides.omitFormAudit !== true) {
@@ -339,6 +343,33 @@ describe("preflight production gates", () => {
     expect(evaluatePreflightGates(externalRequests, true).find(
       (check) => check.name === "network.allowExternalRuntimeRequests",
     )?.status).toBe("fail");
+  });
+
+  it.each([
+    [
+      "bindHost",
+      { bindHost: "localhost" },
+      "production-bind-host-not-127-0-0-1",
+    ],
+    ["port", { port: 4_174 }, "production-port-not-4173"],
+    [
+      "network.allowLan",
+      { allowLan: true },
+      "production-lan-access-enabled",
+    ],
+    [
+      "network.allowExternalRuntimeRequests",
+      { allowExternalRuntimeRequests: true },
+      "production-external-runtime-requests-enabled",
+    ],
+  ] as const)("rejects a modified production %s boundary", (_label, overrides, issueCode) => {
+    const config = parseExperimentConfig(configSource(overrides));
+    expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
+      (check) => check.name === "network.productionBoundary",
+    )).toMatchObject({
+      status: "fail",
+      detail: expect.stringContaining(issueCode),
+    });
   });
 
   it("rejects a Serial path on a screen production config", () => {
