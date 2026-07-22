@@ -337,6 +337,11 @@ describe("shared production policy", () => {
       ...base,
       goEvidence: {
         ...evidence,
+        screenPilot: {
+          ...evidence.screenPilot,
+          sourceTreeSha256: fixtureDigest("different-pilot-source"),
+          pilotConfigFileHash: "a".repeat(64),
+        },
         researchPlan: {
           ...evidence.researchPlan,
           documentId: "TODO-RESEARCH-PLAN",
@@ -354,9 +359,29 @@ describe("shared production policy", () => {
       "researchPlan:document-id-placeholder",
       "researchPlan:document-version-placeholder",
       "researchPlan:content-sha256-unapproved",
+      "screenPilot:pilot-config-file-hash-unapproved",
+      "screenPilot:source-tree-sha256-mismatch",
       "releaseVerification:app-version-placeholder",
       "releaseVerification:source-tree-sha256-unapproved",
     ]));
+  });
+
+  it("requires the approved pilot source tree to equal the release candidate tree", () => {
+    const base = productionConfig("screen");
+    const evidence = base.goEvidence!;
+    const invalid = {
+      ...base,
+      goEvidence: {
+        ...evidence,
+        screenPilot: {
+          ...evidence.screenPilot,
+          sourceTreeSha256: fixtureDigest("different-pilot-source"),
+        },
+      },
+    } as ExperimentConfig;
+    expect(assess(invalid).goEvidence.issues).toContain(
+      "screenPilot:source-tree-sha256-mismatch",
+    );
   });
 
   it("requires fresh, version-matched and distinct independent release attestations", () => {

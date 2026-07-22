@@ -27,6 +27,7 @@ import {
   STUDY_FORM_URL,
 } from "../../../src/shared/schemas.js";
 import { ExperimentLogger } from "../../../src/server/logging/experiment-log.js";
+import { hashTrackedSourceTreeAtCommit } from "../../../scripts/create-release.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -219,6 +220,11 @@ async function createScreenPilotFixture(
     writeFile(
       join(root, "config", "experiment.screen-pilot.json"),
       `${JSON.stringify(source, null, 2)}\n`,
+      "utf8",
+    ),
+    writeFile(
+      join(root, "config", "experiment.production.json"),
+      "production evidence is deliberately excluded from the common source digest\n",
       "utf8",
     ),
   ]);
@@ -843,6 +849,9 @@ describe("startServer production safeguards", () => {
     const configBytes = await readFile(join(root, "config", "experiment.screen-pilot.json"));
     expect(server.sourceEvidence.configFileHash)
       .toBe(createHash("sha256").update(configBytes).digest("hex"));
+    expect(server.sourceEvidence.sourceTreeSha256).toBe(
+      await hashTrackedSourceTreeAtCommit(root, server.sourceEvidence.sourceCommit),
+    );
 
     const operatorConfig = await fetch(`${server.url}/api/operator/config`);
     await expect(operatorConfig.json()).resolves.toMatchObject({

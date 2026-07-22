@@ -269,7 +269,15 @@ describe("experiment config schema", () => {
     };
     const parsed = parseExperimentConfig(withApprovedGoEvidence(screen));
     expect(parsed.goEvidence?.screenPilot.completedSessions).toBe(3);
+    expect(parsed.goEvidence?.screenPilot.sourceTreeSha256).toBe(fixtureDigest("source-tree"));
+    expect(parsed.goEvidence?.screenPilot.pilotConfigFileHash).toBe(fixtureDigest("pilot-config"));
     expect(Object.isFrozen(parsed.goEvidence)).toBe(true);
+
+    const withoutPilotConfigHash = withApprovedGoEvidence(screen);
+    delete ((withoutPilotConfigHash["goEvidence"] as Record<string, unknown>)[
+      "screenPilot"
+    ] as Record<string, unknown>)["pilotConfigFileHash"];
+    expect(() => parseExperimentConfig(withoutPilotConfigHash)).toThrow(/pilotConfigFileHash/iu);
 
     const withName = withApprovedGoEvidence(screen);
     (withName["goEvidence"] as Record<string, unknown>)["reviewerName"] = "must-not-be-stored";

@@ -911,6 +911,42 @@ describe("release creation", () => {
     ).rejects.toThrow("goEvidence.releaseVerification.sourceTreeSha256");
   });
 
+  it("rejects a pilot config whose tracked bytes differ from the approved pilot hash", async () => {
+    const root = await createReleaseSource();
+    const pilotConfigPath = join(root, "config", "experiment.screen-pilot.json");
+    await writeFile(
+      pilotConfigPath,
+      `${JSON.stringify({ fixture: "changed-screen-pilot", protocolVersion: SCREEN_PROTOCOL_VERSION })}\n`,
+      "utf8",
+    );
+    await runGit(root, ["add", "--", "config/experiment.screen-pilot.json"]);
+    await runGit(root, ["commit", "--quiet", "-m", "Change pilot config after approval"]);
+
+    const sourceCommit = await runGit(root, ["rev-parse", "HEAD"]);
+    const sourceTreeSha256 = await hashTrackedSourceTreeAtCommit(root, sourceCommit);
+    const productionConfigPath = join(root, "config", "experiment.production.json");
+    const productionConfig = JSON.parse(
+      await readFile(productionConfigPath, "utf8"),
+    ) as Record<string, unknown>;
+    const goEvidence = productionConfig["goEvidence"] as Record<string, unknown>;
+    const releaseVerification = goEvidence["releaseVerification"] as Record<string, unknown>;
+    const screenPilot = goEvidence["screenPilot"] as Record<string, unknown>;
+    releaseVerification["sourceTreeSha256"] = sourceTreeSha256;
+    screenPilot["sourceTreeSha256"] = sourceTreeSha256;
+    await writeFile(productionConfigPath, JSON.stringify(productionConfig), "utf8");
+    await runGit(root, ["add", "--", "config/experiment.production.json"]);
+    await runGit(root, ["commit", "--quiet", "-m", "Refresh tree evidence only"]);
+
+    await expect(
+      createRelease({
+        rootDirectory: root,
+        configPath: "config/experiment.production.json",
+        outputPath: "release/stale-pilot-config",
+        writeLine: () => undefined,
+      }),
+    ).rejects.toThrow("goEvidence.screenPilot.pilotConfigFileHash");
+  });
+
   it("compares approved appVersion with the package.json at HEAD", async () => {
     const root = await createReleaseSource();
     const packagePath = join(root, "package.json");
