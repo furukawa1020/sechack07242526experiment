@@ -24,6 +24,7 @@ import type {
   PufferDevice,
 } from "../contracts.js";
 import { createLogEvent } from "../logging/index.js";
+import type { ScreenPilotSourceEvidence } from "../screen-pilot-provenance.js";
 
 const TERMINAL_PHASES = new Set<ExperimentPhase>(["completed", "aborted"]);
 const TIMED_PHASES = new Set<ExperimentPhase>(["handling", "processing", "result", "reset"]);
@@ -53,6 +54,7 @@ export interface SessionControllerOptions {
   readonly rehearsal: boolean;
   readonly device: PufferDevice;
   readonly logger: SessionLogWriter;
+  readonly screenPilotSourceEvidence?: ScreenPilotSourceEvidence;
   readonly random?: () => number;
   readonly now?: () => Date;
   readonly monotonicNow?: () => number;
@@ -84,6 +86,7 @@ export class SessionController {
   private readonly rehearsal: boolean;
   private readonly device: PufferDevice;
   private readonly logger: SessionLogWriter;
+  private readonly screenPilotSourceEvidence: ScreenPilotSourceEvidence | undefined;
   private readonly random: () => number;
   private readonly now: () => Date;
   private readonly monotonicNow: () => number;
@@ -110,6 +113,8 @@ export class SessionController {
   private lastDeviceStatus: DeviceStatus | null = null;
   private lastSafetyFailure: Error | null = null;
   private auditStorageHealthy = true;
+  private operatorLeaseSupervisionEnabled = false;
+  private operatorLeaseAvailable = false;
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly unsubscribeDevice: () => void;
 
@@ -120,6 +125,7 @@ export class SessionController {
     this.rehearsal = options.rehearsal;
     this.device = options.device;
     this.logger = options.logger;
+    this.screenPilotSourceEvidence = options.screenPilotSourceEvidence;
     this.random = options.random ?? Math.random;
     this.now = options.now ?? (() => new Date());
     this.monotonicNow = options.monotonicNow ?? (() => performance.now());
@@ -212,6 +218,14 @@ export class SessionController {
     const id = randomUUID();
     const displayToken = randomBytes(32).toString("base64url");
     const timestamp = this.now().toISOString();
+    const reserved = await this.logger.reserveResearchId({
+      researchId: input.researchId,
+      sessionId: id,
+      reservedAt: timestamp,
+    });
+    if (!reserved) {
+      throw conflict("この研究用IDは既に使用されています。", "DUPLICATE_RESEARCH_ID");
+    }
     let initialDeviceStatus: RuntimeSession["deviceStatus"] = "disconnected";
     let initialDeviceLevel = 0;
     try {
@@ -300,12 +314,14 @@ export class SessionController {
   }
 
   public async prepare(sessionId: string): Promise<OperatorSessionSnapshot> {
+    this.requireOperatorLease();
     const initial = this.requireActive(sessionId);
     this.requirePhase(initial, "setup");
     if (!initial.displayConnected) {
       throw conflict("参加者画面の接続を確認してください。", "DISPLAY_NOT_READY");
     }
     const status = await this.runDeviceOperation(() => this.device.getStatus());
+    this.requireOperatorLease();
     const session = this.requireActive(sessionId);
     this.requirePhase(session, "setup");
     if (!session.displayConnected) {
@@ -324,6 +340,7 @@ export class SessionController {
   }
 
   public async start(sessionId: string): Promise<OperatorSessionSnapshot> {
+    this.requireOperatorLease();
     const session = this.requireActive(sessionId);
     this.requirePhase(session, "intro");
     if (session.recoveryRequired) {
@@ -337,6 +354,7 @@ export class SessionController {
   }
 
   public async resume(sessionId: string): Promise<OperatorSessionSnapshot> {
+    this.requireOperatorLease();
     const session = this.requireActive(sessionId);
     if (!session.recoveryRequired) {
       throw conflict("このセッションは復旧確認待ちではありません。", "RECOVERY_NOT_REQUIRED");
@@ -585,8 +603,20 @@ export class SessionController {
     this.emit({ type: "session.snapshot", sessionId: session.id });
   }
 
-  /** A run must never continue unattended after the final Operator connection is lost. */
+  /** Enables the fail-closed lease gate used by the WebSocket supervision layer. */
+  public enableOperatorLeaseSupervision(): void {
+    this.operatorLeaseSupervisionEnabled = true;
+    this.operatorLeaseAvailable = false;
+  }
+
+  /** Marks at least one Operator connection as having completed a round-trip lease challenge. */
+  public markOperatorConnected(): void {
+    this.operatorLeaseAvailable = true;
+  }
+
+  /** A run must never continue unattended after the final confirmed Operator lease is lost. */
   public markOperatorDisconnected(): void {
+    this.operatorLeaseAvailable = false;
     const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
     if (
       active === undefined
@@ -1202,6 +1232,15 @@ export class SessionController {
     }
   }
 
+  private requireOperatorLease(): void {
+    if (this.operatorLeaseSupervisionEnabled && !this.operatorLeaseAvailable) {
+      throw conflict(
+        "研究スタッフ画面のリアルタイム接続を確認してください。",
+        "OPERATOR_CONNECTION_REQUIRED",
+      );
+    }
+  }
+
   private sessionForToken(displayToken: string): RuntimeSession {
     const sessionId = this.displayTokens.get(displayToken);
     if (sessionId === undefined) throw notFound("参加者画面トークンが無効です。", "DISPLAY_TOKEN_NOT_FOUND");
@@ -1314,6 +1353,9 @@ export class SessionController {
       eventType,
       wallClockIso: this.now().toISOString(),
       monotonicMs: this.monotonicNow(),
+      ...(this.screenPilotSourceEvidence === undefined
+        ? {}
+        : { screenPilotSourceEvidence: this.screenPilotSourceEvidence }),
       deviceStatus: session.deviceStatus,
       ...(explicitErrorCode === undefined ? {} : { errorCode: explicitErrorCode }),
     });

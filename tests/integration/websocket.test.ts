@@ -6,7 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseExperimentConfig } from "../../src/shared/index.js";
 import { createApiApp } from "../../src/server/app.js";
 import { MockPufferDevice } from "../../src/server/devices/index.js";
-import type { ExperimentLogEvent, SessionLogSummary } from "../../src/server/logging/index.js";
+import type {
+  ExperimentLogEvent,
+  ResearchIdReservationInput,
+  SessionLogSummary,
+} from "../../src/server/logging/index.js";
 import { SessionController } from "../../src/server/sessions/session-controller.js";
 import { WebSocketHub } from "../../src/server/websocket/websocket-hub.js";
 
@@ -14,6 +18,7 @@ class EmptyLogger {
   public async append(event: ExperimentLogEvent): Promise<void> { void event; }
   public async exportCsv(): Promise<string> { return "sessionId\r\n"; }
   public async hasResearchId(researchId: string): Promise<boolean> { void researchId; return false; }
+  public async reserveResearchId(input: ResearchIdReservationInput): Promise<boolean> { void input; return true; }
   public async listSessionSummaries(): Promise<readonly SessionLogSummary[]> { return []; }
 }
 
@@ -50,19 +55,24 @@ function testConfig() {
 
 interface RunningWebSocketTestServer {
   readonly controller: SessionController;
+  readonly device: MockPufferDevice;
   readonly server: Server;
   readonly hub: WebSocketHub;
   readonly wsUrl: string;
 }
 
-async function start(operatorToken?: string): Promise<RunningWebSocketTestServer> {
+async function start(
+  operatorToken?: string,
+  heartbeat: { readonly timeoutMs?: number; readonly checkIntervalMs?: number } = {},
+): Promise<RunningWebSocketTestServer> {
   const config = testConfig();
+  const device = new MockPufferDevice({ timingMode: "fast", initialConnected: true });
   const controller = new SessionController({
     config,
     configHash: "0".repeat(64),
     appVersion: "1.0.0",
     rehearsal: false,
-    device: new MockPufferDevice({ timingMode: "fast", initialConnected: true }),
+    device,
     logger: new EmptyLogger(),
   });
   const app = createApiApp({
@@ -75,12 +85,13 @@ async function start(operatorToken?: string): Promise<RunningWebSocketTestServer
   const server = createServer(app);
   const hub = new WebSocketHub(server, controller, {
     ...(operatorToken === undefined ? {} : { operatorToken }),
-    heartbeatTimeoutMs: 500,
+    heartbeatTimeoutMs: heartbeat.timeoutMs ?? 500,
+    heartbeatCheckIntervalMs: heartbeat.checkIntervalMs ?? 25,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("Test server did not bind TCP.");
-  return { controller, server, hub, wsUrl: `ws://127.0.0.1:${address.port}/ws` };
+  return { controller, device, server, hub, wsUrl: `ws://127.0.0.1:${address.port}/ws` };
 }
 
 function nextMessage(socket: WebSocket): Promise<unknown> {
@@ -93,6 +104,28 @@ function nextMessage(socket: WebSocket): Promise<unknown> {
   });
 }
 
+function nextMessageOfType(socket: WebSocket, expectedType: string): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error(`Timed out waiting for WebSocket message ${expectedType}.`)),
+      1_000,
+    );
+    const listener = (data: WebSocket.RawData): void => {
+      const message = JSON.parse(data.toString()) as unknown;
+      if (
+        typeof message !== "object"
+        || message === null
+        || Array.isArray(message)
+        || (message as Record<string, unknown>)["type"] !== expectedType
+      ) return;
+      clearTimeout(timeout);
+      socket.off("message", listener);
+      resolve(message);
+    };
+    socket.on("message", listener);
+  });
+}
+
 function waitForOpen(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     socket.once("open", resolve);
@@ -102,6 +135,66 @@ function waitForOpen(socket: WebSocket): Promise<void> {
 
 function waitForClose(socket: WebSocket): Promise<number> {
   return new Promise((resolve) => socket.once("close", (code) => resolve(code)));
+}
+
+interface MaintainedOperatorLease {
+  readonly confirmed: Promise<void>;
+  readonly stop: () => void;
+}
+
+function maintainOperatorLease(socket: WebSocket): MaintainedOperatorLease {
+  let confirmed = false;
+  let resolveConfirmed: (() => void) | undefined;
+  let rejectConfirmed: ((error: Error) => void) | undefined;
+  const confirmation = new Promise<void>((resolve, reject) => {
+    resolveConfirmed = resolve;
+    rejectConfirmed = reject;
+  });
+  const timeout = setTimeout(() => {
+    rejectConfirmed?.(new Error("Timed out waiting for Operator lease confirmation."));
+  }, 2_000);
+  const listener = (data: WebSocket.RawData): void => {
+    let message: unknown;
+    try {
+      message = JSON.parse(data.toString()) as unknown;
+    } catch {
+      return;
+    }
+    if (typeof message !== "object" || message === null || Array.isArray(message)) return;
+    const record = message as Record<string, unknown>;
+    if (record["type"] === "operator.heartbeatAck") {
+      if (!confirmed) {
+        confirmed = true;
+        clearTimeout(timeout);
+        resolveConfirmed?.();
+      }
+      return;
+    }
+    if (record["type"] !== "operator.heartbeatChallenge") return;
+    const payload = record["payload"];
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return;
+    const nonce = (payload as Record<string, unknown>)["nonce"];
+    if (typeof nonce !== "string" || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: "operator.heartbeat", payload: { nonce } }));
+  };
+  socket.on("message", listener);
+  return {
+    confirmed: confirmation,
+    stop(): void {
+      socket.off("message", listener);
+      clearTimeout(timeout);
+    },
+  };
+}
+
+async function connectOperator(wsUrl: string): Promise<{
+  readonly socket: WebSocket;
+  readonly lease: MaintainedOperatorLease;
+}> {
+  const socket = new WebSocket(`${wsUrl}?role=operator`);
+  const lease = maintainOperatorLease(socket);
+  await Promise.all([waitForOpen(socket), lease.confirmed]);
+  return { socket, lease };
 }
 
 async function expectNoMessage(socket: WebSocket, waitMs = 25): Promise<void> {
@@ -188,6 +281,7 @@ describe("WebSocket synchronization", () => {
   it("does not expose an active puffer snapshot to a duplicate display lease", async () => {
     const running = await start();
     runningServers.push(running);
+    const operator = await connectOperator(running.wsUrl);
     const created = await running.controller.create({
       researchId: "SH26-006",
       consentConfirmed: true,
@@ -218,6 +312,8 @@ describe("WebSocket synchronization", () => {
       displayConnected: true,
     });
     await running.controller.abort(created.snapshot.id);
+    operator.lease.stop();
+    operator.socket.close();
     primary.close();
   });
 
@@ -233,11 +329,110 @@ describe("WebSocket synchronization", () => {
     allowed.close();
   });
 
+  it("confirms a round-trip Operator lease and still requires REST for state changes", async () => {
+    const running = await start(undefined, { timeoutMs: 100, checkIntervalMs: 10 });
+    runningServers.push(running);
+    const operator = await connectOperator(running.wsUrl);
+
+    const protocolError = nextMessageOfType(operator.socket, "protocol.error");
+    operator.socket.send(JSON.stringify({ type: "session.start" }));
+    await expect(protocolError).resolves.toEqual({
+      type: "protocol.error",
+      payload: { code: "REST_REQUIRED" },
+    });
+    operator.lease.stop();
+    operator.socket.close();
+  });
+
+  it("blocks prepare after the final Operator lease expires during setup", async () => {
+    const running = await start(undefined, { timeoutMs: 100, checkIntervalMs: 10 });
+    runningServers.push(running);
+    const operator = await connectOperator(running.wsUrl);
+    const created = await running.controller.create({
+      researchId: "SH26-009",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    running.controller.markDisplayReady(created.displayToken, "manual-display");
+
+    operator.lease.stop();
+    const closed = waitForClose(operator.socket);
+    await expect(closed).resolves.toBe(1006);
+    await expect(running.controller.prepare(created.snapshot.id)).rejects.toMatchObject({
+      code: "OPERATOR_CONNECTION_REQUIRED",
+    });
+
+    const replacement = await connectOperator(running.wsUrl);
+    await expect(running.controller.prepare(created.snapshot.id)).resolves.toMatchObject({
+      phase: "intro",
+    });
+    await running.controller.abort(created.snapshot.id);
+    replacement.lease.stop();
+    replacement.socket.close();
+  });
+
+  it("expires a silent final Operator lease and fails the active run safely", async () => {
+    const running = await start(undefined, { timeoutMs: 100, checkIntervalMs: 10 });
+    runningServers.push(running);
+    const operator = await connectOperator(running.wsUrl);
+    const created = await running.controller.create({
+      researchId: "SH26-007",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    running.controller.markDisplayReady(created.displayToken, "manual-display");
+    await running.controller.prepare(created.snapshot.id);
+    await running.controller.start(created.snapshot.id);
+
+    operator.lease.stop();
+    const closed = waitForClose(operator.socket);
+    await expect(closed).resolves.toBe(1006);
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+        phase: "error",
+        errorCode: "OPERATOR_CONNECTION_LOST",
+      });
+    });
+    expect(running.device.commandHistory.map((entry) => entry.command).filter((command) =>
+      command === "stop" || command === "deflate"
+    ).slice(-2)).toEqual(["stop", "deflate"]);
+  });
+
+  it("continues while one of multiple Operator leases is renewed, then fails when all expire", async () => {
+    const running = await start(undefined, { timeoutMs: 300, checkIntervalMs: 10 });
+    runningServers.push(running);
+    const silentOperator = await connectOperator(running.wsUrl);
+    const liveOperator = await connectOperator(running.wsUrl);
+    const created = await running.controller.create({
+      researchId: "SH26-008",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    running.controller.markDisplayReady(created.displayToken, "manual-display");
+    await running.controller.prepare(created.snapshot.id);
+    await running.controller.start(created.snapshot.id);
+
+    silentOperator.lease.stop();
+    const silentClosed = waitForClose(silentOperator.socket);
+    await expect(silentClosed).resolves.toBe(1006);
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    expect(running.controller.getOperatorSnapshot(created.snapshot.id).phase).not.toBe("error");
+
+    liveOperator.lease.stop();
+    const liveClosed = waitForClose(liveOperator.socket);
+    await expect(liveClosed).resolves.toBe(1006);
+    await vi.waitFor(() => {
+      expect(running.controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+        phase: "error",
+        errorCode: "OPERATOR_CONNECTION_LOST",
+      });
+    });
+  });
+
   it("fails an active run safely when the final Operator connection is lost", async () => {
     const running = await start();
     runningServers.push(running);
-    const operator = new WebSocket(`${running.wsUrl}?role=operator`);
-    await waitForOpen(operator);
+    const operator = await connectOperator(running.wsUrl);
     const created = await running.controller.create({
       researchId: "SH26-002",
       consentConfirmed: true,
@@ -252,7 +447,8 @@ describe("WebSocket synchronization", () => {
     await running.controller.prepare(created.snapshot.id);
     await running.controller.start(created.snapshot.id);
 
-    operator.terminate();
+    operator.lease.stop();
+    operator.socket.terminate();
     await vi.waitFor(() => {
       expect(running.controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
         phase: "error",

@@ -5,13 +5,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseExperimentConfig } from "../../src/shared/index.js";
 import { createApiApp } from "../../src/server/app.js";
 import { MockPufferDevice } from "../../src/server/devices/index.js";
-import type { ExperimentLogEvent, SessionLogSummary } from "../../src/server/logging/index.js";
+import type {
+  ExperimentLogEvent,
+  ResearchIdReservationInput,
+  SessionLogSummary,
+} from "../../src/server/logging/index.js";
 import { SessionController } from "../../src/server/sessions/session-controller.js";
 
 class EmptyLogger {
   public async append(event: ExperimentLogEvent): Promise<void> { void event; }
   public async exportCsv(): Promise<string> { return "sessionId\r\n"; }
   public async hasResearchId(researchId: string): Promise<boolean> { void researchId; return false; }
+  public async reserveResearchId(input: ResearchIdReservationInput): Promise<boolean> { void input; return true; }
   public async listSessionSummaries(): Promise<readonly SessionLogSummary[]> { return []; }
 }
 

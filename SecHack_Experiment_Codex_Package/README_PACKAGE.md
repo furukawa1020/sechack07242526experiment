@@ -2,9 +2,12 @@
 
 1. 新しいGitリポジトリのルートへ、このパッケージの内容をコピーします。
 2. `START_HERE.md`の指示をCodexへ渡します。
-3. Codexが実装後、正式な`device.mode=screen`で全4順序と画面上フグの6秒膨張・保持・6秒収縮を確認します。
+3. Codexが実装後、cleanなGit worktreeルートから`npm run screen-pilot`だけを使い、非参加者専用`device.mode=screen`で全4順序と画面上フグの6秒膨張・保持・6秒収縮を確認します。起動時の`sourceCommit`、`sourceTreeSha256`、`configFileHash`と全PILOT JSONLイベントの同名3フィールドが一致することも確認します。直接の`node dist-server/screen-pilot.js`や既存ビルドの流用はしません。
 4. `mock`は開発・自動テスト・明示的な模擬リハーサルだけで使用します。
 5. 実参加者へ使用する前に、二名の独立照合と研究責任者承認により、固定模擬データ、本人非測定、生体データ非取得、画面上フグへの刺激変更および必要な倫理手続きの完了を確認します。
 6. `docs/FORM_RELEASE_GATE.md`を完了し、正式screen用`config/experiment.production.example.json`を承認済み監査値で封印します。同梱例は意図的に`NO-GO`であり、所見を解消せずフラグだけを変更してはいけません。
+7. `docs/GO_EVIDENCE.md`に従い、研究チームの非参加者が専用`screen-pilot`経路を3〜5件完走し、研究計画、倫理判断、提示前同意、データ管理、技術パイロット、独立二名照合を同じ設定・アプリ版・追跡source treeへ結び付けます。実参加者、正式研究用ID、Googleフォーム回答をpilotへ使用しません。
+
+撤回・除外・削除は`docs/DATA_LIFECYCLE.md`に従い、研究責任者が事前承認した外部手順で行います。正式リリースは不可逆な自動変更機能を同梱しません。
 
 このパッケージは、`R8-010-2x2-screen-v1`の実験提示サイトを作るための仕様書です。Googleフォーム本体、実データ、USB機器、物理フグは含みません。`serial`による物理版は将来の別プロトコルです。開発用Mock設定と正式screen設定を混同しないでください。

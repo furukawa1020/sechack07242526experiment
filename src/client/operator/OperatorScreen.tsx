@@ -552,7 +552,11 @@ export function OperatorScreen(): React.JSX.Element {
     const token = getOperatorToken();
     return token === null ? "role=operator" : `role=operator&operatorToken=${encodeURIComponent(token)}`;
   }, []);
-  const realtime = useRealtime({ query: operatorSocketQuery, onMessage: onSocketMessage });
+  const realtime = useRealtime({
+    query: operatorSocketQuery,
+    onMessage: onSocketMessage,
+    announceOperator: true,
+  });
   const remainingSeconds = useRemainingSeconds(session?.phaseEndsAt ?? null, session?.serverNow ?? null);
 
   const createSession = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
@@ -696,8 +700,12 @@ export function OperatorScreen(): React.JSX.Element {
           <h1>実験進行コンソール</h1>
         </div>
         <div className="operator-header-actions">
-          {isRehearsal ? <span className="rehearsal-pill">実機なし・模擬リハーサル</span> : null}
-          {isScreen && !isRehearsal ? <span className="screen-mode-pill">画面上のフグ・実機なし正式方式</span> : null}
+          {isRehearsal ? <span className="rehearsal-pill">非参加者用の事前確認</span> : null}
+          {isScreen ? (
+            <span className="screen-mode-pill">
+              {isRehearsal ? "画面版・PILOT/テスト" : "画面上のフグ・実機なし正式方式"}
+            </span>
+          ) : null}
           <span className={`connection-pill status-${realtime.status}`}>同期 {connectionLabel(realtime.status)}</span>
           <button type="button" className="secondary-button" onClick={() => { void exportCsv(); }} disabled={busy}>
             CSVを出力
@@ -708,7 +716,9 @@ export function OperatorScreen(): React.JSX.Element {
       {failure === null ? null : <div className="operator-banner is-failure" role="alert">{failure}</div>}
       {isRehearsal ? (
         <div className="operator-banner is-rehearsal" role="status">
-          実機は動作しません。固定模擬データによる開発・リハーサル専用です。本番参加者には使用しないでください。
+          {isScreen
+            ? "非参加者の画面版PILOT/テスト専用です。PILOT形式のIDだけを使い、本番参加者には使用しないでください。"
+            : "実機は動作しません。固定模擬データによる開発・リハーサル専用です。本番参加者には使用しないでください。"}
         </div>
       ) : null}
       {notice === null ? null : <div className="operator-banner" role="status">{notice}</div>}

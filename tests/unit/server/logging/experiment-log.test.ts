@@ -85,6 +85,30 @@ describe("ExperimentLogEvent allowlist", () => {
     expect(() => parseLogEvent({ ...screenEvent, screenAnimationFrame: 42 })).toThrow();
   });
 
+  it("requires complete verified provenance on every PILOT screen event", () => {
+    const sourceEvidence = {
+      sourceCommit: "b".repeat(40),
+      sourceTreeSha256: "c".repeat(64),
+      configFileHash: "d".repeat(64),
+    } as const;
+    const pilot = event({
+      researchId: "PILOT-001",
+      deviceMode: "screen",
+      protocolVersion: "R8-010-2x2-screen-v1",
+    }, { screenPilotSourceEvidence: sourceEvidence });
+    expect(pilot).toMatchObject(sourceEvidence);
+
+    expect(() => event({
+      researchId: "PILOT-001",
+      deviceMode: "screen",
+      protocolVersion: "R8-010-2x2-screen-v1",
+    })).toThrow(/require verified source evidence/iu);
+    expect(() => parseLogEvent({ ...pilot, sourceTreeSha256: undefined }))
+      .toThrow(/must be present together|require verified source evidence/iu);
+    expect(() => event({}, { screenPilotSourceEvidence: sourceEvidence }))
+      .toThrow(/restricted to PILOT screen sessions/iu);
+  });
+
   it("rejects PII/unknown fields and contradictory condition metadata", () => {
     const valid = event({ phase: "result", sequenceIndex: 0, currentCondition: "A" });
     expect(() => parseLogEvent({ ...valid, email: "person@example.test" })).toThrow();

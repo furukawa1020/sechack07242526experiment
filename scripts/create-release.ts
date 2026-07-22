@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
 import {
-  copyFile,
   lstat,
   mkdir,
-  readFile,
+  open,
   readdir,
   realpath,
   rename,
@@ -27,12 +27,18 @@ import {
   renderReleaseFormVerification,
   verifyReleaseForm,
 } from "./verify-release-form.js";
-import { loadExperimentConfig } from "../src/shared/config-loader.js";
+import {
+  hashProductionCriticalConfig,
+  loadExperimentConfig,
+} from "../src/shared/config-loader.js";
 import {
   SCREEN_PRODUCTION_FIXED_STATE,
   SCREEN_PRODUCTION_RESEARCH_ID_PATTERN,
 } from "../src/shared/production-policy.js";
-import { SCREEN_PROTOCOL_VERSION } from "../src/shared/schemas.js";
+import {
+  SCREEN_PROTOCOL_VERSION,
+  type ExperimentConfig,
+} from "../src/shared/schemas.js";
 import { acquireBuildLock } from "./build-lock.mjs";
 
 const DEFAULT_CONFIG_PATH = "config/experiment.production.json";
@@ -46,9 +52,17 @@ interface SourceProvenance {
   readonly sourceRepository?: string;
 }
 
+const SOURCE_TREE_HASH_DOMAIN = "sechack-production-source-tree-v1\0";
+const PRODUCTION_CONFIG_PATH_BYTES = Buffer.from(DEFAULT_CONFIG_PATH, "utf8");
+
 interface GitCommandResult {
   readonly exitCode: number;
   readonly stdout: string;
+}
+
+interface GitBinaryCommandResult {
+  readonly exitCode: number;
+  readonly stdout: Buffer;
 }
 
 export interface CreateReleaseArguments {
@@ -86,11 +100,11 @@ function usage(): readonly string[] {
   ]);
 }
 
-async function runGit(
+async function runGitBytes(
   rootDirectory: string,
   arguments_: readonly string[],
-): Promise<GitCommandResult> {
-  return new Promise<GitCommandResult>((resolveCommand, rejectCommand) => {
+): Promise<GitBinaryCommandResult> {
+  return new Promise<GitBinaryCommandResult>((resolveCommand, rejectCommand) => {
     const child = spawn("git", arguments_, {
       cwd: rootDirectory,
       shell: false,
@@ -128,9 +142,20 @@ async function runGit(
       settled = true;
       resolveCommand({
         exitCode: code ?? 1,
-        stdout: Buffer.concat(chunks).toString("utf8").trim(),
+        stdout: Buffer.concat(chunks),
       });
     });
+  });
+}
+
+async function runGit(
+  rootDirectory: string,
+  arguments_: readonly string[],
+): Promise<GitCommandResult> {
+  const result = await runGitBytes(rootDirectory, arguments_);
+  return Object.freeze({
+    exitCode: result.exitCode,
+    stdout: result.stdout.toString("utf8").trim(),
   });
 }
 
@@ -180,6 +205,179 @@ async function collectSourceProvenance(rootDirectory: string): Promise<SourcePro
   return Object.freeze({
     sourceCommit: commitResult.stdout,
     ...(sourceRepository === undefined ? {} : { sourceRepository }),
+  });
+}
+
+async function assertTrackedProductionConfig(
+  rootDirectory: string,
+  sourceCommit: string,
+  configPath: string,
+  sourceBytes: Uint8Array,
+): Promise<void> {
+  const expectedPath = resolve(rootDirectory, DEFAULT_CONFIG_PATH);
+  if (!samePath(configPath, expectedPath)) {
+    throw new Error(
+      `Production releases require the fixed tracked config path ${DEFAULT_CONFIG_PATH}.`,
+    );
+  }
+  const tracked = await runGit(rootDirectory, [
+    "ls-files",
+    "--error-unmatch",
+    "--",
+    DEFAULT_CONFIG_PATH,
+  ]);
+  if (tracked.exitCode !== 0 || tracked.stdout !== DEFAULT_CONFIG_PATH) {
+    throw new Error("Production config must be tracked by Git at the recorded source commit.");
+  }
+  const committed = await runGitBytes(rootDirectory, [
+    "cat-file",
+    "blob",
+    `${sourceCommit}:${DEFAULT_CONFIG_PATH}`,
+  ]);
+  if (committed.exitCode !== 0 || !committed.stdout.equals(Buffer.from(sourceBytes))) {
+    throw new Error(
+      "Production config bytes must exactly match the config tracked by the recorded source commit.",
+    );
+  }
+}
+
+/**
+ * Computes a deterministic SHA-256 over the exact recursively tracked Git tree
+ * at a recorded commit. The production config is the sole excluded entry so it
+ * can contain the resulting approval digest without becoming self-referential.
+ * Every other path (including similarly named backups) remains in the digest.
+ */
+export async function hashTrackedSourceTreeAtCommit(
+  rootDirectory: string,
+  sourceCommit: string,
+): Promise<string> {
+  if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) {
+    throw new Error("Source tree hashing requires a full lowercase 40-character Git commit ID.");
+  }
+  const tree = await runGitBytes(rootDirectory, [
+    "ls-tree",
+    "-r",
+    "-z",
+    "--full-tree",
+    sourceCommit,
+  ]);
+  if (tree.exitCode !== 0) {
+    throw new Error("The tracked Git source tree could not be enumerated.");
+  }
+
+  const hash = createHash("sha256").update(SOURCE_TREE_HASH_DOMAIN, "utf8");
+  let cursor = 0;
+  let includedEntries = 0;
+  while (cursor < tree.stdout.byteLength) {
+    const terminator = tree.stdout.indexOf(0, cursor);
+    if (terminator < 0) {
+      throw new Error("Git returned a malformed tracked source tree.");
+    }
+    const record = tree.stdout.subarray(cursor, terminator);
+    const pathSeparator = record.indexOf(0x09);
+    if (pathSeparator < 1 || pathSeparator === record.byteLength - 1) {
+      throw new Error("Git returned a malformed tracked source tree entry.");
+    }
+    const path = record.subarray(pathSeparator + 1);
+    if (!path.equals(PRODUCTION_CONFIG_PATH_BYTES)) {
+      const frame = Buffer.allocUnsafe(4);
+      frame.writeUInt32BE(record.byteLength);
+      hash.update(frame).update(record);
+      includedEntries += 1;
+    }
+    cursor = terminator + 1;
+  }
+  const countFrame = Buffer.allocUnsafe(4);
+  countFrame.writeUInt32BE(includedEntries);
+  return hash.update(countFrame).digest("hex");
+}
+
+interface TrackedPackage {
+  readonly source: Readonly<Record<string, unknown>>;
+  readonly version: string;
+}
+
+export interface ProductionSourceEvidenceSummary {
+  readonly appVersion: string;
+  readonly criticalConfigSha256: string;
+  readonly sourceCommit: string;
+  readonly sourceTreeSha256: string;
+}
+
+async function readTrackedPackage(
+  rootDirectory: string,
+  sourceCommit: string,
+): Promise<TrackedPackage> {
+  const committed = await runGitBytes(rootDirectory, [
+    "cat-file",
+    "blob",
+    `${sourceCommit}:package.json`,
+  ]);
+  if (committed.exitCode !== 0) {
+    throw new Error("package.json must be tracked by Git at the recorded source commit.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(committed.stdout.toString("utf8")) as unknown;
+  } catch (error) {
+    throw new Error("The tracked package.json could not be parsed.", { cause: error });
+  }
+  const source = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as Readonly<Record<string, unknown>>
+    : undefined;
+  const version = source?.["version"];
+  if (typeof version !== "string" || version.length === 0) {
+    throw new Error("The tracked package.json must contain a version.");
+  }
+  return Object.freeze({ source: Object.freeze({ ...source }), version });
+}
+
+function assertProductionReleaseSourceEvidence(
+  config: ExperimentConfig,
+  appVersion: string,
+  sourceTreeSha256: string,
+): void {
+  const releaseVerification = config.goEvidence?.releaseVerification;
+  const failures: string[] = [];
+  if (releaseVerification === undefined) {
+    failures.push("goEvidence.releaseVerification");
+  } else {
+    if (releaseVerification.appVersion !== appVersion) {
+      failures.push("goEvidence.releaseVerification.appVersion");
+    }
+    if (releaseVerification.sourceTreeSha256 !== sourceTreeSha256) {
+      failures.push("goEvidence.releaseVerification.sourceTreeSha256");
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Production source evidence gate failed: ${failures.join(", ")}`);
+  }
+}
+
+/** Read-only helper used before independent review to obtain the exact values
+ * that must be copied into releaseVerification. It requires a clean Git HEAD
+ * and the same fixed production config invariants as release creation. */
+export async function inspectProductionSourceEvidence(
+  rootDirectory = process.cwd(),
+): Promise<ProductionSourceEvidenceSummary> {
+  const root = resolve(rootDirectory);
+  const provenance = await collectSourceProvenance(root);
+  const [configSnapshot, sourceTreeSha256, trackedPackage] = await Promise.all([
+    loadExperimentConfig(DEFAULT_CONFIG_PATH, { rootDirectory: root, production: false }),
+    hashTrackedSourceTreeAtCommit(root, provenance.sourceCommit),
+    readTrackedPackage(root, provenance.sourceCommit),
+  ]);
+  await assertTrackedProductionConfig(
+    root,
+    provenance.sourceCommit,
+    configSnapshot.path,
+    configSnapshot.sourceBytes,
+  );
+  return Object.freeze({
+    appVersion: trackedPackage.version,
+    criticalConfigSha256: hashProductionCriticalConfig(configSnapshot.config),
+    sourceCommit: provenance.sourceCommit,
+    sourceTreeSha256,
   });
 }
 
@@ -265,7 +463,48 @@ async function copyDirectoryWithoutMaps(source: string, destination: string): Pr
       continue;
     }
     if (!entry.isFile()) throw new Error(`Unsupported build output entry: ${sourcePath}`);
-    await copyFile(sourcePath, destinationPath);
+    await copyRegularFileStable(sourcePath, destinationPath);
+  }
+}
+
+function isSameFileSnapshot(
+  left: Awaited<ReturnType<typeof lstat>>,
+  right: Awaited<ReturnType<typeof lstat>>,
+): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.nlink === right.nlink
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+async function copyRegularFileStable(source: string, destination: string): Promise<void> {
+  const before = await lstat(source);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
+    throw new Error(`Release source must be a unique regular file: ${source}`);
+  }
+  const noFollow = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
+  const sourceHandle = await open(source, fsConstants.O_RDONLY | noFollow);
+  try {
+    const opened = await sourceHandle.stat();
+    if (!isSameFileSnapshot(before, opened) || opened.nlink !== 1) {
+      throw new Error(`Release source changed before it could be copied: ${source}`);
+    }
+    const bytes = await sourceHandle.readFile();
+    const afterRead = await sourceHandle.stat();
+    if (!isSameFileSnapshot(opened, afterRead) || bytes.byteLength !== afterRead.size) {
+      throw new Error(`Release source changed while it was being copied: ${source}`);
+    }
+    const destinationHandle = await open(destination, "wx");
+    try {
+      await destinationHandle.writeFile(bytes);
+      await destinationHandle.sync();
+    } finally {
+      await destinationHandle.close();
+    }
+  } finally {
+    await sourceHandle.close();
   }
 }
 
@@ -283,17 +522,10 @@ function compactTimestamp(date = new Date()): string {
     .replace(/\.\d{3}Z$/u, "Z");
 }
 
-async function runtimePackageJson(
-  rootDirectory: string,
+function runtimePackageJson(
+  source: Readonly<Record<string, unknown>>,
   releaseKind: ReleaseKind,
-): Promise<string> {
-  const parsed: unknown = JSON.parse(
-    await readFile(resolve(rootDirectory, "package.json"), "utf8"),
-  );
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("package.json has an invalid structure.");
-  }
-  const source = parsed as Record<string, unknown>;
+): string {
   const scripts =
     releaseKind === "production"
       ? {
@@ -326,23 +558,41 @@ const PRODUCTION_WINDOWS_LAUNCHERS = Object.freeze({
     'set "NODE_ENV=production"',
     'set "NODE_OPTIONS="',
     'set "NODE_PATH="',
-    "node dist-server\\verify-release.js",
+    'if not exist "%ProgramFiles%\\nodejs\\node.exe" (',
+    '  echo Required Node.js runtime not found: %ProgramFiles%\\nodejs\\node.exe 1^>^&2',
+    "  exit /b 1",
+    ")",
+    '"%ProgramFiles%\\nodejs\\node.exe" dist-server\\verify-release.js',
     "if errorlevel 1 exit /b 1",
-    "node dist-server\\preflight.js --config config\\experiment.json",
+    '"%ProgramFiles%\\nodejs\\node.exe" dist-server\\preflight.js --config config\\experiment.json',
     "if errorlevel 1 exit /b 1",
-    "node dist-server\\index.js",
+    '"%ProgramFiles%\\nodejs\\node.exe" dist-server\\index.js',
   ],
   "CHECK_HEALTH.cmd": [
     "@echo off",
     "setlocal",
     'cd /d "%~dp0"',
-    "node dist-server\\healthcheck.js --config config\\experiment.json",
+    'set "NODE_ENV=production"',
+    'set "NODE_OPTIONS="',
+    'set "NODE_PATH="',
+    'if not exist "%ProgramFiles%\\nodejs\\node.exe" (',
+    '  echo Required Node.js runtime not found: %ProgramFiles%\\nodejs\\node.exe 1^>^&2',
+    "  exit /b 1",
+    ")",
+    '"%ProgramFiles%\\nodejs\\node.exe" dist-server\\healthcheck.js --config config\\experiment.json',
   ],
   "VERIFY_RELEASE.cmd": [
     "@echo off",
     "setlocal",
     'cd /d "%~dp0"',
-    "node dist-server\\verify-release.js",
+    'set "NODE_ENV=production"',
+    'set "NODE_OPTIONS="',
+    'set "NODE_PATH="',
+    'if not exist "%ProgramFiles%\\nodejs\\node.exe" (',
+    '  echo Required Node.js runtime not found: %ProgramFiles%\\nodejs\\node.exe 1^>^&2',
+    "  exit /b 1",
+    ")",
+    '"%ProgramFiles%\\nodejs\\node.exe" dist-server\\verify-release.js',
   ],
 });
 
@@ -401,6 +651,8 @@ function assertMockRehearsalReleaseConfig(report: PreflightReport, rootDirectory
     failures.push("network.allowExternalRuntimeRequests");
   }
   if (report.formUrl !== "") failures.push("formUrl");
+  if (report.formAuditStatus !== "MISSING") failures.push("formAudit");
+  if (report.goEvidenceStatus !== "MISSING") failures.push("goEvidence");
   if (report.researchIdPattern !== "^DEMO-[0-9]{3}$") {
     failures.push("researchIdPattern");
   }
@@ -427,6 +679,13 @@ function assertProductionReleaseMetadata(report: PreflightReport): void {
   if (report.researchIdPattern !== SCREEN_PRODUCTION_RESEARCH_ID_PATTERN) {
     failures.push("researchIdPattern");
   }
+  if (report.goEvidenceStatus !== "GO") failures.push("goEvidence.status");
+  if (
+    report.goEvidenceCriticalConfigSha256 !== report.computedCriticalConfigSha256
+  ) {
+    failures.push("goEvidence.criticalConfigSha256");
+  }
+  if (report.goEvidenceSha256 === "") failures.push("goEvidence.sha256");
   if (failures.length > 0) {
     throw new Error(`Production screen release metadata gate failed: ${failures.join(", ")}`);
   }
@@ -516,7 +775,18 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   const buildLock = await acquireBuildLock(rootDirectory, { kind: "release" });
   try {
   const releaseKind = options.releaseKind ?? "production";
+  if (releaseKind === "production" && options.buildArtifacts === false) {
+    throw new Error("Production releases may not reuse existing build artifacts.");
+  }
+  if (releaseKind === "production" && options.installDependencies === false) {
+    throw new Error("Production releases may not omit lockfile-pinned dependency installation.");
+  }
   const sourceProvenance = await collectSourceProvenance(rootDirectory);
+  const [sourceTreeSha256, trackedPackage] = await Promise.all([
+    hashTrackedSourceTreeAtCommit(rootDirectory, sourceProvenance.sourceCommit),
+    readTrackedPackage(rootDirectory, sourceProvenance.sourceCommit),
+  ]);
+  const appVersion = trackedPackage.version;
   const releaseRoot = resolve(rootDirectory, "release");
   const configPath =
     options.configPath ??
@@ -527,6 +797,14 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     rootDirectory,
     production: false,
   });
+  if (releaseKind === "production") {
+    await assertTrackedProductionConfig(
+      rootDirectory,
+      sourceProvenance.sourceCommit,
+      configSnapshot.path,
+      configSnapshot.sourceBytes,
+    );
+  }
   const report = await collectPreflightReport({
     rootDirectory,
     configPath,
@@ -549,6 +827,11 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     assertMockRehearsalReleaseConfig(report, rootDirectory);
   } else {
     assertProductionReleaseMetadata(report);
+    assertProductionReleaseSourceEvidence(
+      configSnapshot.config,
+      appVersion,
+      sourceTreeSha256,
+    );
     const publicFormReport = await fetchPublicFormAudit(
       configSnapshot.config.formUrl,
       globalThis.fetch,
@@ -575,17 +858,6 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     }
   }
 
-  const packageSource = JSON.parse(
-    await readFile(resolve(rootDirectory, "package.json"), "utf8"),
-  ) as unknown;
-  if (
-    packageSource === null ||
-    typeof packageSource !== "object" ||
-    typeof (packageSource as Record<string, unknown>).version !== "string"
-  ) {
-    throw new Error("package.json must contain a version.");
-  }
-  const appVersion = (packageSource as Record<string, unknown>).version as string;
   const releaseName =
     releaseKind === "production" ? "sechack-experiment" : "sechack-mock-rehearsal";
   const defaultName = `${releaseName}-${appVersion}-${report.configHash.slice(0, 12)}-${compactTimestamp()}`;
@@ -601,7 +873,12 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
 
   const serverBuildNames =
     releaseKind === "production"
-      ? (["index.js", "preflight.js", "healthcheck.js", "verify-release.js"] as const)
+      ? ([
+          "index.js",
+          "preflight.js",
+          "healthcheck.js",
+          "verify-release.js",
+        ] as const)
       : (["rehearsal.js", "healthcheck.js", "verify-release.js"] as const);
   const requiredBuildFiles = [
     resolve(rootDirectory, "dist", "index.html"),
@@ -634,7 +911,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     );
     await mkdir(resolve(stagingDirectory, "dist-server"));
     for (const name of serverBuildNames) {
-      await copyFile(
+      await copyRegularFileStable(
         resolve(rootDirectory, "dist-server", name),
         resolve(stagingDirectory, "dist-server", name),
       );
@@ -678,8 +955,10 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
         "DEPLOYMENT.md",
         "MOCK_REHEARSAL.md",
         "PUBLIC_DEMO.md",
+        "GO_EVIDENCE.md",
+        "DATA_LIFECYCLE.md",
       ] as const) {
-        await copyFile(
+        await copyRegularFileStable(
           resolve(rootDirectory, "docs", name),
           resolve(stagingDirectory, "docs", name),
         );
@@ -692,10 +971,10 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     }
     await writeFile(
       resolve(stagingDirectory, "package.json"),
-      await runtimePackageJson(rootDirectory, releaseKind),
+      runtimePackageJson(trackedPackage.source, releaseKind),
       "utf8",
     );
-    await copyFile(
+    await copyRegularFileStable(
       resolve(rootDirectory, "package-lock.json"),
       resolve(stagingDirectory, "package-lock.json"),
     );
@@ -737,6 +1016,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       configHash: configSnapshot.configHash,
       configFileHash: configSnapshot.configFileHash,
       sourceCommit: sourceProvenance.sourceCommit,
+      sourceTreeSha256,
       ...(sourceProvenance.sourceRepository === undefined
         ? {}
         : { sourceRepository: sourceProvenance.sourceRepository }),
@@ -768,7 +1048,9 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     `${releaseKind === "production" ? "Production" : "Mock rehearsal"} release created: ${outputDirectory}`,
   );
   writeLine(`Config SHA-256: ${report.configHash}`);
+  writeLine(`App version: ${appVersion}`);
   writeLine(`Source commit: ${sourceProvenance.sourceCommit}`);
+  writeLine(`Source tree SHA-256: ${sourceTreeSha256}`);
   if (sourceProvenance.sourceRepository !== undefined) {
     writeLine(`Source repository: ${sourceProvenance.sourceRepository}`);
   }

@@ -3,10 +3,10 @@ import type { PresentationMode, ProcessingLocation } from "./conditions.js";
 /** Exact participant-facing copy from docs/UI_COPY.md. */
 export const UI_COPY = {
   rehearsal: {
-    title: "模擬リハーサル",
-    body: "研究参加用ではありません・回答送信なし・実機なし",
-    summary: "4つの模擬提示を確認しました。\nGoogleフォームへの回答や送信は行いません。",
-    completedTitle: "模擬リハーサルを終了しました",
+    title: "非参加者用の事前確認",
+    body: "研究参加用ではありません・Googleフォームへの回答送信なし",
+    summary: "4つの非参加者向け提示を確認しました。\nGoogleフォームへの回答や送信は行いません。",
+    completedTitle: "非参加者用の事前確認を終了しました",
     completedWaiting: "この画面は研究参加の完了を示すものではありません。",
   },
   intro: {

@@ -12,6 +12,7 @@ import {
 } from "../../../src/server/devices/index.js";
 import type {
   ExperimentLogEvent,
+  ResearchIdReservationInput,
   SessionLogSummary,
 } from "../../../src/server/logging/index.js";
 import { SessionController } from "../../../src/server/sessions/session-controller.js";
@@ -62,6 +63,7 @@ function screenDeviceTestConfig() {
 
 class MemoryLogger {
   public readonly events: ExperimentLogEvent[] = [];
+  private readonly reservedResearchIds = new Set<string>();
 
   public async append(event: ExperimentLogEvent): Promise<void> {
     this.events.push(event);
@@ -72,7 +74,13 @@ class MemoryLogger {
   }
 
   public async hasResearchId(researchId: string): Promise<boolean> {
-    return this.events.some((event) => event.researchId === researchId);
+    return this.reservedResearchIds.has(researchId);
+  }
+
+  public async reserveResearchId(input: ResearchIdReservationInput): Promise<boolean> {
+    if (this.reservedResearchIds.has(input.researchId)) return false;
+    this.reservedResearchIds.add(input.researchId);
+    return true;
   }
 
   public async listSessionSummaries(): Promise<readonly SessionLogSummary[]> {

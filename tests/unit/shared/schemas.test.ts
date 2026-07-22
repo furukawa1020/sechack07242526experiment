@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   hashExperimentConfig,
+  hashProductionCriticalConfig,
   loadExperimentConfig,
 } from "../../../src/shared/config-loader.js";
 import {
@@ -19,6 +20,10 @@ import {
 } from "../../../src/shared/schemas.js";
 
 const AUDIT_CONTENT_SHA256 = "087a88918e51f152e237a823b51a64e23e91e6f9fc328ac9796fe9475cdc1800";
+
+function fixtureDigest(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
 
 function validConfig(): Record<string, unknown> {
   return {
@@ -59,6 +64,67 @@ function validConfig(): Record<string, unknown> {
       includeAbortedInOrderBalancing: true,
     },
     network: { allowLan: false, allowExternalRuntimeRequests: false },
+  };
+}
+
+function withApprovedGoEvidence(source: Record<string, unknown>): Record<string, unknown> {
+  const protocolVersion = String(source["protocolVersion"]);
+  const criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
+  const approval = (documentId: string, contentSha256: string) => ({
+    status: "GO",
+    protocolVersion,
+    documentId,
+    documentVersion: "1.0",
+    contentSha256,
+    approvedOn: "2026-07-20",
+    applicableUntil: "2026-07-22",
+  });
+  return {
+    ...source,
+    goEvidence: {
+      status: "GO",
+      protocolVersion,
+      criticalConfigSha256,
+      researchPlan: approval("PLAN-001", fixtureDigest("research-plan")),
+      ethicsDetermination: approval("ETHICS-001", fixtureDigest("ethics")),
+      preStimulusConsent: approval("CONSENT-001", fixtureDigest("consent")),
+      dataManagementPlan: approval("DATA-PLAN-001", fixtureDigest("data-plan")),
+      screenPilot: {
+        ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
+        completedSessions: 3,
+      },
+      releaseVerification: {
+        status: "GO",
+        protocolVersion,
+        appVersion: "1.0.0",
+        criticalConfigSha256,
+        sourceTreeSha256: fixtureDigest("source-tree"),
+        reviews: [
+          {
+            reviewId: "RELEASE-REVIEW-001",
+            reviewerCode: "REV-0001",
+            reviewVersion: "1.0",
+            status: "GO",
+            protocolVersion,
+            criticalConfigSha256,
+            reviewedOn: "2026-07-20",
+            applicableUntil: "2026-07-22",
+            attestationSha256: fixtureDigest("release-attestation-1"),
+          },
+          {
+            reviewId: "RELEASE-REVIEW-002",
+            reviewerCode: "REV-0002",
+            reviewVersion: "1.0",
+            status: "GO",
+            protocolVersion,
+            criticalConfigSha256,
+            reviewedOn: "2026-07-20",
+            applicableUntil: "2026-07-22",
+            attestationSha256: fixtureDigest("release-attestation-2"),
+          },
+        ],
+      },
+    },
   };
 }
 
@@ -193,6 +259,21 @@ describe("experiment config schema", () => {
     })).toThrow(/unrecognized key/iu);
   });
 
+  it("accepts only non-PII structured production GO evidence", () => {
+    const screen = {
+      ...validConfig(),
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      device: { ...(validConfig()["device"] as object), mode: "screen", serialPath: "" },
+    };
+    const parsed = parseExperimentConfig(withApprovedGoEvidence(screen));
+    expect(parsed.goEvidence?.screenPilot.completedSessions).toBe(3);
+    expect(Object.isFrozen(parsed.goEvidence)).toBe(true);
+
+    const withName = withApprovedGoEvidence(screen);
+    (withName["goEvidence"] as Record<string, unknown>)["reviewerName"] = "must-not-be-stored";
+    expect(() => parseExperimentConfig(withName)).toThrow(/unrecognized key/iu);
+  });
+
   it("formats validation errors without exposing an exception object", () => {
     const parsed = ExperimentConfigSchema.safeParse({});
     expect(parsed.success).toBe(false);
@@ -266,6 +347,20 @@ describe("config file loading", () => {
       rootDirectory: root,
       production: true,
       currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).rejects.toThrow(/GO evidence gate.*missing/iu);
+
+    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
+      ...source,
+      formAudit: {
+        ...(source.formAudit as Record<string, unknown>),
+        status: "GO",
+        twoPersonVerified: true,
+      },
+    })), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
     })).resolves.toMatchObject({
       config: { protocolVersion: SCREEN_PROTOCOL_VERSION, device: { mode: "screen" } },
     });
@@ -300,14 +395,14 @@ describe("config file loading", () => {
     };
     const configPath = join(configDirectory, "production.json");
 
-    await writeFile(configPath, JSON.stringify({
+    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
       ...screenBase,
       device: {
         ...(validConfig()["device"] as Record<string, unknown>),
         mode: "screen",
         serialPath: "",
       },
-    }), "utf8");
+    })), "utf8");
     await expect(loadExperimentConfig("config/production.json", {
       rootDirectory: root,
       production: true,

@@ -534,6 +534,9 @@ type ExperimentLogEvent = {
   protocolVersion: string;
   appVersion: string;
   configHash: string;
+  sourceCommit?: string;
+  sourceTreeSha256?: string;
+  configFileHash?: string;
   sessionId: string;
   researchId: string;
   orderCode: "ABDC" | "BCAD" | "CDBA" | "DACB";
@@ -553,6 +556,8 @@ type ExperimentLogEvent = {
   errorCode?: string;
 };
 ```
+
+`sourceCommit`、`sourceTreeSha256`、`configFileHash`は、非参加者専用`screen-pilot`の`PILOT-xxx`かつ`deviceMode=screen`のイベントだけに3項目一組で記録する技術的来歴である。個人情報や参加者データではない。その他のID・装置モードでは3項目とも禁止し、`PILOT-xxx`イベントでは欠落を拒否する。
 
 禁止フィールド：
 
@@ -621,7 +626,7 @@ MockDevice：
 
 ソース用`development`ランタイムも非参加者専用とし、Mock、loopback、外部通信なし、空フォーム、GO監査証跡なし、`DEV-001`形式、`data/dev-sessions`配下のログを起動時に強制する。参加者画面とOperatorへ同じ模擬表示を常設し、正式研究用IDや実参加者を扱わない。
 
-初回GO前の`screen-pilot`ランタイムは、研究チームの非参加者が同じ画面刺激を3〜5件確認する専用経路とする。`npm run screen-pilot`は`device.mode=screen`、正式固定値・4順序・提示時間、loopback、外部通信なし、空フォーム、GO監査証跡なし、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。Mockリハーサル、公開レビュー、自動E2E、実参加者は事前技術パイロット件数へ含めない。候補commit、pilot設定SHA-256、3〜5件の終了状態とログSHA-256を外部管理票へ記録し、その管理票のSHA-256だけを`goEvidence.screenPilot`へ結び付ける。正式リリースへこの起動entryとpilot設定・ログを同梱しない。
+初回GO前の`screen-pilot`ランタイムは、研究チームの非参加者が同じ画面刺激を3〜5件確認する専用経路とする。`npm run screen-pilot`は毎回再ビルドし、Git worktreeルート、追跡・未追跡変更のないHEAD、固定pilot設定のGit追跡とHEADバイト完全一致を検証してから起動する。`device.mode=screen`、正式固定値・4順序・提示時間、loopback、外部通信なし、空フォーム、GO監査証跡なし、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。検証した`sourceCommit`、全追跡treeの`sourceTreeSha256`、pilot設定バイトの`configFileHash`を表示し、全PILOT JSONLイベントへ同じ3値を結び付ける。汎用`startServer`からの直接起動は拒否し、`node dist-server/screen-pilot.js`の直接実行や古い・改変済みビルドの流用は承認された運用経路としない。Mockリハーサル、公開レビュー、自動E2E、実参加者は事前技術パイロット件数へ含めない。3〜5件の終了状態とログSHA-256を外部管理票へ記録し、その管理票のSHA-256だけを`goEvidence.screenPilot`へ結び付ける。正式リリースへこの起動entryとpilot設定・ログを同梱しない。
 
 ScreenPufferDevice：
 

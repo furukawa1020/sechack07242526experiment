@@ -62,6 +62,7 @@ async function buildServer() {
       entryPoints: {
         index: "src/server/production-entry.ts",
         rehearsal: "src/server/rehearsal.ts",
+        "screen-pilot": "src/server/screen-pilot.ts",
         preflight: "scripts/preflight.ts",
         healthcheck: "scripts/healthcheck.ts",
         "verify-release": "scripts/verify-release.ts",

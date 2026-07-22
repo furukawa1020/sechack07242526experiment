@@ -6,7 +6,10 @@ import {
   type PublicFormAuditReport,
 } from "./audit-public-form.js";
 import { assessFormAudit, STUDY_FORM_URL } from "../src/shared/form-audit.js";
-import { loadExperimentConfig } from "../src/shared/config-loader.js";
+import {
+  hashProductionCriticalConfig,
+  loadExperimentConfig,
+} from "../src/shared/config-loader.js";
 import { assessProductionPolicy } from "../src/shared/production-policy.js";
 import {
   formatConfigError,
@@ -30,6 +33,12 @@ const REQUIRED_MACHINE_FINDING_IDS = Object.freeze([
   "answer-timing",
   "eleven-questions",
   "evaluation-structure",
+  "research-id-field",
+  "research-id-required",
+  "research-id-format-validation",
+  "forbidden-sequence-input",
+  "forbidden-personal-data-input",
+  "forbidden-free-text-input",
   "untitled-inputs",
   "file-uploads",
 ]);
@@ -106,6 +115,8 @@ export function isExpectedStudyFormFinalUrl(value: string): boolean {
       && parsed.hostname === "docs.google.com"
       && parsed.username === ""
       && parsed.password === ""
+      && parsed.hash === ""
+      && (parsed.search === "" || parsed.search === "?usp=send_form")
       && parsed.pathname === `/forms/d/e/${EXPECTED_FORM_ID}/viewform`;
   } catch {
     return false;
@@ -118,12 +129,17 @@ export function assessReleaseFormVerification(
   now = new Date(),
 ): ReleaseFormVerificationResult {
   const issues: string[] = [];
-  const productionPolicy = assessProductionPolicy(config, now);
+  const productionPolicy = assessProductionPolicy(config, now, {
+    criticalConfigSha256: hashProductionCriticalConfig(config),
+  });
   for (const issue of productionPolicy.deviceIssues) {
     issues.push(`production-device-${issue}`);
   }
   for (const issue of productionPolicy.protocolIssues) {
     issues.push(`production-protocol-${issue}`);
+  }
+  for (const issue of productionPolicy.goEvidence.issues) {
+    issues.push(`production-go-evidence-${issue}`);
   }
   for (const issue of assessFormAudit(config, now).issues) {
     issues.push(`form-audit-${issue}`);

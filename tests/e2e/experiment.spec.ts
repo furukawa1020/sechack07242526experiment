@@ -95,6 +95,47 @@ function monitorExternalRequests(page: Page): string[] {
   return external;
 }
 
+function waitForOperatorLeaseConfirmation(page: Page): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      settled = true;
+      reject(new Error("Timed out waiting for the Operator round-trip lease."));
+    }, 5_000);
+    page.on("websocket", (socket) => {
+      const url = new URL(socket.url());
+      if (url.pathname !== "/ws" || url.searchParams.get("role") !== "operator") return;
+      socket.on("framereceived", ({ payload }) => {
+        if (settled) return;
+        let message: unknown;
+        try {
+          message = JSON.parse(payload.toString()) as unknown;
+        } catch {
+          return;
+        }
+        if (
+          typeof message !== "object"
+          || message === null
+          || Array.isArray(message)
+          || (message as JsonRecord).type !== "operator.heartbeatAck"
+        ) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  });
+}
+
+test.beforeEach(async ({ context }) => {
+  // Keep a real Operator page alive. API-only progression is intentionally
+  // rejected by the production controller when no round-trip lease exists.
+  const operator = await context.newPage();
+  const leaseConfirmed = waitForOperatorLeaseConfirmation(operator);
+  await operator.goto("/operator");
+  await leaseConfirmed;
+});
+
 test("4つの固定提示順をMockDeviceで完走し、参加者へ内部コードを公開しない", async ({
   page,
   request,
@@ -125,7 +166,7 @@ test("4つの固定提示順をMockDeviceで完走し、参加者へ内部コー
     expect(JSON.stringify(publicSnapshot)).not.toContain("pufferLevel");
     expect(publicSnapshot.formUrl).toBeNull();
     await expect(
-      page.getByText("研究参加用ではありません・回答送信なし・実機なし"),
+      page.getByText("研究参加用ではありません・Googleフォームへの回答送信なし"),
     ).toBeVisible();
     const presentations = publicSnapshot.summary as JsonRecord[];
     expect(presentations).toHaveLength(4);
@@ -140,7 +181,7 @@ test("4つの固定提示順をMockDeviceで完走し、参加者へ内部コー
     expect(participantText).toContain("この表示は医療上の診断ではありません。");
     await action(request, sessionId, "confirm-form-complete");
     await expect(
-      page.getByRole("heading", { name: "模擬リハーサルを終了しました" }),
+      page.getByRole("heading", { name: "非参加者用の事前確認を終了しました" }),
     ).toBeVisible();
   }
 

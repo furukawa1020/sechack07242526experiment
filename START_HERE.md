@@ -43,7 +43,7 @@
 - 本番アプリはローカルで動作し、デフォルトでは `127.0.0.1` のみにバインドする。
 - 正式MVPは`device.mode=screen`と`ScreenPufferDevice`を使用し、USB機器を接続せず、画面上のフグだけを動かす。フグ制御のための外部通信を行わない。
 - `mock`は開発、自動テスト、明示的な模擬リハーサル専用とし、正式実施に使用しない。
-- 初回GO前の画面版パイロットは、研究チームの非参加者だけが専用`screen-pilot`経路を使用する。正式固定値・時間・順序と`ScreenPufferDevice`を保ち、loopback、空フォーム、`PILOT-xxx`、隔離ログ、非参加者表示を強制し、実参加者や正式研究用IDを使用しない。
+- 初回GO前の画面版パイロットは、研究チームの非参加者だけがcleanなGit worktreeルートから`npm run screen-pilot`を使用する。このコマンドで毎回再ビルドし、固定pilot設定の追跡・HEADバイト一致を検証し、`sourceCommit`、`sourceTreeSha256`、`configFileHash`を全PILOT JSONLへ結び付ける。直接のビルド済みentryは使わない。正式固定値・時間・順序と`ScreenPufferDevice`を保ち、loopback、空フォーム、`PILOT-xxx`、隔離ログ、非参加者表示を強制し、実参加者や正式研究用IDを使用しない。
 - `serial`による物理フグは将来の別プロトコルとし、`R8-010-2x2-screen-v1`へ混在させない。
 - C/Dでは、`result`開始から6秒で画面上のフグを同じ形状まで膨張させ、結果終了まで保持し、`reset`開始から6秒で収縮させる。描画はサーバ時刻へ同期する。`result`または`reset`中の切断・再読み込みは刺激欠損として安全停止し、そのセッションを再開しない。他フェーズではOperatorの復旧確認まで停止する。
 - 参加者向け文言は `docs/UI_COPY.md` を単一の正として実装し、独自に言い換えない。

@@ -43,6 +43,8 @@ describe("server build", () => {
       "preflight.js.map",
       "rehearsal.js",
       "rehearsal.js.map",
+      "screen-pilot.js",
+      "screen-pilot.js.map",
       "verify-release.js",
       "verify-release.js.map",
     ]);

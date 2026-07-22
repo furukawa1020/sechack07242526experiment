@@ -54,6 +54,37 @@ export function hashExperimentConfig(config: ExperimentConfig): string {
   return createHash("sha256").update(JSON.stringify(config), "utf8").digest("hex");
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  return `{${Object.keys(record)
+    .sort((left, right) => left.localeCompare(right, "en"))
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(",")}}`;
+}
+
+function sha256Canonical(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
+}
+
+/**
+ * Binds approvals to every production config field except goEvidence itself.
+ * Excluding the evidence bundle avoids an impossible self-referential digest.
+ */
+export function hashProductionCriticalConfig(config: ExperimentConfig): string {
+  const criticalConfig = Object.fromEntries(
+    Object.entries(config).filter(([key]) => key !== "goEvidence"),
+  );
+  return sha256Canonical(criticalConfig);
+}
+
+export function hashProductionGoEvidence(config: ExperimentConfig): string | null {
+  return config.goEvidence === undefined ? null : sha256Canonical(config.goEvidence);
+}
+
 export async function loadExperimentConfig(
   requestedPath = "config/experiment.json",
   options: LoadExperimentConfigOptions = {},
@@ -95,6 +126,7 @@ export async function loadExperimentConfig(
     const productionPolicy = assessProductionPolicy(
       config,
       options.currentDate ?? new Date(),
+      { criticalConfigSha256: hashProductionCriticalConfig(config) },
     );
     if (productionPolicy.deviceIssues.includes("mock-device-not-allowed")) {
       throw new Error("Mock device mode is unconditionally disabled in production.");
@@ -112,6 +144,11 @@ export async function loadExperimentConfig(
     if (!productionPolicy.formUrlMatchesStudy || !productionPolicy.formAudit.approved) {
       throw new Error(
         `Production Google Form audit gate rejected the config (${productionPolicy.formAudit.issues.join(", ")}).`,
+      );
+    }
+    if (!productionPolicy.goEvidence.approved) {
+      throw new Error(
+        `Production GO evidence gate rejected the config (${productionPolicy.goEvidence.issues.join(", ")}).`,
       );
     }
   }

@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+
+import { hashProductionCriticalConfig } from "../../../src/shared/config-loader.js";
 
 import {
   evaluatePreflightGates,
@@ -22,6 +25,10 @@ import {
 
 const AUDIT_CONTENT_SHA256 = "087a88918e51f152e237a823b51a64e23e91e6f9fc328ac9796fe9475cdc1800";
 const AUDIT_NOW = new Date("2026-07-21T12:00:00Z");
+
+function fixtureDigest(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
 
 function goFormAudit(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -85,6 +92,62 @@ function configSource(overrides: {
     },
   };
   if (overrides.omitFormAudit === true) Reflect.deleteProperty(source, "formAudit");
+  if (mode === "screen") {
+    const criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
+    const approval = (documentId: string, contentSha256: string) => ({
+      status: "GO",
+      protocolVersion,
+      documentId,
+      documentVersion: "1.0",
+      contentSha256,
+      approvedOn: "2026-07-20",
+      applicableUntil: "2026-07-22",
+    });
+    source["goEvidence"] = {
+      status: "GO",
+      protocolVersion,
+      criticalConfigSha256,
+      researchPlan: approval("PLAN-001", fixtureDigest("research-plan")),
+      ethicsDetermination: approval("ETHICS-001", fixtureDigest("ethics")),
+      preStimulusConsent: approval("CONSENT-001", fixtureDigest("consent")),
+      dataManagementPlan: approval("DATA-PLAN-001", fixtureDigest("data-plan")),
+      screenPilot: {
+        ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
+        completedSessions: 3,
+      },
+      releaseVerification: {
+        status: "GO",
+        protocolVersion,
+        appVersion: "1.0.0",
+        criticalConfigSha256,
+        sourceTreeSha256: fixtureDigest("source-tree"),
+        reviews: [
+          {
+            reviewId: "RELEASE-REVIEW-001",
+            reviewerCode: "REV-0001",
+            reviewVersion: "1.0",
+            status: "GO",
+            protocolVersion,
+            criticalConfigSha256,
+            reviewedOn: "2026-07-20",
+            applicableUntil: "2026-07-22",
+            attestationSha256: fixtureDigest("release-attestation-1"),
+          },
+          {
+            reviewId: "RELEASE-REVIEW-002",
+            reviewerCode: "REV-0002",
+            reviewVersion: "1.0",
+            status: "GO",
+            protocolVersion,
+            criticalConfigSha256,
+            reviewedOn: "2026-07-20",
+            applicableUntil: "2026-07-22",
+            attestationSha256: fixtureDigest("release-attestation-2"),
+          },
+        ],
+      },
+    };
+  }
   return source;
 }
 
@@ -114,10 +177,16 @@ describe("preflight argument parsing", () => {
 describe("preflight production gates", () => {
   it("recognizes only approved Google Forms URL shapes", () => {
     expect(isApprovedGoogleFormsUrl("https://docs.google.com/forms/d/example/viewform")).toBe(true);
+    expect(isApprovedGoogleFormsUrl(
+      "https://docs.google.com/forms/d/e/example/viewform?usp=send_form",
+    )).toBe(true);
     expect(isApprovedGoogleFormsUrl("https://forms.gle/example")).toBe(true);
     expect(isApprovedGoogleFormsUrl("https://docs.google.com/forms/")).toBe(false);
     expect(isApprovedGoogleFormsUrl("https://example.com/forms/example")).toBe(false);
     expect(isApprovedGoogleFormsUrl("http://forms.gle/example")).toBe(false);
+    expect(isApprovedGoogleFormsUrl("https://forms.gle/example?entry.123=SH26-001")).toBe(false);
+    expect(isApprovedGoogleFormsUrl("https://forms.gle/example?usp=pp_url")).toBe(false);
+    expect(isApprovedGoogleFormsUrl("https://forms.gle/example#prefill")).toBe(false);
   });
 
   it("accepts Windows COM paths and rejects non-COM device paths", () => {
@@ -152,6 +221,17 @@ describe("preflight production gates", () => {
     expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
       (check) => check.name === "protocol.fixedParameters",
     )?.status).toBe("pass");
+    expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
+      (check) => check.name === "goEvidence",
+    )?.status).toBe("pass");
+  });
+
+  it("rejects a GO form audit when the broader production evidence is absent", () => {
+    const complete = parseExperimentConfig(configSource({ mode: "screen" }));
+    const formOnly = { ...complete, goEvidence: undefined } as ExperimentConfig;
+    const checks = evaluatePreflightGates(formOnly, false, AUDIT_NOW);
+    expect(checks.find((check) => check.name === "formAudit")?.status).toBe("pass");
+    expect(checks.find((check) => check.name === "goEvidence")?.status).toBe("fail");
   });
 
   it("rejects an arbitrary protocolVersion even when the remaining screen metadata is formal", () => {

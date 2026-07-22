@@ -40,10 +40,10 @@
 
 初回GO前に実参加者を使って循環を解消してはならない。研究チームの非参加者だけが、必須5テスト済みのcleanな候補commitで次を実施する。
 
-1. `npm run screen-pilot`を起動する。`config/experiment.screen-pilot.json`以外へ差し替えず、`127.0.0.1:4174`で使用する。
+1. Git worktreeのルートで`git status --short --untracked-files=all`が空であることを確認し、`npm run screen-pilot`を起動する。このコマンドは毎回再ビルドし、worktreeルート、cleanなHEAD、固定パス`config/experiment.screen-pilot.json`のGit追跡とHEADバイト完全一致を起動前に再検証する。`node dist-server/screen-pilot.js`の直接実行や、既存・コピー済み`dist-server/`の流用は禁止する。`127.0.0.1:4174`で使用する。
 2. Operatorの「非参加者用の事前確認」「画面版・PILOT/テスト」、参加者側の「非参加者用の事前確認」、空フォーム、`PILOT-001`形式、`ScreenPufferDevice`を確認する。
 3. 異なる`PILOT-xxx`で3〜5件を完走し、正式時間、4順序、6秒膨張・保持・6秒収縮、STOP/DEFLATEを確認する。氏名、正式`SH26-xxx`、Googleフォーム、研究参加者を使用しない。
-4. 外部の承認済み管理票へsource commit、pilot設定SHA-256、完走ID、終了状態、対象JSONLのSHA-256、確認日を記録し、その管理票のSHA-256を`goEvidence.screenPilot`へ使用する。JSONLはGitやproductionリリースへ含めない。
+4. 起動時に表示された`sourceCommit`、`sourceTreeSha256`、`configFileHash`と、各対象JSONLイベントの同名3フィールドが完全一致することを確認する。外部の承認済み管理票へこの3値、完走ID、終了状態、対象JSONLのSHA-256、確認日を記録し、その管理票のSHA-256を`goEvidence.screenPilot`へ使用する。JSONLはGitやproductionリリースへ含めない。
 5. 固定値、文言、時間、順序、ScreenPufferDevice動作またはprotocolVersionを変更した場合は旧記録を破棄し、3〜5件を再実施する。
 
 この経路は非参加者技術確認専用で、production、同意取得、正式データ収集の代替ではない。実参加者による追加パイロットが研究計画で必要な場合は、初回production GO後に承認済み手順で実施する。

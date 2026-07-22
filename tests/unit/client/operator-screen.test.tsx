@@ -54,7 +54,7 @@ describe("operator screen-mode guidance", () => {
       .toBeInTheDocument();
     expect(screen.getByText(/Googleフォームで事後送信する方式は、責任者承認済みの手順に限ります/u))
       .toBeInTheDocument();
-    expect(screen.queryByText("実機なし・模擬リハーサル")).not.toBeInTheDocument();
+    expect(screen.queryByText("非参加者用の事前確認")).not.toBeInTheDocument();
     expect(screen.queryByText(/本番参加者には使用しないでください/u)).not.toBeInTheDocument();
   });
 
@@ -68,7 +68,7 @@ describe("operator screen-mode guidance", () => {
     });
     render(<OperatorScreen />);
 
-    expect(await screen.findByText("実機なし・模擬リハーサル")).toBeInTheDocument();
+    expect(await screen.findByText("非参加者用の事前確認")).toBeInTheDocument();
     expect(screen.getByText(/本番参加者には使用しないでください/u)).toBeInTheDocument();
     expect(screen.getByText("リハーサル開始条件を確認済み")).toBeInTheDocument();
     expect(screen.queryByText("画面上のフグ・実機なし正式方式")).not.toBeInTheDocument();
@@ -82,7 +82,8 @@ describe("operator screen-mode guidance", () => {
     });
     render(<OperatorScreen />);
 
-    expect(await screen.findByText("実機なし・模擬リハーサル")).toBeInTheDocument();
+    expect(await screen.findByText("非参加者用の事前確認")).toBeInTheDocument();
+    expect(screen.getByText("画面版・PILOT/テスト")).toBeInTheDocument();
     expect(screen.getByText(/本番参加者には使用しないでください/u)).toBeInTheDocument();
     expect(screen.getByText("リハーサル開始条件を確認済み")).toBeInTheDocument();
     expect(screen.queryByText("画面上のフグ・実機なし正式方式")).not.toBeInTheDocument();

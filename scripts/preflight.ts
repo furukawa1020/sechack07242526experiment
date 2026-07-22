@@ -3,7 +3,11 @@ import { lstat, mkdir, open, readFile, realpath, statfs, unlink } from "node:fs/
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { loadExperimentConfig } from "../src/shared/config-loader.js";
+import {
+  hashProductionCriticalConfig,
+  hashProductionGoEvidence,
+  loadExperimentConfig,
+} from "../src/shared/config-loader.js";
 import {
   STUDY_FORM_URL,
 } from "../src/shared/form-audit.js";
@@ -61,6 +65,10 @@ export interface PreflightReport {
   readonly formAuditAuditedOn: string | null;
   readonly formAuditContentSha256: string;
   readonly formAuditTwoPersonVerified: boolean;
+  readonly goEvidenceStatus: "GO" | "NO-GO" | "MISSING";
+  readonly goEvidenceCriticalConfigSha256: string;
+  readonly computedCriticalConfigSha256: string;
+  readonly goEvidenceSha256: string;
   readonly bindHost: string;
   readonly port: number;
   readonly allowLan: boolean;
@@ -152,15 +160,16 @@ export function isApprovedGoogleFormsUrl(value: string): boolean {
       parsed.protocol !== "https:"
       || parsed.username !== ""
       || parsed.password !== ""
+      || parsed.hash !== ""
+      || !(parsed.search === "" || parsed.search === "?usp=send_form")
     ) {
       return false;
     }
     if (parsed.hostname === "forms.gle") {
-      return parsed.pathname !== "/" && parsed.pathname.length > 1;
+      return /^\/[A-Za-z0-9_-]+$/u.test(parsed.pathname);
     }
     return parsed.hostname === "docs.google.com"
-      && parsed.pathname.startsWith("/forms/")
-      && parsed.pathname.length > "/forms/".length;
+      && /^\/forms\/d\/(?:e\/)?[A-Za-z0-9_-]+\/viewform$/u.test(parsed.pathname);
   } catch {
     return false;
   }
@@ -175,7 +184,8 @@ export function evaluatePreflightGates(
 ): readonly GateCheck[] {
   const checks: GateCheck[] = [];
   const production = !allowMock;
-  const productionPolicy = assessProductionPolicy(config, now);
+  const criticalConfigSha256 = hashProductionCriticalConfig(config);
+  const productionPolicy = assessProductionPolicy(config, now, { criticalConfigSha256 });
 
   if (production) {
     checks.push({
@@ -284,6 +294,17 @@ export function evaluatePreflightGates(
         : "フォーム監査は未承認です。開発用Mock確認には影響しませんが、本番リリースは生成できません。",
   });
 
+  const goEvidence = productionPolicy.goEvidence;
+  checks.push({
+    name: "goEvidence",
+    status: goEvidence.approved ? "pass" : production ? "fail" : "warning",
+    detail: goEvidence.approved
+      ? "研究計画、倫理判断、提示前同意、データ管理、3〜5件の画面パイロット、独立二名release照合の有効な証跡を確認しました。"
+      : production
+        ? `本番GO証跡ゲートを通過できません（${goEvidence.issues.join(", ")}）。`
+        : "本番GO証跡は未承認です。開発用Mock確認には影響しませんが、本番リリースは生成できません。",
+  });
+
   checks.push({
     name: "network.allowExternalRuntimeRequests",
     status: config.network.allowExternalRuntimeRequests ? "fail" : "pass",
@@ -327,6 +348,8 @@ export async function collectPreflightReport(
     { rootDirectory, production: false },
   );
   const config = loaded.config;
+  const computedCriticalConfigSha256 = hashProductionCriticalConfig(config);
+  const goEvidenceSha256 = hashProductionGoEvidence(config);
   const resolvedLog = resolveLogPath(
     rootDirectory,
     options.dataDirectoryOverride ?? config.logging.directory,
@@ -460,6 +483,10 @@ export async function collectPreflightReport(
     formAuditAuditedOn: config.formAudit?.auditedOn ?? null,
     formAuditContentSha256: config.formAudit?.contentSha256 ?? "",
     formAuditTwoPersonVerified: config.formAudit?.twoPersonVerified ?? false,
+    goEvidenceStatus: config.goEvidence?.status ?? "MISSING",
+    goEvidenceCriticalConfigSha256: config.goEvidence?.criticalConfigSha256 ?? "",
+    computedCriticalConfigSha256,
+    goEvidenceSha256: goEvidenceSha256 ?? "",
     bindHost: config.bindHost,
     port: config.port,
     allowLan: config.network.allowLan,
@@ -511,6 +538,10 @@ export function renderPreflightReport(
   writeLine(`  監査日: ${report.formAuditAuditedOn ?? "(未設定)"}`);
   writeLine(`  公開内容SHA-256: ${report.formAuditContentSha256 === "" ? "(未設定)" : report.formAuditContentSha256}`);
   writeLine(`  二名確認: ${String(report.formAuditTwoPersonVerified)}`);
+  writeLine(`  本番GO証跡: ${report.goEvidenceStatus}`);
+  writeLine(`  証跡対象設定SHA-256: ${report.goEvidenceCriticalConfigSha256 === "" ? "(未設定)" : report.goEvidenceCriticalConfigSha256}`);
+  writeLine(`  算出済み対象設定SHA-256: ${report.computedCriticalConfigSha256}`);
+  writeLine(`  GO証跡SHA-256: ${report.goEvidenceSha256 === "" ? "(未設定)" : report.goEvidenceSha256}`);
   writeLine(`  bind: ${report.bindHost}:${report.port}`);
   writeLine(`  allowLan: ${String(report.allowLan)}`);
   writeLine(`  allowExternalRuntimeRequests: ${String(report.allowExternalRuntimeRequests)}`);

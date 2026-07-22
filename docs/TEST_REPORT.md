@@ -18,7 +18,7 @@
 | --- | --- |
 | `npm run lint` | 成功 |
 | `npm run typecheck` | 成功 |
-| `npm test` | 成功: 34ファイル、519テスト |
+| `npm test` | 成功: 34ファイル、523テスト |
 | `npm run test:e2e` | 成功: Chromium 10テスト |
 | `npm run build` | 成功 |
 | `npm run test:public-demo` | 成功: 5画面幅、25テスト、skipなし |
@@ -31,10 +31,10 @@
 
 最終カバレッジ:
 
-- Statements: 93.19%（2124/2279）
-- Branches: 87.58%（1446/1651）
-- Functions: 95.96%（381/397）
-- Lines: 94.52%（2039/2157）
+- Statements: 93.26%（2147/2302）
+- Branches: 87.73%（1467/1672）
+- Functions: 96.00%（385/401）
+- Lines: 94.58%（2061/2179）
 
 重要領域の強制閾値:
 
@@ -62,6 +62,8 @@
 - `test`モードがloopback、合成ID、隔離ログ、実フォーム非表示、GO証跡禁止、Serial禁止を強制し、参加者画面とOperatorへ非参加者表示を常設すること
 - `development`モードもMock、loopback、`DEV-001`形式、開発専用ログ、空フォームを強制し、参加者画面とOperatorへ非参加者表示を常設すること
 - `screen-pilot`モードがScreenPufferDevice、正式固定値・時間・4順序を保ちつつ、loopback、空フォーム、GO証跡禁止、`PILOT-001`形式、隔離ログ、非参加者表示を強制し、Mock・正式ID・本番ログ先・設定上書きを拒否すること
+- `screen-pilot`がGit worktreeルート、追跡・未追跡変更のないHEAD、固定pilot設定のGit追跡・HEADバイト完全一致を要求し、汎用`startServer`からの直接起動、dirtyな追跡ファイル、未追跡ファイル、Git statusから隠した設定バイト差分を拒否すること
+- `screen-pilot`の`sourceCommit`、`sourceTreeSha256`、`configFileHash`が起動結果へ返され、すべてのPILOT JSONLイベントへ同じ3値で記録されること
 - Mockは開発・E2E・明示的リハーサルだけに限定され、本番で拒否されること
 - 通常フェーズの再読み込みはOperator確認まで停止すること
 - result/reset中に実際に参加者ページを再読み込みすると、STOP、DEFLATE、errorとなり再開できないこと

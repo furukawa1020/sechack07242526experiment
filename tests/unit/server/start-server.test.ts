@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -9,10 +12,13 @@ import {
   inferServerMode,
   startProductionReleaseCli,
   startServer,
+  startVerifiedScreenPilot,
   type RunningExperimentServer,
   type VerifiedProductionStartOptions,
 } from "../../../src/server/index.js";
 import {
+  hashProductionCriticalConfig,
+  hashProductionGoEvidence,
   loadExperimentConfig,
   type LoadedExperimentConfig,
 } from "../../../src/shared/config-loader.js";
@@ -20,11 +26,21 @@ import {
   SCREEN_PROTOCOL_VERSION,
   STUDY_FORM_URL,
 } from "../../../src/shared/schemas.js";
+import { ExperimentLogger } from "../../../src/server/logging/experiment-log.js";
 
 type JsonRecord = Record<string, unknown>;
 
 const temporaryRoots: string[] = [];
 const runningServers: RunningExperimentServer[] = [];
+const execFileAsync = promisify(execFile);
+
+async function runGit(root: string, args: readonly string[]): Promise<void> {
+  await execFileAsync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+}
 
 function fakeRunningServer(): RunningExperimentServer {
   return {
@@ -54,6 +70,10 @@ function successfulVerification(loaded: LoadedExperimentConfig) {
       protocolVersion: loaded.config.protocolVersion,
       configHash: loaded.configHash,
       configFileHash: loaded.configFileHash,
+      criticalConfigSha256: hashProductionCriticalConfig(loaded.config),
+      goEvidenceSha256: hashProductionGoEvidence(loaded.config),
+      sourceTreeSha256: "d".repeat(64),
+      sourceEvidenceBindingSha256: "c".repeat(64),
     }),
   } as const;
 }
@@ -84,6 +104,7 @@ async function createRehearsalFixture(overrides: {
   readonly loggingDirectory?: string;
   readonly researchIdPattern?: string;
   readonly formAuditGo?: boolean;
+  readonly includeProductionGoEvidence?: boolean;
 } = {}): Promise<string> {
   const source = record(JSON.parse(
     await readFile(resolve("config", "experiment.e2e.json"), "utf8"),
@@ -92,6 +113,11 @@ async function createRehearsalFixture(overrides: {
   const device = record(source["device"]);
   const network = record(source["network"]);
   const logging = record(source["logging"]);
+  const productionSource = overrides.includeProductionGoEvidence === true
+    ? record(JSON.parse(
+        await readFile(resolve("config", "experiment.production.json"), "utf8"),
+      ) as unknown)
+    : undefined;
   const root = await mkdtemp(join(tmpdir(), "sechack-rehearsal-server-"));
   temporaryRoots.push(root);
   await Promise.all([
@@ -154,6 +180,7 @@ async function createRehearsalFixture(overrides: {
             twoPersonVerified: true,
           }
         : undefined,
+      goEvidence: productionSource?.["goEvidence"],
       logging: {
         ...logging,
         directory: overrides.loggingDirectory ?? "./data/mock-sessions",
@@ -166,6 +193,41 @@ async function createRehearsalFixture(overrides: {
     }, null, 2)}\n`,
     "utf8",
   );
+  return root;
+}
+
+async function createScreenPilotFixture(
+  mutate?: (config: JsonRecord) => void,
+): Promise<string> {
+  const source = record(JSON.parse(
+    await readFile(resolve("config", "experiment.screen-pilot.json"), "utf8"),
+  ) as unknown);
+  source["port"] = await reservePort();
+  mutate?.(source);
+  const root = await mkdtemp(join(tmpdir(), "sechack-screen-pilot-server-"));
+  temporaryRoots.push(root);
+  await Promise.all([
+    mkdir(join(root, "config"), { recursive: true }),
+    mkdir(join(root, "dist"), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(
+      join(root, "dist", "index.html"),
+      "<!doctype html><html><body>built-screen-pilot-client</body></html>",
+      "utf8",
+    ),
+    writeFile(
+      join(root, "config", "experiment.screen-pilot.json"),
+      `${JSON.stringify(source, null, 2)}\n`,
+      "utf8",
+    ),
+  ]);
+  await runGit(root, ["init"]);
+  await runGit(root, ["config", "core.autocrlf", "false"]);
+  await runGit(root, ["config", "user.name", "Screen Pilot Test"]);
+  await runGit(root, ["config", "user.email", "screen-pilot-test@example.invalid"]);
+  await runGit(root, ["add", "--all"]);
+  await runGit(root, ["commit", "-m", "screen pilot fixture"]);
   return root;
 }
 
@@ -311,7 +373,13 @@ describe("production release CLI seal", () => {
     })).rejects.toThrow(/Production release verification failed.*manifest/iu);
   });
 
-  it.each(["configFileHash", "configHash", "protocolVersion"] as const)(
+  it.each([
+    "configFileHash",
+    "configHash",
+    "protocolVersion",
+    "criticalConfigSha256",
+    "goEvidenceSha256",
+  ] as const)(
     "rejects a loaded config whose %s differs from the verified manifest",
     async (field) => {
       const loaded = await loadExperimentConfig("config/experiment.e2e.json");
@@ -445,6 +513,15 @@ describe("startServer production safeguards", () => {
       configPath: "config/rehearsal.json",
       mode: "test",
     })).rejects.toThrow(/Test mode prohibits GO form-audit evidence/iu);
+  });
+
+  it("rejects production GO evidence in test mode even when its status is NO-GO", async () => {
+    const root = await createRehearsalFixture({ includeProductionGoEvidence: true });
+    await expect(startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "test",
+    })).rejects.toThrow(/Test mode prohibits production GO evidence/iu);
   });
 
   it("rejects a production log directory in test-mode configuration", async () => {
@@ -590,6 +667,19 @@ describe("startServer production safeguards", () => {
     })).rejects.toThrow(/Development mode prohibits GO form-audit evidence/iu);
   });
 
+  it("rejects production GO evidence in development mode regardless of status", async () => {
+    const root = await createRehearsalFixture({
+      includeProductionGoEvidence: true,
+      researchIdPattern: "^DEV-[0-9]{3}$",
+      loggingDirectory: "./data/dev-sessions",
+    });
+    await expect(startServer({
+      rootDirectory: root,
+      configPath: "config/rehearsal.json",
+      mode: "development",
+    })).rejects.toThrow(/Development mode prohibits production GO evidence/iu);
+  });
+
   it.each(["test", "production"])(
     "does not let NODE_ENV=%s change a direct source start out of development mode",
     async (nodeEnvironment) => {
@@ -720,5 +810,149 @@ describe("startServer production safeguards", () => {
       configPath: "config/rehearsal.json",
       mode: "rehearsal",
     })).rejects.toThrow(/DEMO-001 research ID format/iu);
+  });
+
+  it("rejects form-audit and production GO evidence in rehearsal", async () => {
+    const auditRoot = await createRehearsalFixture({ formAuditGo: true });
+    await expect(startServer({
+      rootDirectory: auditRoot,
+      configPath: "config/rehearsal.json",
+      mode: "rehearsal",
+    })).rejects.toThrow(/Rehearsal mode prohibits GO form-audit evidence/iu);
+
+    const evidenceRoot = await createRehearsalFixture({ includeProductionGoEvidence: true });
+    await expect(startServer({
+      rootDirectory: evidenceRoot,
+      configPath: "config/rehearsal.json",
+      mode: "rehearsal",
+    })).rejects.toThrow(/Rehearsal mode prohibits production GO evidence/iu);
+  });
+
+  it("runs an isolated nonparticipant screen pilot with exact formal timings", async () => {
+    const root = await createScreenPilotFixture();
+    await expect(startServer({ rootDirectory: root, mode: "screen-pilot" }))
+      .rejects.toThrow(/clean, tracked source verification entry/iu);
+
+    const server = await startVerifiedScreenPilot(root);
+    runningServers.push(server);
+    expect(server.sourceEvidence).toMatchObject({
+      sourceCommit: expect.stringMatching(/^[a-f0-9]{40}$/u),
+      sourceTreeSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      configFileHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    const configBytes = await readFile(join(root, "config", "experiment.screen-pilot.json"));
+    expect(server.sourceEvidence.configFileHash)
+      .toBe(createHash("sha256").update(configBytes).digest("hex"));
+
+    const operatorConfig = await fetch(`${server.url}/api/operator/config`);
+    await expect(operatorConfig.json()).resolves.toMatchObject({
+      researchIdPattern: "^PILOT-[0-9]{3}$",
+      rehearsal: true,
+    });
+    const deviceStatus = await fetch(`${server.url}/api/device/status`);
+    await expect(deviceStatus.json()).resolves.toMatchObject({
+      status: { connected: true, state: "idle", level: 0, fault: null, mode: "screen" },
+    });
+    const created = await fetch(`${server.url}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        researchId: "PILOT-001",
+        consentConfirmed: true,
+        orderCode: "ABDC",
+      }),
+    });
+    expect(created.status).toBe(201);
+    const payload = record(await created.json());
+    expect(record(payload["snapshot"])["rehearsal"]).toBe(true);
+    expect(record(payload["snapshot"])["formUrl"]).toBeNull();
+    const logger = new ExperimentLogger({
+      directory: join(root, "data", "screen-pilot-sessions"),
+    });
+    const events = await logger.listEvents();
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((event) => (
+      event.sourceCommit === server.sourceEvidence.sourceCommit
+      && event.sourceTreeSha256 === server.sourceEvidence.sourceTreeSha256
+      && event.configFileHash === server.sourceEvidence.configFileHash
+    ))).toBe(true);
+  });
+
+  it.each([
+    ["Mock adapter", (config: JsonRecord) => {
+      record(config["device"])["mode"] = "mock";
+    }, /ScreenPufferDevice adapter/iu],
+    ["changed fixed state", (config: JsonRecord) => {
+      record(config["fixedState"])["score"] = 71;
+    }, /formal fixed-state values/iu],
+    ["changed timing", (config: JsonRecord) => {
+      record(config["timingMs"])["result"] = 14_999;
+    }, /formal presentation and puffer timings/iu],
+    ["changed order", (config: JsonRecord) => {
+      config["orders"] = ["BCAD", "ABDC", "CDBA", "DACB"];
+    }, /four formal counterbalanced orders/iu],
+    ["formal research ID", (config: JsonRecord) => {
+      config["researchIdPattern"] = "^SH26-[0-9]{3}$";
+    }, /PILOT-001 research ID format/iu],
+    ["production log directory", (config: JsonRecord) => {
+      record(config["logging"])["directory"] = "./data/sessions";
+    }, /isolated data\/screen-pilot-sessions/iu],
+    ["LAN access", (config: JsonRecord) => {
+      config["bindHost"] = "0.0.0.0";
+      record(config["network"])["allowLan"] = true;
+    }, /must bind to loopback/iu],
+    ["Google Form destination", (config: JsonRecord) => {
+      config["formUrl"] = STUDY_FORM_URL;
+    }, /prohibits a Google Form destination/iu],
+  ] as const)("rejects screen-pilot configuration with %s", async (_label, mutate, expected) => {
+    const root = await createScreenPilotFixture(mutate);
+    await expect(startVerifiedScreenPilot(root)).rejects.toThrow(expected);
+  });
+
+  it("rejects all production evidence and log overrides in screen-pilot mode", async () => {
+    const production = record(JSON.parse(
+      await readFile(resolve("config", "experiment.production.json"), "utf8"),
+    ) as unknown);
+    const formEvidenceRoot = await createScreenPilotFixture((config) => {
+      config["formAudit"] = production["formAudit"];
+    });
+    await expect(startVerifiedScreenPilot(formEvidenceRoot)).rejects.toThrow(/form-audit evidence/iu);
+
+    const goEvidenceRoot = await createScreenPilotFixture((config) => {
+      config["goEvidence"] = production["goEvidence"];
+    });
+    await expect(startVerifiedScreenPilot(goEvidenceRoot)).rejects.toThrow(/production GO evidence/iu);
+
+    const overrideRoot = await createScreenPilotFixture();
+    const previousDataDirectory = process.env.DATA_DIRECTORY;
+    process.env.DATA_DIRECTORY = "data/sessions";
+    try {
+      await expect(startVerifiedScreenPilot(overrideRoot))
+        .rejects.toThrow(/prohibits overriding its isolated pilot log directory/iu);
+    } finally {
+      if (previousDataDirectory === undefined) delete process.env.DATA_DIRECTORY;
+      else process.env.DATA_DIRECTORY = previousDataDirectory;
+    }
+  });
+
+  it("rejects dirty and untracked screen-pilot source before opening a listener", async () => {
+    const dirtyRoot = await createScreenPilotFixture();
+    await writeFile(join(dirtyRoot, "dist", "index.html"), "dirty tracked client", "utf8");
+    await expect(startVerifiedScreenPilot(dirtyRoot)).rejects.toThrow(/clean Git HEAD/iu);
+
+    const untrackedRoot = await createScreenPilotFixture();
+    await writeFile(join(untrackedRoot, "untracked.txt"), "must block pilot", "utf8");
+    await expect(startVerifiedScreenPilot(untrackedRoot)).rejects.toThrow(/clean Git HEAD/iu);
+  });
+
+  it("rejects fixed pilot config bytes that differ from HEAD even if Git is told to skip them", async () => {
+    const root = await createScreenPilotFixture();
+    const configPath = join(root, "config", "experiment.screen-pilot.json");
+    await runGit(root, ["update-index", "--assume-unchanged", "config/experiment.screen-pilot.json"]);
+    const original = await readFile(configPath, "utf8");
+    await writeFile(configPath, `${original}\n`, "utf8");
+
+    await expect(startVerifiedScreenPilot(root))
+      .rejects.toThrow(/config bytes must exactly match/iu);
   });
 });

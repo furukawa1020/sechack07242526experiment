@@ -216,9 +216,9 @@ test("built nonparticipant client keeps direct routes, caching, and runtime requ
   expect(operatorResponse?.status()).toBe(200);
   expect(operatorResponse?.headers()["cache-control"]).toBe("no-store");
   await expect(operator.getByTestId("operator-app")).toBeVisible();
-  await expect(operator.getByText("実機なし・模擬リハーサル")).toBeVisible();
+  await expect(operator.getByText("非参加者用の事前確認")).toBeVisible();
   await expect(operator.getByText(/本番参加者には使用しないでください/u)).toBeVisible();
-  await expect(operator.locator(".screen-mode-pill")).toHaveCount(0);
+  await expect(operator.locator(".screen-mode-pill")).toHaveText("画面版・PILOT/テスト");
   await expectNoDocumentOverflow(operator);
   const operatorReload = await operator.reload();
   expect(operatorReload?.status()).toBe(200);
@@ -301,7 +301,7 @@ test("built nonparticipant client keeps direct routes, caching, and runtime requ
   expect(publicResponse.ok()).toBeTruthy();
   expect(record(record(await publicResponse.json()).snapshot)["formUrl"]).toBeNull();
   await expect(
-    display.getByText("研究参加用ではありません・回答送信なし・実機なし"),
+    display.getByText("研究参加用ではありません・Googleフォームへの回答送信なし"),
   ).toBeVisible();
 
   const formLink = display.getByRole("link", { name: "Googleフォームを開いて回答する" });
@@ -317,7 +317,7 @@ test("built nonparticipant client keeps direct routes, caching, and runtime requ
   await operator.getByRole("checkbox", { name: /リハーサルの確認を完了済み/u }).check();
   await operator.getByRole("button", { name: "確認を完了してリハーサル終了" }).click();
   await expect(
-    display.getByRole("heading", { name: "模擬リハーサルを終了しました" }),
+    display.getByRole("heading", { name: "非参加者用の事前確認を終了しました" }),
   ).toBeVisible();
 
   const invalidDisplay = await context.newPage();

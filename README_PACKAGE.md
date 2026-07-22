@@ -2,7 +2,7 @@
 
 1. 新しいGitリポジトリのルートへ、このパッケージの内容をコピーします。
 2. `START_HERE.md`の指示をCodexへ渡します。
-3. Codexが実装後、非参加者専用`screen-pilot`経路の`device.mode=screen`で全4順序と画面上フグの6秒膨張・保持・6秒収縮を確認します。
+3. Codexが実装後、cleanなGit worktreeルートから`npm run screen-pilot`だけを使い、非参加者専用`device.mode=screen`で全4順序と画面上フグの6秒膨張・保持・6秒収縮を確認します。起動時の`sourceCommit`、`sourceTreeSha256`、`configFileHash`と全PILOT JSONLイベントの同名3フィールドが一致することも確認します。直接の`node dist-server/screen-pilot.js`や既存ビルドの流用はしません。
 4. `mock`は開発・自動テスト・明示的な模擬リハーサルだけで使用します。
 5. 実参加者へ使用する前に、二名の独立照合と研究責任者承認により、固定模擬データ、本人非測定、生体データ非取得、画面上フグへの刺激変更および必要な倫理手続きの完了を確認します。
 6. `docs/FORM_RELEASE_GATE.md`を完了し、正式screen用`config/experiment.production.example.json`を承認済み監査値で封印します。同梱例は意図的に`NO-GO`であり、所見を解消せずフラグだけを変更してはいけません。

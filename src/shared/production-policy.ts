@@ -5,7 +5,10 @@ import {
 } from "./form-audit.js";
 import {
   SCREEN_PROTOCOL_VERSION,
+  type ApprovalEvidence,
   type ExperimentConfig,
+  type ProductionGoEvidence,
+  type ReleaseReview,
 } from "./schemas.js";
 
 export type ProductionDevicePolicyIssueCode =
@@ -54,6 +57,18 @@ export interface ProductionPolicyAssessment {
   readonly protocolIssues: readonly ProductionProtocolPolicyIssueCode[];
   readonly formUrlMatchesStudy: boolean;
   readonly formAudit: FormAuditAssessment;
+  readonly goEvidence: ProductionGoEvidenceAssessment;
+}
+
+export interface ProductionPolicyContext {
+  /** Canonical SHA-256 of the production config with goEvidence omitted. */
+  readonly criticalConfigSha256?: string;
+}
+
+export interface ProductionGoEvidenceAssessment {
+  readonly approved: boolean;
+  readonly issues: readonly string[];
+  readonly criticalConfigSha256: string | null;
 }
 
 export type ProductionPolicySubject = Pick<
@@ -62,11 +77,257 @@ export type ProductionPolicySubject = Pick<
   | "fixedState"
   | "formAudit"
   | "formUrl"
+  | "goEvidence"
   | "orders"
   | "protocolVersion"
   | "researchIdPattern"
   | "timingMs"
 >;
+
+const DAY_MS = 86_400_000;
+const JST_OFFSET_MS = 9 * 60 * 60 * 1_000;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const PLACEHOLDER_SHA256 = "0".repeat(64);
+const PLACEHOLDER_TOKEN_PATTERN = /(?:^|[._:/-])(?:PENDING|TBD|TODO|EXAMPLE|PLACEHOLDER|DUMMY|SAMPLE)(?:[0-9]+)?(?:$|[._:/-])/iu;
+const MAX_RELEASE_REVIEW_AGE_DAYS = 30;
+
+function isPlaceholderDigest(value: string): boolean {
+  if (!SHA256_PATTERN.test(value)) return true;
+  if (value === PLACEHOLDER_SHA256) return true;
+  // Reject conspicuously synthetic values such as aaaa… or deadbeefdeadbeef… .
+  // A real SHA-256 digest matching a period of 16 characters or less is
+  // cryptographically negligible, while these values are common placeholders.
+  for (let period = 1; period <= 16; period += 1) {
+    if (64 % period !== 0) continue;
+    const fragment = value.slice(0, period);
+    if (fragment.repeat(64 / period) === value) return true;
+  }
+  return false;
+}
+
+function containsPlaceholderToken(value: string): boolean {
+  return PLACEHOLDER_TOKEN_PATTERN.test(value);
+}
+
+function calendarDateToUtcMs(value: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return null;
+  const milliseconds = Date.parse(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(milliseconds)) return null;
+  return new Date(milliseconds).toISOString().slice(0, 10) === value
+    ? milliseconds
+    : null;
+}
+
+function japanCalendarDate(value: Date): string | null {
+  if (!Number.isFinite(value.getTime())) return null;
+  return new Date(value.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function assessEvidenceDates(
+  path: string,
+  approvedOn: string | null,
+  applicableUntil: string | null,
+  nowDay: number | null,
+  issues: string[],
+): void {
+  if (approvedOn === null) {
+    issues.push(`${path}:approval-date-missing`);
+  }
+  if (applicableUntil === null) {
+    issues.push(`${path}:applicability-deadline-missing`);
+  }
+  if (approvedOn === null || applicableUntil === null) return;
+  const approvedDay = calendarDateToUtcMs(approvedOn);
+  const applicableDay = calendarDateToUtcMs(applicableUntil);
+  if (approvedDay === null) issues.push(`${path}:approval-date-invalid`);
+  if (applicableDay === null) issues.push(`${path}:applicability-deadline-invalid`);
+  if (approvedDay === null || applicableDay === null) return;
+  if (nowDay !== null && approvedDay > nowDay) {
+    issues.push(`${path}:approval-date-in-future`);
+  }
+  if (applicableDay < approvedDay) issues.push(`${path}:invalid-applicability-range`);
+  if (nowDay !== null && applicableDay < nowDay) {
+    const ageDays = Math.floor((nowDay - applicableDay) / DAY_MS);
+    issues.push(`${path}:applicability-expired-${String(ageDays)}-days`);
+  }
+}
+
+function assessApprovalRecord(
+  path: string,
+  record: ApprovalEvidence,
+  protocolVersion: string,
+  nowDay: number | null,
+  issues: string[],
+): void {
+  if (record.status !== "GO") issues.push(`${path}:status-not-go`);
+  if (record.protocolVersion !== protocolVersion) {
+    issues.push(`${path}:protocol-version-mismatch`);
+  }
+  if (isPlaceholderDigest(record.contentSha256)) {
+    issues.push(`${path}:content-sha256-unapproved`);
+  }
+  if (containsPlaceholderToken(record.documentId)) {
+    issues.push(`${path}:${/PENDING/iu.test(record.documentId) ? "document-id-pending" : "document-id-placeholder"}`);
+  }
+  if (containsPlaceholderToken(record.documentVersion)) {
+    issues.push(`${path}:${/PENDING/iu.test(record.documentVersion) ? "document-version-pending" : "document-version-placeholder"}`);
+  }
+  assessEvidenceDates(
+    path,
+    record.approvedOn,
+    record.applicableUntil,
+    nowDay,
+    issues,
+  );
+}
+
+function assessReleaseReview(
+  path: string,
+  review: ReleaseReview,
+  protocolVersion: string,
+  criticalConfigSha256: string | undefined,
+  nowDay: number | null,
+  issues: string[],
+): void {
+  if (review.status !== "GO") issues.push(`${path}:status-not-go`);
+  if (review.protocolVersion !== protocolVersion) {
+    issues.push(`${path}:protocol-version-mismatch`);
+  }
+  if (
+    criticalConfigSha256 === undefined
+    || review.criticalConfigSha256 !== criticalConfigSha256
+  ) {
+    issues.push(`${path}:critical-config-sha256-mismatch`);
+  }
+  if (
+    isPlaceholderDigest(review.attestationSha256)
+  ) {
+    issues.push(`${path}:attestation-sha256-unapproved`);
+  }
+  if (containsPlaceholderToken(review.reviewId)) {
+    issues.push(`${path}:${/PENDING/iu.test(review.reviewId) ? "review-id-pending" : "review-id-placeholder"}`);
+  }
+  if (containsPlaceholderToken(review.reviewerCode)) {
+    issues.push(`${path}:${/PENDING/iu.test(review.reviewerCode) ? "reviewer-code-pending" : "reviewer-code-placeholder"}`);
+  }
+  if (containsPlaceholderToken(review.reviewVersion)) {
+    issues.push(`${path}:${/PENDING/iu.test(review.reviewVersion) ? "review-version-pending" : "review-version-placeholder"}`);
+  }
+  assessEvidenceDates(
+    path,
+    review.reviewedOn,
+    review.applicableUntil,
+    nowDay,
+    issues,
+  );
+  if (review.reviewedOn !== null && nowDay !== null) {
+    const reviewedDay = calendarDateToUtcMs(review.reviewedOn);
+    if (reviewedDay !== null && reviewedDay <= nowDay) {
+      const ageDays = Math.floor((nowDay - reviewedDay) / DAY_MS);
+      if (ageDays > MAX_RELEASE_REVIEW_AGE_DAYS) {
+        issues.push(`${path}:review-stale-${String(ageDays)}-days`);
+      }
+    }
+  }
+}
+
+/**
+ * Verifies local, non-PII approval evidence only. documentId, reviewId and
+ * reviewerCode are opaque operational codes; names and email addresses do not
+ * belong in this configuration or in release artifacts.
+ */
+export function assessProductionGoEvidence(
+  evidence: ProductionGoEvidence | undefined,
+  protocolVersion: string,
+  now: Date,
+  criticalConfigSha256: string | undefined,
+): ProductionGoEvidenceAssessment {
+  if (evidence === undefined) {
+    return Object.freeze({
+      approved: false,
+      issues: Object.freeze(["missing"]),
+      criticalConfigSha256: criticalConfigSha256 ?? null,
+    });
+  }
+  const issues: string[] = [];
+  const nowCalendarDate = japanCalendarDate(now);
+  const nowDay = nowCalendarDate === null ? null : calendarDateToUtcMs(nowCalendarDate);
+  if (nowDay === null) {
+    issues.push("clock:calendar-date-invalid");
+  }
+  if (evidence.status !== "GO") issues.push("status-not-go");
+  if (evidence.protocolVersion !== protocolVersion) {
+    issues.push("protocol-version-mismatch");
+  }
+  if (criticalConfigSha256 === undefined) {
+    issues.push("critical-config-sha256-unavailable");
+  } else if (evidence.criticalConfigSha256 !== criticalConfigSha256) {
+    issues.push("critical-config-sha256-mismatch");
+  }
+
+  const approvalRecords = [
+    ["researchPlan", evidence.researchPlan],
+    ["ethicsDetermination", evidence.ethicsDetermination],
+    ["preStimulusConsent", evidence.preStimulusConsent],
+    ["dataManagementPlan", evidence.dataManagementPlan],
+    ["screenPilot", evidence.screenPilot],
+  ] as const;
+  for (const [path, record] of approvalRecords) {
+    assessApprovalRecord(path, record, protocolVersion, nowDay, issues);
+  }
+  if (evidence.screenPilot.completedSessions === null) {
+    issues.push("screenPilot:completed-sessions-missing");
+  }
+
+  const releaseVerification = evidence.releaseVerification;
+  if (releaseVerification.status !== "GO") {
+    issues.push("releaseVerification:status-not-go");
+  }
+  if (releaseVerification.protocolVersion !== protocolVersion) {
+    issues.push("releaseVerification:protocol-version-mismatch");
+  }
+  if (containsPlaceholderToken(releaseVerification.appVersion)) {
+    issues.push("releaseVerification:app-version-placeholder");
+  }
+  if (isPlaceholderDigest(releaseVerification.sourceTreeSha256)) {
+    issues.push("releaseVerification:source-tree-sha256-unapproved");
+  }
+  if (
+    criticalConfigSha256 === undefined
+    || releaseVerification.criticalConfigSha256 !== criticalConfigSha256
+  ) {
+    issues.push("releaseVerification:critical-config-sha256-mismatch");
+  }
+  releaseVerification.reviews.forEach((review, index) => {
+    assessReleaseReview(
+      `releaseVerification.reviews.${String(index)}`,
+      review,
+      protocolVersion,
+      criticalConfigSha256,
+      nowDay,
+      issues,
+    );
+  });
+  const [firstReview, secondReview] = releaseVerification.reviews;
+  if (firstReview.reviewId === secondReview.reviewId) {
+    issues.push("releaseVerification:duplicate-review-id");
+  }
+  if (firstReview.reviewerCode === secondReview.reviewerCode) {
+    issues.push("releaseVerification:duplicate-reviewer-code");
+  }
+  if (firstReview.reviewVersion !== secondReview.reviewVersion) {
+    issues.push("releaseVerification:review-version-mismatch");
+  }
+  if (firstReview.attestationSha256 === secondReview.attestationSha256) {
+    issues.push("releaseVerification:duplicate-attestation-sha256");
+  }
+
+  return Object.freeze({
+    approved: issues.length === 0,
+    issues: Object.freeze(issues),
+    criticalConfigSha256: criticalConfigSha256 ?? null,
+  });
+}
 
 export function isWindowsComPath(value: string): boolean {
   return /^(?:COM[1-9][0-9]*|\\\\\.\\COM[1-9][0-9]*)$/iu.test(value.trim());
@@ -80,6 +341,7 @@ export function isWindowsComPath(value: string): boolean {
 export function assessProductionPolicy(
   subject: ProductionPolicySubject,
   now = new Date(),
+  context: ProductionPolicyContext = {},
 ): ProductionPolicyAssessment {
   const deviceIssues: ProductionDevicePolicyIssueCode[] = [];
   const protocolIssues: ProductionProtocolPolicyIssueCode[] = [];
@@ -144,15 +406,23 @@ export function assessProductionPolicy(
 
   const formUrlMatchesStudy = subject.formUrl === STUDY_FORM_URL;
   const formAudit = assessFormAudit(subject, now);
+  const goEvidence = assessProductionGoEvidence(
+    subject.goEvidence,
+    subject.protocolVersion,
+    now,
+    context.criticalConfigSha256,
+  );
 
   return Object.freeze({
     approved: deviceIssues.length === 0
       && protocolIssues.length === 0
       && formUrlMatchesStudy
-      && formAudit.approved,
+      && formAudit.approved
+      && goEvidence.approved,
     deviceIssues: Object.freeze(deviceIssues),
     protocolIssues: Object.freeze(protocolIssues),
     formUrlMatchesStudy,
     formAudit,
+    goEvidence,
   });
 }

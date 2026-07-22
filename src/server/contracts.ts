@@ -6,7 +6,11 @@ import type {
   ProcessingLocation,
 } from "../shared/index.js";
 import type { DeviceAck, DeviceStatus, PufferDevice } from "./devices/index.js";
-import type { ExperimentLogEvent, SessionLogSummary } from "./logging/index.js";
+import type {
+  ExperimentLogEvent,
+  ResearchIdReservationInput,
+  SessionLogSummary,
+} from "./logging/index.js";
 
 export type { DeviceAck, DeviceStatus, PufferDevice };
 
@@ -48,6 +52,7 @@ export interface SessionLogWriter {
   append(event: ExperimentLogEvent): Promise<void>;
   exportCsv(): Promise<string>;
   hasResearchId(researchId: string): Promise<boolean>;
+  reserveResearchId(input: ResearchIdReservationInput): Promise<boolean>;
   listSessionSummaries(): Promise<readonly SessionLogSummary[]>;
 }
 

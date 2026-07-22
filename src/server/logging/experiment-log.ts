@@ -3,7 +3,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile,
   readdir,
   realpath,
   type FileHandle,
@@ -18,10 +17,17 @@ import {
   PUFFER_DEVICE_STATES,
   type Session,
 } from "../../shared/experiment-machine.js";
+import type { ScreenPilotSourceEvidence } from "../screen-pilot-provenance.js";
 import {
   assertExperimentLogEventFieldAllowlist,
   type ExperimentLogEventAllowedField,
 } from "./log-event-allowlist.js";
+import {
+  assertResearchIdReservation,
+  hasReservedResearchId,
+  reserveResearchId,
+  type ResearchIdReservationInput,
+} from "./research-id-registry.js";
 
 const safeToken = (name: string, maxLength: number): z.ZodString => z.string()
   .min(1)
@@ -38,6 +44,9 @@ const experimentLogEventShape = {
   protocolVersion: safeToken("protocolVersion", 200),
   appVersion: safeToken("appVersion", 80),
   configHash: z.string().regex(/^[a-f0-9]{64}$/u, "configHash must be a SHA-256 hex digest."),
+  sourceCommit: z.string().regex(/^[a-f0-9]{40}$/u, "sourceCommit must be a full Git commit ID.").optional(),
+  sourceTreeSha256: z.string().regex(/^[a-f0-9]{64}$/u, "sourceTreeSha256 must be a SHA-256 digest.").optional(),
+  configFileHash: z.string().regex(/^[a-f0-9]{64}$/u, "configFileHash must be a SHA-256 digest.").optional(),
   sessionId: z.string().uuid(),
   researchId: z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/u),
   orderCode: OrderCodeSchema,
@@ -84,6 +93,30 @@ export const ExperimentLogEventSchema = z.object(experimentLogEventShape).strict
       });
     }
   }
+  const sourceEvidence = [event.sourceCommit, event.sourceTreeSha256, event.configFileHash];
+  const sourceEvidenceCount = sourceEvidence.filter((value) => value !== undefined).length;
+  const pilotResearchId = /^PILOT-[0-9]{3}$/u.test(event.researchId);
+  if (sourceEvidenceCount !== 0 && sourceEvidenceCount !== sourceEvidence.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sourceCommit"],
+      message: "sourceCommit, sourceTreeSha256 and configFileHash must be present together.",
+    });
+  }
+  if (pilotResearchId && sourceEvidenceCount !== sourceEvidence.length) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sourceCommit"],
+      message: "PILOT session logs require verified source evidence.",
+    });
+  }
+  if (sourceEvidenceCount === sourceEvidence.length && (!pilotResearchId || event.deviceMode !== "screen")) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sourceCommit"],
+      message: "Verified screen-pilot source evidence is restricted to PILOT screen sessions.",
+    });
+  }
 });
 
 export type ExperimentLogEvent = Readonly<z.infer<typeof ExperimentLogEventSchema>>;
@@ -94,6 +127,7 @@ export interface CreateLogEventInput {
   readonly eventType: string;
   readonly wallClockIso: string;
   readonly monotonicMs: number;
+  readonly screenPilotSourceEvidence?: ScreenPilotSourceEvidence;
   readonly deviceStatus?: Session["deviceStatus"];
   readonly errorCode?: string;
 }
@@ -133,6 +167,7 @@ export function createLogEvent(input: CreateLogEventInput): ExperimentLogEvent {
     protocolVersion: session.protocolVersion,
     appVersion: input.appVersion,
     configHash: session.configHash,
+    ...(input.screenPilotSourceEvidence === undefined ? {} : input.screenPilotSourceEvidence),
     sessionId: session.id,
     researchId: session.researchId,
     orderCode: session.orderCode,
@@ -185,6 +220,7 @@ export class ExperimentLogger {
     this.assertInsideLogDirectory(path);
     const previousWrite = this.writes.get(path) ?? Promise.resolve();
     const currentWrite = previousWrite.then(async () => {
+      await this.ensureEventReservation(validated);
       const realLogDirectory = await this.ensureSecureLogRoot();
       await this.ensureSecureDateDirectory(dirname(path), realLogDirectory);
       const handle = await this.openSecureLogFile(path, realLogDirectory);
@@ -216,7 +252,7 @@ export class ExperimentLogger {
     const paths = await this.listLogPaths();
     const events: ExperimentLogEvent[] = [];
     for (const path of paths) {
-      const source = await readFile(path, "utf8");
+      const source = await this.readSecureLogFile(path);
       const lines = source.split(/\r?\n/u).filter((line) => line.length > 0);
       lines.forEach((line, index) => {
         let parsed: unknown;
@@ -239,8 +275,11 @@ export class ExperimentLogger {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(researchId)) {
       return false;
     }
-    const events = await this.listEvents();
-    return events.some((event) => event.researchId === researchId);
+    return hasReservedResearchId(this.directory, researchId);
+  }
+
+  public async reserveResearchId(input: ResearchIdReservationInput): Promise<boolean> {
+    return reserveResearchId(this.directory, input);
   }
 
   public async listSessionSummaries(): Promise<readonly SessionLogSummary[]> {
@@ -414,6 +453,50 @@ export class ExperimentLogger {
       await handle.close();
       throw error;
     }
+  }
+
+  private async readSecureLogFile(path: string): Promise<string> {
+    const realLogDirectory = await this.resolveSecureLogRoot();
+    const noFollow = constants.O_NOFOLLOW ?? 0;
+    const handle = await open(path, constants.O_RDONLY | noFollow);
+    try {
+      await this.assertOpenHandleMatchesPath(handle, path, realLogDirectory);
+      const before = await handle.stat();
+      const source = await handle.readFile("utf8");
+      const [afterHandle, afterPath] = await Promise.all([handle.stat(), lstat(path)]);
+      if (
+        before.dev !== afterHandle.dev
+        || before.ino !== afterHandle.ino
+        || before.nlink !== afterHandle.nlink
+        || before.size !== afterHandle.size
+        || before.mtimeMs !== afterHandle.mtimeMs
+        || before.ctimeMs !== afterHandle.ctimeMs
+        || afterHandle.dev !== afterPath.dev
+        || afterHandle.ino !== afterPath.ino
+        || afterHandle.nlink !== afterPath.nlink
+        || afterHandle.size !== afterPath.size
+        || afterHandle.mtimeMs !== afterPath.mtimeMs
+        || afterHandle.ctimeMs !== afterPath.ctimeMs
+      ) {
+        throw new Error("The session log changed while it was being read.");
+      }
+      return source;
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async ensureEventReservation(event: ExperimentLogEvent): Promise<void> {
+    const reservation = {
+      researchId: event.researchId,
+      sessionId: event.sessionId,
+      reservedAt: event.wallClockIso,
+    } satisfies ResearchIdReservationInput;
+    if (event.eventType === "session.created") {
+      const created = await reserveResearchId(this.directory, reservation);
+      if (created) return;
+    }
+    await assertResearchIdReservation(this.directory, reservation);
   }
 
   private async assertSecureExistingLogFile(

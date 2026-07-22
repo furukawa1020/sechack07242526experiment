@@ -6,9 +6,17 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { verifyReleaseDirectoryDetailed } from "../../scripts/release-manifest.js";
 import {
+  hashProductionCriticalConfig,
+  hashProductionGoEvidence,
   loadExperimentConfig,
   type LoadedExperimentConfig,
 } from "../shared/config-loader.js";
+import {
+  SCREEN_PRODUCTION_FIXED_STATE,
+  SCREEN_PRODUCTION_ORDERS,
+  SCREEN_PRODUCTION_TIMING_MS,
+} from "../shared/production-policy.js";
+import { SCREEN_PROTOCOL_VERSION } from "../shared/schemas.js";
 import { createApplication } from "./app.js";
 import {
   MockPufferDevice,
@@ -18,6 +26,10 @@ import {
 } from "./devices/index.js";
 import { ExperimentLogger } from "./logging/index.js";
 import { acquireExperimentServerLock } from "./runtime-lock.js";
+import {
+  verifyScreenPilotSource,
+  type ScreenPilotSourceEvidence,
+} from "./screen-pilot-provenance.js";
 import { SessionController } from "./sessions/session-controller.js";
 import { WebSocketHub } from "./websocket/websocket-hub.js";
 
@@ -28,6 +40,10 @@ export interface RunningExperimentServer {
   readonly operatorToken: string | null;
   readonly shutdownDeadlineMs: number;
   close(): Promise<void>;
+}
+
+export interface RunningVerifiedScreenPilotServer extends RunningExperimentServer {
+  readonly sourceEvidence: ScreenPilotSourceEvidence;
 }
 
 export interface StartServerOptions {
@@ -42,9 +58,12 @@ interface InternalStartServerOptions extends StartServerOptions {
   readonly productionReleaseCapability?: symbol;
   readonly verifiedProductionConfig?: LoadedExperimentConfig;
   readonly verifiedAppVersion?: string;
+  readonly screenPilotCapability?: symbol;
+  readonly verifiedScreenPilotConfig?: LoadedExperimentConfig;
+  readonly screenPilotSourceEvidence?: ScreenPilotSourceEvidence;
 }
 
-export type ServerMode = "development" | "production" | "rehearsal" | "test";
+export type ServerMode = "development" | "production" | "rehearsal" | "screen-pilot" | "test";
 
 export interface ServerCliOptions {
   readonly start?: () => Promise<RunningExperimentServer>;
@@ -76,8 +95,10 @@ export interface VerifiedProductionStartOptions {
 
 const REHEARSAL_LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const REHEARSAL_RESEARCH_ID_PATTERN = "^DEMO-[0-9]{3}$";
+const SCREEN_PILOT_RESEARCH_ID_PATTERN = "^PILOT-[0-9]{3}$";
 const DEVELOPMENT_RESEARCH_ID_PATTERN = "^DEV-[0-9]{3}$";
 const DEVELOPMENT_LOG_DIRECTORY = "./data/dev-sessions";
+const SCREEN_PILOT_LOG_DIRECTORY = "./data/screen-pilot-sessions";
 const TEST_RESEARCH_ID_PATTERNS = new Set([
   REHEARSAL_RESEARCH_ID_PATTERN,
   "^TEST-[0-9]{3}$",
@@ -92,6 +113,7 @@ const PRODUCTION_CONFIG_PATH = "config/experiment.json";
 const PRODUCTION_SERVER_DIRECTORY = "dist-server";
 const PRODUCTION_SERVER_ENTRY = "index.js";
 const VERIFIED_PRODUCTION_RELEASE = Symbol("verified-production-release");
+const VERIFIED_SCREEN_PILOT_SOURCE = Symbol("verified-screen-pilot-source");
 
 function isInside(parent: string, candidate: string): boolean {
   const pathFromParent = relative(parent, candidate);
@@ -157,6 +179,9 @@ function assertDevelopmentConfig(
   if (config.formAudit?.status === "GO") {
     throw new Error("Development mode prohibits GO form-audit evidence.");
   }
+  if (config.goEvidence !== undefined) {
+    throw new Error("Development mode prohibits production GO evidence.");
+  }
   if (config.researchIdPattern !== DEVELOPMENT_RESEARCH_ID_PATTERN) {
     throw new Error("Development mode requires the DEV-001 research ID format.");
   }
@@ -183,11 +208,77 @@ function assertRehearsalConfig(
   if (config.formUrl !== "") {
     throw new Error("Rehearsal mode prohibits a Google Form destination.");
   }
+  if (config.formAudit?.status === "GO") {
+    throw new Error("Rehearsal mode prohibits GO form-audit evidence.");
+  }
+  if (config.goEvidence !== undefined) {
+    throw new Error("Rehearsal mode prohibits production GO evidence.");
+  }
   if (config.researchIdPattern !== REHEARSAL_RESEARCH_ID_PATTERN) {
     throw new Error("Rehearsal mode requires the DEMO-001 research ID format.");
   }
   if (config.logging.directory !== "./data/mock-sessions") {
     throw new Error("Rehearsal mode requires the isolated data/mock-sessions log directory.");
+  }
+}
+
+function assertScreenPilotConfig(
+  config: Awaited<ReturnType<typeof loadExperimentConfig>>["config"],
+): void {
+  if (config.device.mode !== "screen" || config.device.serialPath !== "") {
+    throw new Error("Screen-pilot mode requires the hardware-free ScreenPufferDevice adapter.");
+  }
+  if (config.device.allowMockInProduction) {
+    throw new Error("Screen-pilot mode prohibits allowMockInProduction.");
+  }
+  if (config.protocolVersion !== SCREEN_PROTOCOL_VERSION) {
+    throw new Error(`Screen-pilot mode requires protocolVersion ${SCREEN_PROTOCOL_VERSION}.`);
+  }
+  if (
+    config.fixedState.score !== SCREEN_PRODUCTION_FIXED_STATE.score
+    || config.fixedState.label !== SCREEN_PRODUCTION_FIXED_STATE.label
+    || config.fixedState.pufferLevel !== SCREEN_PRODUCTION_FIXED_STATE.pufferLevel
+  ) {
+    throw new Error("Screen-pilot mode requires the formal fixed-state values.");
+  }
+  if (
+    config.timingMs.handling !== SCREEN_PRODUCTION_TIMING_MS.handling
+    || config.timingMs.processing !== SCREEN_PRODUCTION_TIMING_MS.processing
+    || config.timingMs.result !== SCREEN_PRODUCTION_TIMING_MS.result
+    || config.timingMs.reset !== SCREEN_PRODUCTION_TIMING_MS.reset
+    || config.timingMs.inflateRamp !== SCREEN_PRODUCTION_TIMING_MS.inflateRamp
+    || config.timingMs.deflateRamp !== SCREEN_PRODUCTION_TIMING_MS.deflateRamp
+  ) {
+    throw new Error("Screen-pilot mode requires the formal presentation and puffer timings.");
+  }
+  if (
+    config.orders.length !== SCREEN_PRODUCTION_ORDERS.length
+    || config.orders.some((order, index) => order !== SCREEN_PRODUCTION_ORDERS[index])
+  ) {
+    throw new Error("Screen-pilot mode requires the four formal counterbalanced orders.");
+  }
+  if (config.network.allowLan || !REHEARSAL_LOOPBACK_HOSTS.has(config.bindHost)) {
+    throw new Error("Screen-pilot mode must bind to loopback and prohibits LAN access.");
+  }
+  if (config.network.allowExternalRuntimeRequests) {
+    throw new Error("Screen-pilot mode prohibits external runtime requests.");
+  }
+  if (config.formUrl !== "" || config.formAudit !== undefined) {
+    throw new Error("Screen-pilot mode prohibits a Google Form destination and form-audit evidence.");
+  }
+  if (config.goEvidence !== undefined) {
+    throw new Error("Screen-pilot mode prohibits production GO evidence.");
+  }
+  if (config.researchIdPattern !== SCREEN_PILOT_RESEARCH_ID_PATTERN) {
+    throw new Error("Screen-pilot mode requires the PILOT-001 research ID format.");
+  }
+  if (
+    config.logging.directory !== SCREEN_PILOT_LOG_DIRECTORY
+    || !config.logging.includeAbortedInOrderBalancing
+  ) {
+    throw new Error(
+      "Screen-pilot mode requires the isolated data/screen-pilot-sessions log directory and aborted-run balancing.",
+    );
   }
 }
 
@@ -208,6 +299,9 @@ function assertTestConfig(
   }
   if (config.formAudit?.status === "GO") {
     throw new Error("Test mode prohibits GO form-audit evidence.");
+  }
+  if (config.goEvidence !== undefined) {
+    throw new Error("Test mode prohibits production GO evidence.");
   }
   if (!TEST_RESEARCH_ID_PATTERNS.has(config.researchIdPattern)) {
     throw new Error("Test mode requires the TEST-001 or DEMO-001 research ID format.");
@@ -234,6 +328,18 @@ async function startServerInternal(
       "Production mode can start only from a verified sealed release CLI.",
     );
   }
+  if (
+    mode === "screen-pilot"
+    && (
+      options.screenPilotCapability !== VERIFIED_SCREEN_PILOT_SOURCE
+      || options.verifiedScreenPilotConfig === undefined
+      || options.screenPilotSourceEvidence === undefined
+    )
+  ) {
+    throw new Error(
+      "Screen-pilot mode can start only through the clean, tracked source verification entry.",
+    );
+  }
   if (options.serveBuiltAssets === true && mode !== "test") {
     throw new Error("serveBuiltAssets is available only in explicit test mode.");
   }
@@ -243,13 +349,26 @@ async function startServerInternal(
   ) {
     throw new Error("Verified production release values cannot be used outside production mode.");
   }
-  const loaded = options.verifiedProductionConfig ?? await loadExperimentConfig(
+  if (
+    mode !== "screen-pilot"
+    && (
+      options.screenPilotCapability !== undefined
+      || options.verifiedScreenPilotConfig !== undefined
+      || options.screenPilotSourceEvidence !== undefined
+    )
+  ) {
+    throw new Error("Verified screen-pilot source values cannot be used outside screen-pilot mode.");
+  }
+  const loaded = options.verifiedProductionConfig
+    ?? options.verifiedScreenPilotConfig
+    ?? await loadExperimentConfig(
       options.configPath ?? process.env.EXPERIMENT_CONFIG_PATH ?? "config/experiment.json",
       { rootDirectory },
     );
   const { config } = loaded;
   if (mode === "development") assertDevelopmentConfig(config);
   if (mode === "rehearsal") assertRehearsalConfig(config);
+  if (mode === "screen-pilot") assertScreenPilotConfig(config);
   if (mode === "test") assertTestConfig(config);
   const appVersion = mode === "production"
     ? options.verifiedAppVersion as string
@@ -266,6 +385,12 @@ async function startServerInternal(
     configuredLogDirectory !== resolve(rootDirectory, "data", "mock-sessions")
   ) {
     throw new Error("Rehearsal mode prohibits overriding its isolated mock log directory.");
+  }
+  if (
+    mode === "screen-pilot"
+    && configuredLogDirectory !== resolve(rootDirectory, "data", "screen-pilot-sessions")
+  ) {
+    throw new Error("Screen-pilot mode prohibits overriding its isolated pilot log directory.");
   }
   if (
     mode === "development"
@@ -333,6 +458,9 @@ async function startServerInternal(
       rehearsal: mode !== "production",
       device,
       logger,
+      ...(options.screenPilotSourceEvidence === undefined
+        ? {}
+        : { screenPilotSourceEvidence: options.screenPilotSourceEvidence }),
     });
     const testHooks = mode === "test"
       && options.serveBuiltAssets !== true
@@ -502,6 +630,25 @@ export async function startServer(
 }
 
 /**
+ * Starts the dedicated nonparticipant screen pilot only after binding its exact
+ * clean Git HEAD and tracked fixed config to the runtime and every session log.
+ * No caller-supplied config path or verification seam is accepted here.
+ */
+export async function startVerifiedScreenPilot(
+  rootDirectory = process.cwd(),
+): Promise<RunningVerifiedScreenPilotServer> {
+  const verified = await verifyScreenPilotSource(rootDirectory);
+  const running = await startServerInternal({
+    rootDirectory: verified.rootDirectory,
+    mode: "screen-pilot",
+    screenPilotCapability: VERIFIED_SCREEN_PILOT_SOURCE,
+    verifiedScreenPilotConfig: verified.loadedConfig,
+    screenPilotSourceEvidence: verified.evidence,
+  });
+  return Object.freeze({ ...running, sourceEvidence: verified.evidence });
+}
+
+/**
  * Starts the compiled production CLI only from a complete, verified release.
  *
  * The release root and config path are derived from the compiled entry rather
@@ -558,6 +705,13 @@ export async function startProductionReleaseCli(
     loadedConfig.config.protocolVersion === verification.manifest.protocolVersion
       ? null
       : "protocolVersion",
+    hashProductionCriticalConfig(loadedConfig.config)
+      === verification.manifest.criticalConfigSha256
+      ? null
+      : "criticalConfigSha256",
+    hashProductionGoEvidence(loadedConfig.config) === verification.manifest.goEvidenceSha256
+      ? null
+      : "goEvidenceSha256",
   ].filter((name): name is string => name !== null);
   if (bindingMismatches.length > 0) {
     throw new Error(

@@ -20,6 +20,13 @@ const DisplayMessageSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 
+const OperatorMessageSchema = z
+  .object({
+    type: z.literal("operator.heartbeat"),
+    payload: z.object({ nonce: z.string().uuid() }).strict(),
+  })
+  .strict();
+
 interface BaseClient {
   readonly id: string;
   readonly socket: WebSocket;
@@ -28,6 +35,8 @@ interface BaseClient {
 
 interface OperatorClient extends BaseClient {
   readonly role: "operator";
+  challengeNonce: string | null;
+  leaseConfirmed: boolean;
 }
 
 interface DisplayClient extends BaseClient {
@@ -41,6 +50,7 @@ type ConnectedClient = OperatorClient | DisplayClient;
 
 export interface WebSocketHubOptions {
   readonly heartbeatTimeoutMs?: number;
+  readonly heartbeatCheckIntervalMs?: number;
   readonly operatorToken?: string;
   readonly allowLan?: boolean;
 }
@@ -124,8 +134,12 @@ export class WebSocketHub {
     };
     this.httpServer.on("upgrade", this.upgradeListener);
     this.server.on("connection", (socket, request) => this.handleConnection(socket, request));
+    this.controller.enableOperatorLeaseSupervision();
     this.unsubscribeController = this.controller.subscribe((event) => this.broadcastControllerEvent(event));
-    this.heartbeatTimer = setInterval(() => this.expireStaleDisplays(), 1_000);
+    this.heartbeatTimer = setInterval(
+      () => this.expireStaleClients(),
+      options.heartbeatCheckIntervalMs ?? 1_000,
+    );
     this.heartbeatTimer.unref?.();
   }
 
@@ -171,7 +185,14 @@ export class WebSocketHub {
         socket.close(1008, "Operator token is required");
         return;
       }
-      client = { id, role: "operator", socket, lastHeartbeatAt: performance.now() };
+      client = {
+        id,
+        role: "operator",
+        socket,
+        lastHeartbeatAt: performance.now(),
+        challengeNonce: null,
+        leaseConfirmed: false,
+      };
       const snapshot = this.controller.getActiveOperatorSnapshot();
       if (snapshot !== null) safeSend(socket, { type: "session.snapshot", payload: snapshot });
     } else {
@@ -183,6 +204,7 @@ export class WebSocketHub {
     socket.on("message", (data, isBinary) => this.handleMessage(client, data, isBinary));
     socket.on("close", () => this.removeClient(client));
     socket.on("error", () => this.removeClient(client));
+    if (client.role === "operator") this.sendOperatorChallenge(client);
   }
 
   private handleMessage(client: ConnectedClient, data: WebSocket.RawData, isBinary: boolean): void {
@@ -192,6 +214,24 @@ export class WebSocketHub {
       return;
     }
     if (client.role === "operator") {
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(text) as unknown;
+      } catch {
+        safeSend(client.socket, { type: "protocol.error", payload: { code: "REST_REQUIRED" } });
+        return;
+      }
+      const parsed = OperatorMessageSchema.safeParse(parsedJson);
+      if (parsed.success && parsed.data.payload.nonce === client.challengeNonce) {
+        client.challengeNonce = null;
+        client.lastHeartbeatAt = performance.now();
+        if (!client.leaseConfirmed) {
+          client.leaseConfirmed = true;
+          this.controller.markOperatorConnected();
+        }
+        safeSend(client.socket, { type: "operator.heartbeatAck" });
+        return;
+      }
       // All state-changing operator actions use validated REST endpoints.
       safeSend(client.socket, { type: "protocol.error", payload: { code: "REST_REQUIRED" } });
       return;
@@ -259,7 +299,10 @@ export class WebSocketHub {
     if (
       !this.closing
       && client.role === "operator"
-      && ![...this.clients.values()].some((candidate) => candidate.role === "operator")
+      && client.leaseConfirmed
+      && ![...this.clients.values()].some(
+        (candidate) => candidate.role === "operator" && candidate.leaseConfirmed,
+      )
     ) {
       this.controller.markOperatorDisconnected();
     }
@@ -268,14 +311,26 @@ export class WebSocketHub {
     }
   }
 
-  private expireStaleDisplays(): void {
+  private expireStaleClients(): void {
     const deadline = performance.now() - this.heartbeatTimeoutMs;
     for (const client of this.clients.values()) {
-      if (client.role === "display" && client.ready && client.lastHeartbeatAt < deadline) {
+      const leaseIsActive = client.role === "operator" || client.ready;
+      if (leaseIsActive && client.lastHeartbeatAt < deadline) {
         client.socket.terminate();
         this.removeClient(client);
+      } else if (client.role === "operator" && client.challengeNonce === null) {
+        this.sendOperatorChallenge(client);
       }
     }
+  }
+
+  private sendOperatorChallenge(client: OperatorClient): void {
+    const nonce = randomUUID();
+    client.challengeNonce = nonce;
+    safeSend(client.socket, {
+      type: "operator.heartbeatChallenge",
+      payload: { nonce },
+    });
   }
 
   private broadcastControllerEvent(event: ServerEvent): void {

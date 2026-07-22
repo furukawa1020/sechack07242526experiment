@@ -9,6 +9,7 @@ interface RealtimeOptions {
   /** Returning false rejects a message at the client boundary. */
   readonly onMessage: (type: string, payload: unknown) => boolean | void;
   readonly announceDisplay?: boolean;
+  readonly announceOperator?: boolean;
 }
 
 interface RealtimeChannel {
@@ -23,7 +24,24 @@ function socketUrl(query: string): string {
   return `${protocol}//${window.location.host}/ws?${query}`;
 }
 
-export function useRealtime({ query, enabled = true, onMessage, announceDisplay = false }: RealtimeOptions): RealtimeChannel {
+function operatorChallengeNonce(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const record = payload as Record<string, unknown>;
+  if (Object.keys(record).length !== 1 || typeof record["nonce"] !== "string") return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+    record["nonce"],
+  )
+    ? record["nonce"]
+    : null;
+}
+
+export function useRealtime({
+  query,
+  enabled = true,
+  onMessage,
+  announceDisplay = false,
+  announceOperator = false,
+}: RealtimeOptions): RealtimeChannel {
   const [status, setStatus] = useState<RealtimeStatus>(enabled ? "connecting" : "closed");
   const [synchronized, setSynchronized] = useState(!announceDisplay);
   const socketRef = useRef<WebSocket | null>(null);
@@ -74,6 +92,16 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
         try {
           const message = payloadFromSocketMessage(JSON.parse(event.data) as unknown);
           if (message !== null) {
+            if (announceOperator && message.type === "operator.heartbeatChallenge") {
+              const nonce = operatorChallengeNonce(message.payload);
+              if (nonce !== null && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                  type: "operator.heartbeat",
+                  payload: { nonce },
+                }));
+              }
+              return;
+            }
             const accepted = handlerRef.current(message.type, message.payload);
             if (
               announceDisplay
@@ -139,7 +167,7 @@ export function useRealtime({ query, enabled = true, onMessage, announceDisplay 
       socketRef.current?.close(1000, "view unmounted");
       socketRef.current = null;
     };
-  }, [announceDisplay, enabled, query]);
+  }, [announceDisplay, announceOperator, enabled, query]);
 
   return {
     status: enabled ? status : "closed",

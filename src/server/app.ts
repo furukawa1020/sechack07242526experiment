@@ -11,7 +11,7 @@ import { securityMiddleware } from "./security/http-security.js";
 import type { SessionController } from "./sessions/session-controller.js";
 import { PufferDeviceError } from "./devices/index.js";
 
-export type ApplicationMode = "development" | "production" | "rehearsal" | "test";
+export type ApplicationMode = "development" | "production" | "rehearsal" | "screen-pilot" | "test";
 
 export interface ApiAppOptions {
   readonly controller: SessionController;
@@ -125,6 +125,7 @@ export async function createApplication(options: ApplicationOptions): Promise<Ap
   } else if (
     options.mode === "production"
     || options.mode === "rehearsal"
+    || options.mode === "screen-pilot"
     || (options.mode === "test" && options.serveBuiltAssets === true)
   ) {
     const clientDirectory = resolve(rootDirectory, "dist");

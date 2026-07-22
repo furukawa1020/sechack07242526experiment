@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { hashExperimentConfig } from "../src/shared/config-loader.js";
+import {
+  hashExperimentConfig,
+  hashProductionCriticalConfig,
+  hashProductionGoEvidence,
+} from "../src/shared/config-loader.js";
 import {
   parseExperimentConfig,
   type ExperimentConfig,
@@ -17,12 +21,16 @@ export interface ReleaseManifestFile {
 }
 
 export interface ReleaseManifest {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 4;
   readonly appVersion: string;
   readonly protocolVersion: string;
   readonly configHash: string;
   readonly configFileHash: string;
+  readonly criticalConfigSha256: string;
+  readonly goEvidenceSha256: string | null;
   readonly sourceCommit: string;
+  readonly sourceTreeSha256: string;
+  readonly sourceEvidenceBindingSha256: string;
   readonly sourceRepository?: string;
   readonly createdAt: string;
   readonly buildRuntime: {
@@ -44,6 +52,10 @@ export interface ReleaseVerificationResult {
     readonly protocolVersion: string;
     readonly configHash: string;
     readonly configFileHash: string;
+    readonly criticalConfigSha256: string;
+    readonly goEvidenceSha256: string | null;
+    readonly sourceTreeSha256: string;
+    readonly sourceEvidenceBindingSha256: string;
   } | null;
 }
 
@@ -54,6 +66,27 @@ const RELEASE_CONFIG_PATHS = Object.freeze([
   "config/experiment.json",
   "config/experiment.mock-rehearsal.json",
 ]);
+
+export function hashSourceEvidenceBinding(input: {
+  readonly appVersion: string;
+  readonly sourceCommit: string;
+  readonly sourceTreeSha256: string;
+  readonly criticalConfigSha256: string;
+  readonly goEvidenceSha256: string | null;
+}): string {
+  return createHash("sha256").update(
+    [
+      "sechack-release-source-evidence-v2",
+      input.appVersion,
+      input.sourceCommit,
+      input.sourceTreeSha256,
+      input.criticalConfigSha256,
+      input.goEvidenceSha256 ?? "MISSING",
+      "",
+    ].join("\n"),
+    "utf8",
+  ).digest("hex");
+}
 
 function toManifestPath(value: string): string {
   return value.split(sep).join("/");
@@ -142,14 +175,26 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
   if (value === null || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
   if (
-    candidate.schemaVersion !== 2 ||
+    candidate.schemaVersion !== 4 ||
     typeof candidate.appVersion !== "string" ||
     !APP_VERSION_PATTERN.test(candidate.appVersion) ||
     typeof candidate.protocolVersion !== "string" ||
     !SHA256_PATTERN.test(String(candidate.configHash)) ||
     !SHA256_PATTERN.test(String(candidate.configFileHash)) ||
+    !SHA256_PATTERN.test(String(candidate.criticalConfigSha256)) ||
+    !(
+      candidate.goEvidenceSha256 === null
+      || (
+        typeof candidate.goEvidenceSha256 === "string"
+        && SHA256_PATTERN.test(candidate.goEvidenceSha256)
+      )
+    ) ||
     typeof candidate.sourceCommit !== "string" ||
     !SOURCE_COMMIT_PATTERN.test(candidate.sourceCommit) ||
+    typeof candidate.sourceTreeSha256 !== "string" ||
+    !SHA256_PATTERN.test(candidate.sourceTreeSha256) ||
+    typeof candidate.sourceEvidenceBindingSha256 !== "string" ||
+    !SHA256_PATTERN.test(candidate.sourceEvidenceBindingSha256) ||
     (candidate.sourceRepository !== undefined &&
       (typeof candidate.sourceRepository !== "string" ||
         !isCredentialFreeSourceRepository(candidate.sourceRepository))) ||
@@ -192,6 +237,7 @@ export async function createReleaseManifest(
     | "configHash"
     | "configFileHash"
     | "sourceCommit"
+    | "sourceTreeSha256"
     | "sourceRepository"
   >,
 ): Promise<ReleaseManifest> {
@@ -212,6 +258,9 @@ export async function createReleaseManifest(
   }
   if (!SHA256_PATTERN.test(metadata.configFileHash)) {
     throw new Error("Release config file hash must be a lowercase SHA-256 digest.");
+  }
+  if (!SHA256_PATTERN.test(metadata.sourceTreeSha256)) {
+    throw new Error("Release source tree hash must be a lowercase SHA-256 digest.");
   }
   const rootDirectory = resolve(releaseDirectory);
   const paths = await listRegularFiles(rootDirectory);
@@ -260,6 +309,28 @@ export async function createReleaseManifest(
   if (config.protocolVersion !== metadata.protocolVersion) {
     throw new Error("Release protocolVersion does not match the packaged config.");
   }
+  const criticalConfigSha256 = hashProductionCriticalConfig(config);
+  const goEvidenceSha256 = hashProductionGoEvidence(config);
+  const releaseVerification = config.goEvidence?.releaseVerification;
+  if (
+    releaseVerification !== undefined
+    && releaseVerification.appVersion !== metadata.appVersion
+  ) {
+    throw new Error("Release appVersion does not match the packaged GO evidence.");
+  }
+  if (
+    releaseVerification !== undefined
+    && releaseVerification.sourceTreeSha256 !== metadata.sourceTreeSha256
+  ) {
+    throw new Error("Release source tree SHA-256 does not match the packaged GO evidence.");
+  }
+  const sourceEvidenceBindingSha256 = hashSourceEvidenceBinding({
+    appVersion: metadata.appVersion,
+    sourceCommit: metadata.sourceCommit,
+    sourceTreeSha256: metadata.sourceTreeSha256,
+    criticalConfigSha256,
+    goEvidenceSha256,
+  });
   const files: ReleaseManifestFile[] = [];
   for (const path of paths) {
     const absolutePath = resolve(rootDirectory, path);
@@ -268,6 +339,9 @@ export async function createReleaseManifest(
       throw new Error(`Release file escaped the release directory: ${path}`);
     }
     const fileStat = await lstat(absolutePath);
+    if (!fileStat.isFile() || fileStat.isSymbolicLink() || fileStat.nlink !== 1) {
+      throw new Error(`Release payload file must be a unique regular file: ${path}`);
+    }
     files.push(
       Object.freeze({
         path,
@@ -277,12 +351,16 @@ export async function createReleaseManifest(
     );
   }
   return Object.freeze({
-    schemaVersion: 2,
+    schemaVersion: 4,
     appVersion: metadata.appVersion,
     protocolVersion: metadata.protocolVersion,
     configHash: metadata.configHash,
     configFileHash: metadata.configFileHash,
+    criticalConfigSha256,
+    goEvidenceSha256,
     sourceCommit: metadata.sourceCommit,
+    sourceTreeSha256: metadata.sourceTreeSha256,
+    sourceEvidenceBindingSha256,
     ...(metadata.sourceRepository === undefined
       ? {}
       : { sourceRepository: metadata.sourceRepository }),
@@ -319,7 +397,12 @@ export async function verifyReleaseDirectoryDetailed(
   let manifestSha256: string | null = null;
   let parsed: unknown;
   try {
-    manifestSource = await readFile(resolve(rootDirectory, RELEASE_MANIFEST_NAME));
+    const manifestPath = resolve(rootDirectory, RELEASE_MANIFEST_NAME);
+    const manifestStat = await lstat(manifestPath);
+    if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.nlink !== 1) {
+      throw new Error("Deployment manifest must be a unique regular file.");
+    }
+    manifestSource = await readFile(manifestPath);
     manifestSha256 = sha256Bytes(manifestSource);
     parsed = JSON.parse(new TextDecoder().decode(manifestSource)) as unknown;
   } catch (error) {
@@ -342,6 +425,16 @@ export async function verifyReleaseDirectoryDetailed(
   }
 
   const errors: string[] = [];
+  const expectedSourceEvidenceBindingSha256 = hashSourceEvidenceBinding({
+    appVersion: parsed.appVersion,
+    sourceCommit: parsed.sourceCommit,
+    sourceTreeSha256: parsed.sourceTreeSha256,
+    criticalConfigSha256: parsed.criticalConfigSha256,
+    goEvidenceSha256: parsed.goEvidenceSha256,
+  });
+  if (parsed.sourceEvidenceBindingSha256 !== expectedSourceEvidenceBindingSha256) {
+    errors.push("Source, application, config, and GO evidence binding SHA-256 mismatch.");
+  }
   if (parsed.buildRuntime.node !== process.version) {
     errors.push(
       `Node runtime mismatch: expected ${parsed.buildRuntime.node}, got ${process.version}`,
@@ -403,6 +496,27 @@ export async function verifyReleaseDirectoryDetailed(
           `Config protocolVersion mismatch: expected ${parsed.protocolVersion}, got ${packagedConfig.protocolVersion}`,
         );
       }
+      const packagedCriticalConfigSha256 = hashProductionCriticalConfig(packagedConfig);
+      if (packagedCriticalConfigSha256 !== parsed.criticalConfigSha256) {
+        errors.push(`Critical config SHA-256 mismatch: ${configPath}`);
+      }
+      const packagedGoEvidenceSha256 = hashProductionGoEvidence(packagedConfig);
+      if (packagedGoEvidenceSha256 !== parsed.goEvidenceSha256) {
+        errors.push(`GO evidence SHA-256 mismatch: ${configPath}`);
+      }
+      const packagedReleaseVerification = packagedConfig.goEvidence?.releaseVerification;
+      if (
+        packagedReleaseVerification !== undefined
+        && packagedReleaseVerification.appVersion !== parsed.appVersion
+      ) {
+        errors.push(`GO evidence appVersion mismatch: ${configPath}`);
+      }
+      if (
+        packagedReleaseVerification !== undefined
+        && packagedReleaseVerification.sourceTreeSha256 !== parsed.sourceTreeSha256
+      ) {
+        errors.push(`GO evidence source tree SHA-256 mismatch: ${configPath}`);
+      }
     } catch {
       errors.push(`Packaged config could not be parsed and bound to manifest metadata: ${configPath}`);
     }
@@ -427,6 +541,10 @@ export async function verifyReleaseDirectoryDetailed(
         errors.push(`Not a regular file: ${file.path}`);
         continue;
       }
+      if (fileStat.nlink !== 1) {
+        errors.push(`Hard-linked controlled file is not allowed: ${file.path}`);
+        continue;
+      }
       if (fileStat.size !== file.bytes) errors.push(`Size mismatch: ${file.path}`);
       const digest = await sha256File(absolutePath);
       if (digest !== file.sha256) errors.push(`SHA-256 mismatch: ${file.path}`);
@@ -446,6 +564,10 @@ export async function verifyReleaseDirectoryDetailed(
       protocolVersion: parsed.protocolVersion,
       configHash: parsed.configHash,
       configFileHash: parsed.configFileHash,
+      criticalConfigSha256: parsed.criticalConfigSha256,
+      goEvidenceSha256: parsed.goEvidenceSha256,
+      sourceTreeSha256: parsed.sourceTreeSha256,
+      sourceEvidenceBindingSha256: parsed.sourceEvidenceBindingSha256,
     }),
   });
 }

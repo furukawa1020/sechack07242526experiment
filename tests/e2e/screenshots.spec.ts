@@ -51,6 +51,40 @@ async function waitForDisplay(request: APIRequestContext, id: string): Promise<v
   }).toBe(true);
 }
 
+async function openConfirmedOperator(page: Page): Promise<void> {
+  const leaseConfirmed = new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      settled = true;
+      reject(new Error("Timed out waiting for the Operator round-trip lease."));
+    }, 5_000);
+    page.on("websocket", (socket) => {
+      const url = new URL(socket.url());
+      if (url.pathname !== "/ws" || url.searchParams.get("role") !== "operator") return;
+      socket.on("framereceived", ({ payload }) => {
+        if (settled) return;
+        let message: unknown;
+        try {
+          message = JSON.parse(payload.toString()) as unknown;
+        } catch {
+          return;
+        }
+        if (
+          typeof message !== "object"
+          || message === null
+          || Array.isArray(message)
+          || (message as Readonly<Record<string, unknown>>)["type"] !== "operator.heartbeatAck"
+        ) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  });
+  await page.goto("/operator");
+  await leaseConfirmed;
+}
+
 async function expectNoViewportOverflow(page: Page): Promise<void> {
   await page.evaluate(async () => document.fonts.ready);
   const report = await page.evaluate(() => {
@@ -333,7 +367,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
   for (const [viewportIndex, viewport] of VIEWPORTS.entries()) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
 
-    await page.goto("/operator");
+    await openConfirmedOperator(page);
     await expect(page.getByTestId("operator-app")).toBeVisible();
     await expect(page.locator(".device-mode-badge")).toContainText("装置モード: 模擬装置");
     await expect(page.locator(".device-details")).toContainText("待機・収縮済み");
@@ -392,7 +426,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
 
     const operatorPage = await page.context().newPage();
     await operatorPage.setViewportSize({ width: viewport.width, height: viewport.height });
-    await operatorPage.goto("/operator");
+    await openConfirmedOperator(operatorPage);
     await expect(operatorPage.getByRole("heading", { name: "進行状況" })).toBeVisible();
     await expect(operatorPage.getByTestId("operator-app")).toContainText("全画面表示");
     await expect(operatorPage.getByTestId("operator-app")).not.toContainText("Fullscreen API");
@@ -424,9 +458,11 @@ test("主要画面の承認用スクリーンショットを生成する", async
     });
     await expect(page.locator(".message-eyebrow")).toHaveCount(0);
     await expect(page.getByTestId("participant-app")).toHaveAttribute("data-rehearsal", "true");
-    await expect(page.getByRole("note")).toContainText("研究参加用ではありません・回答送信なし・実機なし");
+    await expect(page.getByRole("note")).toContainText(
+      "研究参加用ではありません・Googleフォームへの回答送信なし",
+    );
     await expect(page.locator(".summary-heading .multiline-copy")).toHaveText(
-      /4つの模擬提示を確認しました。\s*Googleフォームへの回答や送信は行いません。/u,
+      /4つの非参加者向け提示を確認しました。\s*Googleフォームへの回答や送信は行いません。/u,
     );
     await expect(page.getByRole("link", { name: "Googleフォームを開いて回答する" })).toHaveCount(0);
     await expect(page.getByRole("img", { name: "Googleフォームを開くQRコード" })).toHaveCount(0);
@@ -445,7 +481,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await waitForDisplay(request, pufferSession.id);
     const pufferOperatorPage = await page.context().newPage();
     await pufferOperatorPage.setViewportSize({ width: viewport.width, height: viewport.height });
-    await pufferOperatorPage.goto("/operator");
+    await openConfirmedOperator(pufferOperatorPage);
     await expect(pufferOperatorPage.getByRole("heading", { name: "進行状況" })).toBeVisible();
     await pufferOperatorPage.getByRole("checkbox", { name: /全画面表示し、目視確認済み/u }).check();
     await pufferOperatorPage.getByRole("button", { name: "共通導入を表示" }).click();

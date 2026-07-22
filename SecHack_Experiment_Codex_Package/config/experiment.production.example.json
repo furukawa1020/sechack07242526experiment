@@ -35,6 +35,89 @@
     "contentSha256": "33762250e42e9cb63900ccd58a64923f4047693086a81a3737cfe7cbb72d9476",
     "twoPersonVerified": false
   },
+  "goEvidence": {
+    "status": "NO-GO",
+    "protocolVersion": "R8-010-2x2-screen-v1",
+    "criticalConfigSha256": "0bd0c774f8b0c3f7d70760fd6e7523e00a38ed528f792c8551d8463b30f37d30",
+    "researchPlan": {
+      "status": "NO-GO",
+      "protocolVersion": "R8-010-2x2-screen-v1",
+      "documentId": "PENDING-RESEARCH-PLAN",
+      "documentVersion": "PENDING",
+      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "approvedOn": null,
+      "applicableUntil": null
+    },
+    "ethicsDetermination": {
+      "status": "NO-GO",
+      "protocolVersion": "R8-010-2x2-screen-v1",
+      "documentId": "PENDING-ETHICS-DETERMINATION",
+      "documentVersion": "PENDING",
+      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "approvedOn": null,
+      "applicableUntil": null
+    },
+    "preStimulusConsent": {
+      "status": "NO-GO",
+      "protocolVersion": "R8-010-2x2-screen-v1",
+      "documentId": "PENDING-PRE-STIMULUS-CONSENT",
+      "documentVersion": "PENDING",
+      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "approvedOn": null,
+      "applicableUntil": null
+    },
+    "dataManagementPlan": {
+      "status": "NO-GO",
+      "protocolVersion": "R8-010-2x2-screen-v1",
+      "documentId": "PENDING-DATA-MANAGEMENT-PLAN",
+      "documentVersion": "PENDING",
+      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "approvedOn": null,
+      "applicableUntil": null
+    },
+    "screenPilot": {
+      "status": "NO-GO",
+      "protocolVersion": "R8-010-2x2-screen-v1",
+      "documentId": "PENDING-SCREEN-PILOT",
+      "documentVersion": "PENDING",
+      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "approvedOn": null,
+      "applicableUntil": null,
+      "completedSessions": null
+    },
+    "releaseVerification": {
+      "status": "NO-GO",
+      "protocolVersion": "R8-010-2x2-screen-v1",
+      "appVersion": "PENDING",
+      "criticalConfigSha256": "0bd0c774f8b0c3f7d70760fd6e7523e00a38ed528f792c8551d8463b30f37d30",
+      "sourceTreeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "reviews": [
+        {
+          "reviewId": "PENDING-RELEASE-REVIEW-1",
+          "reviewerCode": "REV-PENDING01",
+          "reviewVersion": "PENDING",
+          "status": "NO-GO",
+          "protocolVersion": "R8-010-2x2-screen-v1",
+          "criticalConfigSha256": "0bd0c774f8b0c3f7d70760fd6e7523e00a38ed528f792c8551d8463b30f37d30",
+          "reviewedOn": null,
+          "applicableUntil": null,
+          "attestationSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "reviewId": "PENDING-RELEASE-REVIEW-2",
+          "reviewerCode": "REV-PENDING02",
+          "reviewVersion": "PENDING",
+          "status": "NO-GO",
+          "protocolVersion": "R8-010-2x2-screen-v1",
+          "criticalConfigSha256": "0bd0c774f8b0c3f7d70760fd6e7523e00a38ed528f792c8551d8463b30f37d30",
+          "reviewedOn": null,
+          "applicableUntil": null,
+          "attestationSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    }
+  },
+
   "logging": {
     "directory": "./data/sessions",
     "includeAbortedInOrderBalancing": true

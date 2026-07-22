@@ -20,6 +20,10 @@ export async function runReleaseVerification(
   if (verification.sourceCommit !== null) {
     writeLine(`Source commit: ${verification.sourceCommit}`);
   }
+  if (verification.manifest !== null) {
+    writeLine(`App version: ${verification.manifest.appVersion}`);
+    writeLine(`Source tree SHA-256: ${verification.manifest.sourceTreeSha256}`);
+  }
   if (verification.sourceRepository !== undefined) {
     writeLine(`Source repository: ${verification.sourceRepository}`);
   }

@@ -121,6 +121,30 @@ const auditDateSchema = z.string().regex(
     && new Date(milliseconds).toISOString().slice(0, 10) === value;
 }, "auditedOn must be a valid calendar date.");
 
+const evidenceDateSchema = z.string().regex(
+  /^\d{4}-\d{2}-\d{2}$/u,
+  "Evidence dates must use YYYY-MM-DD.",
+).refine((value) => {
+  const milliseconds = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(milliseconds)
+    && new Date(milliseconds).toISOString().slice(0, 10) === value;
+}, "Evidence dates must be valid calendar dates.");
+
+const sha256Schema = z.string().regex(
+  /^[a-f0-9]{64}$/u,
+  "Evidence digests must be lowercase SHA-256 values.",
+);
+
+const evidenceIdentifierSchema = z.string().regex(
+  /^[A-Z0-9][A-Z0-9._:/-]{2,79}$/u,
+  "Evidence identifiers must be opaque uppercase codes without names, email addresses or whitespace.",
+);
+
+const evidenceVersionSchema = z.string().regex(
+  /^[A-Za-z0-9][A-Za-z0-9._:-]{0,39}$/u,
+  "Evidence versions may contain only letters, digits, dot, underscore, colon and hyphen.",
+);
+
 export const FormAuditSchema = z.object({
   status: z.enum(["GO", "NO-GO"]),
   protocolVersion: singleLineText,
@@ -131,6 +155,56 @@ export const FormAuditSchema = z.object({
     "contentSha256 must be a lowercase SHA-256 digest.",
   ),
   twoPersonVerified: z.boolean(),
+}).strict();
+
+export const ApprovalEvidenceSchema = z.object({
+  status: z.enum(["GO", "NO-GO"]),
+  protocolVersion: singleLineText,
+  documentId: evidenceIdentifierSchema,
+  documentVersion: evidenceVersionSchema,
+  contentSha256: sha256Schema,
+  approvedOn: evidenceDateSchema.nullable(),
+  // This is the evidence's applicability deadline for this experiment run;
+  // it need not be the source institution's document-retention expiry date.
+  applicableUntil: evidenceDateSchema.nullable(),
+}).strict();
+
+export const ScreenPilotEvidenceSchema = ApprovalEvidenceSchema.extend({
+  completedSessions: z.number().int().min(3).max(5).nullable(),
+}).strict();
+
+export const ReleaseReviewSchema = z.object({
+  reviewId: evidenceIdentifierSchema,
+  reviewerCode: z.string().regex(
+    /^REV-[A-Z0-9]{4,32}$/u,
+    "reviewerCode must be an opaque REV- code and must not contain a person's name.",
+  ),
+  reviewVersion: evidenceVersionSchema,
+  status: z.enum(["GO", "NO-GO"]),
+  protocolVersion: singleLineText,
+  criticalConfigSha256: sha256Schema,
+  reviewedOn: evidenceDateSchema.nullable(),
+  applicableUntil: evidenceDateSchema.nullable(),
+  attestationSha256: sha256Schema,
+}).strict();
+
+export const ProductionGoEvidenceSchema = z.object({
+  status: z.enum(["GO", "NO-GO"]),
+  protocolVersion: singleLineText,
+  criticalConfigSha256: sha256Schema,
+  researchPlan: ApprovalEvidenceSchema,
+  ethicsDetermination: ApprovalEvidenceSchema,
+  preStimulusConsent: ApprovalEvidenceSchema,
+  dataManagementPlan: ApprovalEvidenceSchema,
+  screenPilot: ScreenPilotEvidenceSchema,
+  releaseVerification: z.object({
+    status: z.enum(["GO", "NO-GO"]),
+    protocolVersion: singleLineText,
+    appVersion: evidenceVersionSchema,
+    criticalConfigSha256: sha256Schema,
+    sourceTreeSha256: sha256Schema,
+    reviews: z.tuple([ReleaseReviewSchema, ReleaseReviewSchema]),
+  }).strict(),
 }).strict();
 
 export const ExperimentConfigSchema = z.object({
@@ -158,6 +232,9 @@ export const ExperimentConfigSchema = z.object({
   // Required by repository-owned deployment configs. Optional parsing keeps
   // synthetic development fixtures usable; production always rejects missing evidence.
   formAudit: FormAuditSchema.optional(),
+  // Optional for development and test fixtures. Every production entry point
+  // independently rejects a missing or unapproved evidence bundle.
+  goEvidence: ProductionGoEvidenceSchema.optional(),
   logging: z.object({
     directory: safeRelativeDirectory,
     includeAbortedInOrderBalancing: z.boolean(),
@@ -209,6 +286,10 @@ export type TimingConfig = Readonly<z.infer<typeof TimingSchema>>;
 export type DeviceConfig = Readonly<z.infer<typeof DeviceConfigSchema>>;
 export type DeviceMode = DeviceConfig["mode"];
 export type FormAudit = Readonly<z.infer<typeof FormAuditSchema>>;
+export type ApprovalEvidence = Readonly<z.infer<typeof ApprovalEvidenceSchema>>;
+export type ScreenPilotEvidence = Readonly<z.infer<typeof ScreenPilotEvidenceSchema>>;
+export type ReleaseReview = Readonly<z.infer<typeof ReleaseReviewSchema>>;
+export type ProductionGoEvidence = Readonly<z.infer<typeof ProductionGoEvidenceSchema>>;
 
 type ParsedExperimentConfig = z.infer<typeof ExperimentConfigSchema>;
 

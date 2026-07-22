@@ -20,6 +20,7 @@ const SCALE = [
   "7非常にそう思う",
 ] as const;
 const ROWS = ["第1提示", "第2提示", "第3提示", "第4提示"] as const;
+const RESEARCH_ID_PATTERN = "^SH26-[0-9]{3}$";
 const EXTERNAL_NON_TRANSMISSION_COPY =
   "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存することはありません。";
 const SCREEN_PROTOCOL_COPY = [
@@ -33,9 +34,18 @@ const SCREEN_PROTOCOL_COPY = [
 
 interface FormFixtureOptions {
   readonly evaluationCount?: number;
+  readonly forbiddenInternalCodeChoices?: boolean;
+  readonly forbiddenSequenceInput?: boolean;
   readonly malformedEvaluation?: boolean;
+  readonly extraFreeText?: "paragraph" | "short";
+  readonly personalDataChoice?: boolean;
+  readonly personalDataNegationChoice?: boolean;
   readonly untitledInput?: boolean;
   readonly omitScreenProtocolCopy?: boolean;
+  readonly researchIdCount?: number;
+  readonly researchIdLabel?: string;
+  readonly researchIdRequired?: boolean;
+  readonly researchIdValidation?: "missing" | "unknown" | "valid" | "wrong-pattern";
 }
 
 function response(body: string, status = 200): Response {
@@ -57,8 +67,35 @@ function evaluationQuestion(index: number, malformed: boolean): readonly unknown
   return [10_000 + index, `評価質問${String(index + 1)}`, null, 7, entries];
 }
 
+function researchIdQuestion(index: number, options: FormFixtureOptions): readonly unknown[] {
+  const validation = options.researchIdValidation === "missing"
+    ? undefined
+    : options.researchIdValidation === "unknown"
+      ? [[999, 999, [RESEARCH_ID_PATTERN], "形式を確認してください"]]
+      : [[
+          4,
+          301,
+          [options.researchIdValidation === "wrong-pattern" ? "^SH26-.*$" : RESEARCH_ID_PATTERN],
+          "SH26-001の形式で入力してください",
+        ]];
+  const entry: unknown[] = [
+    30_000 + index,
+    null,
+    options.researchIdRequired === false ? 0 : 1,
+  ];
+  if (validation !== undefined) entry.push(null, validation);
+  return [
+    29_000 + index,
+    options.researchIdLabel ?? "研究用ID",
+    "研究スタッフから伝えられた研究用IDを入力してください。",
+    0,
+    [entry],
+  ];
+}
+
 function formHtml(content: string, options: FormFixtureOptions = {}): string {
   const evaluationCount = options.evaluationCount ?? 11;
+  const researchIdCount = options.researchIdCount ?? 1;
   const items: unknown[] = [
     [
       1,
@@ -67,6 +104,40 @@ function formHtml(content: string, options: FormFixtureOptions = {}): string {
       6,
       null,
     ],
+    ...Array.from(
+      { length: researchIdCount },
+      (_, index) => researchIdQuestion(index, options),
+    ),
+    ...(options.forbiddenSequenceInput === true
+      ? [
+          [
+            40_000,
+            "研究用情報の入力",
+            "研究用IDと提示順コードを使用します。研究スタッフの案内に従って入力してください。",
+            8,
+            null,
+          ],
+          [40_001, null, null, 2, [[40_002, [["Option 1"]], 0]]],
+        ]
+      : []),
+    ...(options.forbiddenInternalCodeChoices === true
+      ? [[41_000, "入力項目", null, 2, [[41_001, [["A"], ["B"], ["C"], ["D"]], 1]]]]
+      : []),
+    ...(options.extraFreeText === undefined
+      ? []
+      : [[
+          42_000,
+          "追加コメント",
+          null,
+          options.extraFreeText === "short" ? 0 : 1,
+          [[42_001, null, 0]],
+        ]]),
+    ...(options.personalDataChoice === true
+      ? [[42_100, "氏名を選択してください", null, 2, [[42_101, [["例"]], 1]]]]
+      : []),
+    ...(options.personalDataNegationChoice === true
+      ? [[42_110, "氏名やメールアドレスは収集しません", null, 2, [[42_111, [["確認しました"]], 1]]]]
+      : []),
     ...Array.from(
       { length: evaluationCount },
       (_, index) => evaluationQuestion(index, options.malformedEvaluation === true),
@@ -84,6 +155,21 @@ describe("public Google Form audit", () => {
       .toEqual({ help: false, url: "https://docs.google.com/forms/d/e/id/viewform" });
     expect(() => parsePublicFormAuditArguments(["--url", "https://example.com/form"]))
       .toThrow(/approved Google Forms/iu);
+    expect(() => parsePublicFormAuditArguments([
+      "--url",
+      "https://docs.google.com/forms/d/e/id/viewform?usp=pp_url&entry.1=secret",
+    ])).toThrow(/approved Google Forms/iu);
+    expect(() => parsePublicFormAuditArguments([
+      "--url",
+      "https://forms.gle/example?unknown=1",
+    ])).toThrow(/approved Google Forms/iu);
+    expect(parsePublicFormAuditArguments([
+      "--url",
+      "https://docs.google.com/forms/d/e/id/viewform?usp=send_form",
+    ])).toEqual({
+      help: false,
+      url: "https://docs.google.com/forms/d/e/id/viewform?usp=send_form",
+    });
     expect(() => parsePublicFormAuditArguments(["--url"]))
       .toThrow(/requires a value/iu);
   });
@@ -104,6 +190,46 @@ describe("public Google Form audit", () => {
     expect(report.contentSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
+  it("normalizes full-width internal condition mappings before detection", () => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("Ａ 条件 → クラウド 4つの提示をすべて体験した後、全11問へ回答してください。"),
+    );
+    expect(report.findings.find((item) => item.id === "internal-condition-mapping")?.status)
+      .toBe("fail");
+  });
+
+  it.each([
+    "A：状態ラベル",
+    "C：フグ",
+    "条件B（状態指標）",
+    "puffer = D条件",
+  ])("rejects an internal code mapped to any presentation attribute: %s", (mapping) => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml(`${mapping} 4つの提示をすべて体験した後、全11問へ回答してください。`),
+    );
+    expect(report.findings.find((item) => item.id === "internal-condition-mapping")?.status)
+      .toBe("fail");
+  });
+
+  it.each([
+    "3種類を比較します",
+    "3つの提示を体験します",
+    "3提示が終了してから回答します",
+    "三つの方法を比較します",
+  ])("rejects every supported legacy three-presentation expression: %s", (copy) => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml(`${copy} 4つの提示をすべて体験した後、全11問へ回答してください。`),
+    );
+    expect(report.findings.find((item) => item.id === "legacy-three-presentations")?.status)
+      .toBe("fail");
+  });
+
   it("passes machine-checkable content while retaining the administrator warning", () => {
     const report = inspectPublicFormPayload(
       FORM_URL,
@@ -118,6 +244,148 @@ describe("public Google Form audit", () => {
     expect(report.findings.filter((item) => item.status === "fail")).toEqual([]);
     expect(report.findings.find((item) => item.id === "administrator-only-settings")?.status)
       .toBe("warning");
+    expect(report.findings.find((item) => item.id === "research-id-field")?.status)
+      .toBe("pass");
+    expect(report.findings.find((item) => item.id === "research-id-required")?.status)
+      .toBe("pass");
+    expect(report.findings.find((item) => item.id === "research-id-format-validation")?.status)
+      .toBe("pass");
+    expect(report.findings.find((item) => item.id === "forbidden-sequence-input")?.status)
+      .toBe("pass");
+  });
+
+  it.each([
+    ["missing", { researchIdCount: 0 }, "research-id-field"],
+    ["duplicate", { researchIdCount: 2 }, "research-id-field"],
+    ["decorated label", { researchIdLabel: "研究用ID（必須）" }, "research-id-field"],
+    ["optional", { researchIdRequired: false }, "research-id-required"],
+    ["missing validation", { researchIdValidation: "missing" }, "research-id-format-validation"],
+    ["unknown validation", { researchIdValidation: "unknown" }, "research-id-format-validation"],
+    ["broad validation", { researchIdValidation: "wrong-pattern" }, "research-id-format-validation"],
+  ] as const)("fails a %s research ID field", (_label, options, findingId) => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。", options),
+    );
+    expect(report.findings.find((item) => item.id === findingId)?.status).toBe("fail");
+  });
+
+  it("rejects participant input of presentation order or internal codes", () => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。", {
+        forbiddenSequenceInput: true,
+      }),
+    );
+    expect(report.findings.find((item) => item.id === "forbidden-sequence-input")?.status)
+      .toBe("fail");
+
+    const internalCodes = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。", {
+        forbiddenInternalCodeChoices: true,
+      }),
+    );
+    expect(internalCodes.findings.find((item) => item.id === "forbidden-sequence-input")?.status)
+      .toBe("fail");
+  });
+
+  it.each([
+    "提示 順序 コードを入力してください。",
+    "提示順番の番号を記入してください。",
+    "オーダー・コードを回答してください。",
+    "条件 番号を選択してください。",
+  ])("normalizes presentation-order wording before rejecting input: %s", (copy) => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml(`4つの提示をすべて体験した後、全11問へ回答してください。 ${copy}`),
+    );
+    expect(report.findings.find((item) => item.id === "forbidden-sequence-input")?.status)
+      .toBe("fail");
+  });
+
+  it.each([
+    "提示順コードは入力しません。",
+    "参加者へ内部コードを入力させません。",
+    "順序番号を回答する必要はありません。",
+    "参加者に提示順を入力させることはありません。",
+  ])("does not treat an explicit sequence-input negation as an instruction: %s", (copy) => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml(`4つの提示をすべて体験した後、全11問へ回答してください。 ${copy}`),
+    );
+    expect(report.findings.find((item) => item.id === "forbidden-sequence-input")?.status)
+      .toBe("pass");
+  });
+
+  it.each(["short", "paragraph"] as const)(
+    "rejects a non-research-ID %s free-text field without flagging the 11 evaluation grids",
+    (extraFreeText) => {
+      const report = inspectPublicFormPayload(
+        FORM_URL,
+        CANONICAL_FORM_URL,
+        formHtml("4つの提示をすべて体験した後、全11問へ回答してください。", {
+          extraFreeText,
+        }),
+      );
+      expect(report.findings.find((item) => item.id === "forbidden-free-text-input")?.status)
+        .toBe("fail");
+      expect(report.findings.find((item) => item.id === "evaluation-structure")?.status)
+        .toBe("pass");
+    },
+  );
+
+  it("rejects personal-data response items and affirmative collection copy", () => {
+    const responseItem = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。", {
+        personalDataChoice: true,
+      }),
+    );
+    expect(responseItem.findings.find(
+      (item) => item.id === "forbidden-personal-data-input",
+    )?.status).toBe("fail");
+
+    const instruction = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。メールアドレスを入力してください。"),
+    );
+    expect(instruction.findings.find(
+      (item) => item.id === "forbidden-personal-data-input",
+    )?.status).toBe("fail");
+  });
+
+  it("permits explicit non-collection copy while the approved 11 grids remain valid", () => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。氏名やメールアドレスは収集しません。"),
+    );
+    expect(report.findings.find(
+      (item) => item.id === "forbidden-personal-data-input",
+    )?.status).toBe("pass");
+    expect(report.findings.find((item) => item.id === "forbidden-free-text-input")?.status)
+      .toBe("pass");
+    expect(report.findings.find((item) => item.id === "evaluation-structure")?.status)
+      .toBe("pass");
+
+    const consentChoice = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。", {
+        personalDataNegationChoice: true,
+      }),
+    );
+    expect(consentChoice.findings.find(
+      (item) => item.id === "forbidden-personal-data-input",
+    )?.status).toBe("pass");
   });
 
   it("fails when the fixed-data and screen-puffer protocol explanation is incomplete", () => {
@@ -269,6 +537,10 @@ describe("public Google Form audit", () => {
     );
     expect(report.contentSha256).toBe("");
     expect(report.findings.find((item) => item.id === "canonical-public-payload")?.status)
+      .toBe("fail");
+    expect(report.findings.find((item) => item.id === "research-id-field")?.status)
+      .toBe("fail");
+    expect(report.findings.find((item) => item.id === "forbidden-sequence-input")?.status)
       .toBe("fail");
   });
 });

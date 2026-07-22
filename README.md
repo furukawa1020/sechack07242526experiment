@@ -44,7 +44,9 @@ npm run rehearsal
 npm run screen-pilot
 ```
 
-この専用経路は`config/experiment.screen-pilot.json`を使い、正式固定値・4順序・提示時間と`ScreenPufferDevice`を保ちながら、loopback、空フォーム、`PILOT-001`形式、`data/screen-pilot-sessions/`の隔離ログ、非参加者表示を強制します。異なる`PILOT-xxx`で3〜5件を完走し、候補commit・設定SHA-256・ログSHA-256を承認済み外部管理票へ記録します。研究参加者、正式`SH26-xxx`、Googleフォーム回答には使用できず、正式リリースにもこの起動経路を同梱しません。
+この専用経路は毎回クライアントとサーバを再ビルドした後、Git worktreeのルート、追跡・未追跡変更のないHEAD、Gitで追跡された固定パス`config/experiment.screen-pilot.json`、そのファイルとHEADの完全なバイト一致を起動前に検証します。検証済みの`sourceCommit`、`sourceTreeSha256`、`configFileHash`を標準出力へ表示し、すべての`PILOT-xxx` JSONLイベントにも同じ3値を記録します。
+
+正式固定値・4順序・提示時間と`ScreenPufferDevice`を保ちながら、loopback、空フォーム、`PILOT-001`形式、`data/screen-pilot-sessions/`の隔離ログ、非参加者表示を強制します。異なる`PILOT-xxx`で3〜5件を完走し、表示された3値・完走状態・ログSHA-256を承認済み外部管理票へ記録します。承認された操作経路は`npm run screen-pilot`だけです。`node dist-server/screen-pilot.js`を直接実行したり、古い・改変された`dist-server/`を流用したりしないでください。研究参加者、正式`SH26-xxx`、Googleフォーム回答には使用できず、正式リリースにもこの起動経路を同梱しません。
 
 実参加者を扱う正式な実機なし`screen`モードは、ソースツリーや単独の`dist-server/`から直接起動しません。承認済み設定から生成した封印済みproductionリリースだけを使用します。開発用Mockは`npm run dev`、明示的な模擬リハーサルは`npm run rehearsal`、非参加者の画面版技術確認だけは`npm run screen-pilot`を使用します。ビルド済み`dist-server/index.js`は封印起動関数だけを公開し、汎用`startServer`を公開しません。`npm run start`を含むproduction CLIは、manifestのない場所では起動を拒否します。
 

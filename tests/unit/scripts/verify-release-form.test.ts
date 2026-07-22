@@ -13,6 +13,7 @@ import {
   parseReleaseFormVerificationArguments,
   runReleaseFormVerification,
 } from "../../../scripts/verify-release-form.js";
+import { hashProductionCriticalConfig } from "../../../src/shared/config-loader.js";
 import { STUDY_FORM_URL } from "../../../src/shared/form-audit.js";
 import {
   parseExperimentConfig,
@@ -37,11 +38,21 @@ const REQUIRED_FINDINGS = [
   "answer-timing",
   "eleven-questions",
   "evaluation-structure",
+  "research-id-field",
+  "research-id-required",
+  "research-id-format-validation",
+  "forbidden-sequence-input",
+  "forbidden-personal-data-input",
+  "forbidden-free-text-input",
   "untitled-inputs",
   "file-uploads",
 ] as const;
 
 const temporaryRoots: string[] = [];
+
+function fixtureDigest(label: string): string {
+  return createHash("sha256").update(`fixture:${label}`, "utf8").digest("hex");
+}
 
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map(async (root) => {
@@ -50,7 +61,7 @@ afterEach(async () => {
 });
 
 function config(contentSha256 = "a".repeat(64)): ExperimentConfig {
-  return parseExperimentConfig({
+  const source = {
     schemaVersion: 1,
     protocolVersion: PROTOCOL_VERSION,
     studyTitle: "テスト研究",
@@ -88,6 +99,63 @@ function config(contentSha256 = "a".repeat(64)): ExperimentConfig {
       includeAbortedInOrderBalancing: true,
     },
     network: { allowLan: false, allowExternalRuntimeRequests: false },
+  };
+  const criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
+  const approval = (documentId: string, digest: string) => ({
+    status: "GO" as const,
+    protocolVersion: PROTOCOL_VERSION,
+    documentId,
+    documentVersion: "1.0",
+    contentSha256: digest,
+    approvedOn: "2026-07-20",
+    applicableUntil: "2026-07-22",
+  });
+  return parseExperimentConfig({
+    ...source,
+    goEvidence: {
+      status: "GO",
+      protocolVersion: PROTOCOL_VERSION,
+      criticalConfigSha256,
+      researchPlan: approval("PLAN-001", fixtureDigest("research-plan")),
+      ethicsDetermination: approval("ETHICS-001", fixtureDigest("ethics")),
+      preStimulusConsent: approval("CONSENT-001", fixtureDigest("consent")),
+      dataManagementPlan: approval("DATA-PLAN-001", fixtureDigest("data-plan")),
+      screenPilot: {
+        ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
+        completedSessions: 3,
+      },
+      releaseVerification: {
+        status: "GO",
+        protocolVersion: PROTOCOL_VERSION,
+        appVersion: "1.0.0",
+        sourceTreeSha256: fixtureDigest("source-tree"),
+        criticalConfigSha256,
+        reviews: [
+          {
+            reviewId: "RELEASE-REVIEW-001",
+            reviewerCode: "REV-0001",
+            reviewVersion: "1.0",
+            status: "GO",
+            protocolVersion: PROTOCOL_VERSION,
+            criticalConfigSha256,
+            reviewedOn: "2026-07-20",
+            applicableUntil: "2026-07-22",
+            attestationSha256: fixtureDigest("release-review-1"),
+          },
+          {
+            reviewId: "RELEASE-REVIEW-002",
+            reviewerCode: "REV-0002",
+            reviewVersion: "1.0",
+            status: "GO",
+            protocolVersion: PROTOCOL_VERSION,
+            criticalConfigSha256,
+            reviewedOn: "2026-07-20",
+            applicableUntil: "2026-07-22",
+            attestationSha256: fixtureDigest("release-review-2"),
+          },
+        ],
+      },
+    },
   });
 }
 
@@ -119,13 +187,22 @@ function approvedFormHtml(): { readonly html: string; readonly sha256: string } 
   ].join(" ");
   const rows = ["第1提示", "第2提示", "第3提示", "第4提示"];
   const scale = ["1全くそう思わない", "2", "3", "4", "5", "6", "7非常にそう思う"];
-  const items = Array.from({ length: 11 }, (_unused, questionIndex) => [
-    null,
-    `評価質問${String(questionIndex + 1)}`,
-    null,
-    7,
-    rows.map((row) => [null, scale.map((label) => [label]), 0, [row]]),
-  ]);
+  const items = [
+    [
+      null,
+      "研究用ID",
+      "研究スタッフから伝えられた研究用IDを入力してください。",
+      0,
+      [[null, null, 1, null, [[4, 301, ["^SH26-[0-9]{3}$"], "形式を確認してください"]]]],
+    ],
+    ...Array.from({ length: 11 }, (_unused, questionIndex) => [
+      null,
+      `評価質問${String(questionIndex + 1)}`,
+      null,
+      7,
+      rows.map((row) => [null, scale.map((label) => [label]), 0, [row]]),
+    ]),
+  ];
   const payload = JSON.stringify([content, [null, items]]);
   return {
     html: `<title>${EXPECTED_TITLE}</title><script>var FB_PUBLIC_LOAD_DATA_ = ${payload};</script>`,
@@ -152,6 +229,14 @@ describe("production release Google Form verification", () => {
     expect(isExpectedStudyFormFinalUrl(
       `https://example.test/forms/d/e/1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q/viewform`,
     )).toBe(false);
+    expect(isExpectedStudyFormFinalUrl(
+      `${EXPECTED_FINAL_URL}&entry.123=participant-data`,
+    )).toBe(false);
+    expect(isExpectedStudyFormFinalUrl(
+      EXPECTED_FINAL_URL.replace("usp=send_form", "usp=pp_url"),
+    )).toBe(false);
+    expect(isExpectedStudyFormFinalUrl(`${EXPECTED_FINAL_URL}#prefill`)).toBe(false);
+    expect(isExpectedStudyFormFinalUrl(EXPECTED_FINAL_URL.split("?")[0] ?? "")).toBe(true);
   });
 
   it("passes only when local approval and the live report are exactly bound", () => {
@@ -198,12 +283,20 @@ describe("production release Google Form verification", () => {
     expect(result.issues).toContain(issue);
   });
 
-  it("fails closed when a required machine finding is absent", () => {
+  it.each([
+    "untitled-inputs",
+    "research-id-field",
+    "research-id-required",
+    "research-id-format-validation",
+    "forbidden-sequence-input",
+    "forbidden-personal-data-input",
+    "forbidden-free-text-input",
+  ])("fails closed when the required %s machine finding is absent", (findingId) => {
     const missing = report({
-      findings: report().findings.filter((finding) => finding.id !== "untitled-inputs"),
+      findings: report().findings.filter((finding) => finding.id !== findingId),
     });
     expect(assessReleaseFormVerification(config(), missing, AUDIT_NOW).issues)
-      .toContain("machine-finding-missing:untitled-inputs");
+      .toContain(`machine-finding-missing:${findingId}`);
   });
 
   it("performs one credential-free GET and verifies the configured payload SHA", async () => {
