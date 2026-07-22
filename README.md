@@ -4,7 +4,7 @@
 
 このアプリは診断システムではありません。この版では心拍その他の生体データを取得しません。「クラウド」は比較用シナリオであり、このアプリから固定模擬身体データやローカル実験ログを外部へ送信しません。アンケート回答だけは、参加者がGoogleフォーム上で明示的に送信したときにGoogleへ送信・保存されます。
 
-> **現在の判定:** 実機なしの正式`screen`アプリと公開レビュー版は技術試験済みです。実参加者を対象とする本番だけは、Googleフォームの未解決所見、提示前同意の記録方法、研究計画との整合確認、二名照合、研究責任者承認が完了するまで**NO-GO**です。ソフトウェアはこれらを満たさない本番起動・リリース生成を自動的に拒否します。
+> **現在の判定:** 実機なしの正式`screen`アプリと公開レビュー版は技術試験済みです。実参加者を対象とする本番だけは、Googleフォームの未解決所見、提示前同意の記録方法、研究計画・倫理判断との整合、データ管理計画、研究チームの非参加者による3〜5件の画面版技術パイロット、独立二名照合、研究責任者承認が完了するまで**NO-GO**です。ソフトウェアは`formAudit`と非個人識別の`goEvidence`を別々に検証し、一つでも不足する本番起動・リリース生成を自動的に拒否します。
 
 ## 必要環境
 
@@ -38,9 +38,17 @@ npm run rehearsal
 
 このモードは`config/experiment.mock-rehearsal.json`を使い、`127.0.0.1`だけで待ち受け、MockDeviceを自動準備します。フォームURLは空で、ログは`data/mock-sessions/`へ分離されます。本番参加者には使用できません。
 
-正式な実機なし`screen`モードは、ソースツリーや単独の`dist-server/`から直接起動しません。承認済み設定から生成した封印済みproductionリリースだけを使用します。開発用Mockは`npm run dev`、明示的な模擬リハーサルは`npm run rehearsal`を使用します。ビルド済み`dist-server/index.js`は封印起動関数だけを公開し、汎用`startServer`を公開しません。`npm run start`を含むproduction CLIは、manifestのない場所では起動を拒否します。
+初回GOに必要な画面版技術パイロットは、研究チームの非参加者だけで次を実行します。
 
-本番preflightは、プロトコル`R8-010-2x2-screen-v1`、`device.mode=screen`、空のシリアルパス、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内の二名監査GO、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。production起動はmanifest、設定ファイルのバイト列・意味内容hash、フォーム監査ゲートを再検証します。その後に固定パスから一度だけ読んだ設定スナップショットのバイトhash・意味hash・protocolVersionと、管理対象`package.json.version`へ相互拘束したappVersionを検証済みmanifestへ結び付け、その同じスナップショットとappVersionで表示・監査記録して起動します。検証後の設定再読込、設定差し替え、環境変数による設定・ログ先上書き、`mock`または`serial`設定を拒否します。
+```bash
+npm run screen-pilot
+```
+
+この専用経路は`config/experiment.screen-pilot.json`を使い、正式固定値・4順序・提示時間と`ScreenPufferDevice`を保ちながら、loopback、空フォーム、`PILOT-001`形式、`data/screen-pilot-sessions/`の隔離ログ、非参加者表示を強制します。異なる`PILOT-xxx`で3〜5件を完走し、候補commit・設定SHA-256・ログSHA-256を承認済み外部管理票へ記録します。研究参加者、正式`SH26-xxx`、Googleフォーム回答には使用できず、正式リリースにもこの起動経路を同梱しません。
+
+実参加者を扱う正式な実機なし`screen`モードは、ソースツリーや単独の`dist-server/`から直接起動しません。承認済み設定から生成した封印済みproductionリリースだけを使用します。開発用Mockは`npm run dev`、明示的な模擬リハーサルは`npm run rehearsal`、非参加者の画面版技術確認だけは`npm run screen-pilot`を使用します。ビルド済み`dist-server/index.js`は封印起動関数だけを公開し、汎用`startServer`を公開しません。`npm run start`を含むproduction CLIは、manifestのない場所では起動を拒否します。
+
+本番preflightは、プロトコル`R8-010-2x2-screen-v1`、`device.mode=screen`、空のシリアルパス、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内のフォーム監査、研究計画・倫理判断・提示前同意・データ管理・3〜5件のscreenパイロット・独立二名照合のGO証跡、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。productionリリース生成は、固定production設定のGit追跡・HEADバイト完全一致、Git HEADの`package.json.version`、production設定だけを除外した全追跡tree SHA-256をGO証跡と照合し、manifest schema version 4でsource commit、source tree、appVersion、対象設定、GO証跡を相互拘束します。production起動はmanifest、設定ファイルのバイト列・意味内容hash、フォーム監査ゲート、GO証跡ゲートを再検証し、その同じ設定スナップショットとappVersionで表示・監査記録して起動します。検証後の設定再読込、設定差し替え、環境変数による設定・ログ先上書き、`mock`または`serial`設定を拒否します。
 
 会場へ配置する本番成果物は、ソースディレクトリをそのままコピーせず、次のコマンドで生成します。
 
@@ -106,7 +114,7 @@ npm.cmd run deploy:prepare:rehearsal
 生成物は`sechack-mock-rehearsal-*`という別名になり、`START_MOCK_DEMO.cmd`から起動します。本番リリースへ転用できません。
 
 参加者画面には内部コードA/B/C/Dを表示しません。スタッフ画面では監査と進行確認のためだけに表示します。
-デバイステスト画面では、モードを明示したうえでINFLATE・DEFLATE・STOPの状態を表示します。正式な`screen`では画面上のフグとサーバ時刻同期を確認し、USB ACKは使用しません。将来の`serial`だけが実ACKと`requestId`を扱います。最後のスタッフ画面接続が実行中に失われた場合は、無人進行を防ぐためSTOP/DEFLATEとerror遷移を行います。
+デバイステスト画面では、モードを明示したうえでINFLATE・DEFLATE・STOPの状態を表示します。正式な`screen`では画面上のフグとサーバ時刻同期を確認し、USB ACKは使用しません。将来の`serial`だけが実ACKと`requestId`を扱います。スタッフ画面は1秒heartbeat／5秒leaseで監視し、LAN断・half-open・ブラウザ停止を含めて最後の有効接続が実行中に失われた場合は、無人進行を防ぐためSTOP/DEFLATEとerror遷移を行います。複数接続の1つが生存中は継続します。
 
 ## 正式版の実機なし設定
 
@@ -127,7 +135,7 @@ npm.cmd run deploy:prepare:rehearsal
 
 本番前に`/device-test`で、画面上のフグが`result`開始から6秒で膨張し、結果終了まで保持され、`reset`開始から6秒で収縮することと、STOP後に収縮することを確認してください。描画は継続接続中のサーバ時刻に同期します。`result`または`reset`中の再読み込みは刺激欠損としてセッションを安全停止し、再開しません。他フェーズの再読み込みでは進行を止め、再接続後もOperatorの明示確認まで再開しません。CとDの動作は完全に同一でなければなりません。詳細は[運用手順](docs/RUNBOOK.md)と[装置境界仕様](docs/DEVICE_PROTOCOL.md)を参照してください。
 
-新しい本番設定は`config/experiment.production.example.json`から作成します。例には提供済みフォームURL`https://forms.gle/BeShY7cY5zMjunto9`が反映されています。意図的な本番ブロッカーは`formAudit.status=NO-GO`と未完了の二名照合です。[Googleフォーム公開内容監査](docs/FORM_AUDIT.md)の所見を0件にし、研究責任者の承認を得て二名照合を完了するまで、本番ゲートを通過しません。
+新しい本番設定は`config/experiment.production.example.json`から作成します。例には提供済みフォームURL`https://forms.gle/BeShY7cY5zMjunto9`が反映されています。意図的な本番ブロッカーは`formAudit.status=NO-GO`と`goEvidence.status=NO-GO`です。[Googleフォーム公開内容監査](docs/FORM_AUDIT.md)の所見を0件にし、[本番GO証跡手順](docs/GO_EVIDENCE.md)に従って人による承認と二名照合を完了するまで、本番ゲートを通過しません。
 
 `serial`による物理フグはこのプロトコルの対象外です。物理フグへ戻す場合は、研究刺激の変更として研究責任者の承認と所属機関で必要な倫理審査・変更手続きを完了し、別の`protocolVersion`で実施してください。
 
@@ -165,6 +173,8 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 
 `data/sessions/`はGit管理外です。実参加者ログをfixtureやissueへコピーしないでください。
 
+研究用ID単位の撤回・除外・削除は、実験サーバを停止し、研究責任者が事前承認した外部手順で行います。このアプリと正式リリースは不可逆な変更機能を持たず、開発リポジトリの`data:lifecycle`も候補Previewと保持期限レポートだけを読取り専用で出力します。Googleフォーム側は同じ研究用IDをフォーム管理者が別途手動照合します。詳しくは[研究データの撤回・除外・保持期限手順](docs/DATA_LIFECYCLE.md)を参照してください。
+
 ## 品質確認
 
 ```bash
@@ -189,6 +199,8 @@ E2Eは高速MockDeviceを使用し、4つの提示順と主要障害系を確認
 - [本番リリース二名照合票](docs/RELEASE_CHECKLIST.md)
 - [テスト報告](docs/TEST_REPORT.md)
 - [Googleフォーム公開内容監査](docs/FORM_AUDIT.md)
+- [本番GO証跡の作成・照合手順](docs/GO_EVIDENCE.md)
+- [研究データの撤回・除外・保持期限手順](docs/DATA_LIFECYCLE.md)
 - [プロトコル変更履歴](docs/PROTOCOL_CHANGELOG.md)
 - [専用Mockリハーサル設定に紐付く合成サンプルログ](docs/examples/sample-session.jsonl)
 
