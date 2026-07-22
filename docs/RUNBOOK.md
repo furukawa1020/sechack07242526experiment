@@ -4,7 +4,7 @@
 
 本プロトコルの正式刺激は、固定模擬データと画面上のフグである。心拍等の生体データ、USB機器、空圧装置、物理フグは使用しない。`device.mode=screen`は外部通信も故障注入も行わない正式アダプタであり、開発用`mock`とは別である。
 
-> **現在は人を対象とする本番NO-GOです。** ソフトウェアは実機なし方式へ移行しているが、[Googleフォーム公開内容監査](FORM_AUDIT.md)の所見解消、提示開始前の同意記録方法、画面刺激版の研究計画との整合、二名照合、研究責任者の最終承認が未完了である。これらを完了して本番preflightがPASSするまで参加者へ提示しない。
+> **現在は人を対象とする本番NO-GOです。** ソフトウェアは実機なし方式へ移行しているが、[Googleフォーム公開内容監査](FORM_AUDIT.md)の所見解消、提示開始前の同意記録方法、画面刺激版の研究計画・倫理判断・データ管理との整合、screenパイロット、独立二名照合、研究責任者の最終承認が未完了である。これらを`formAudit`と`goEvidence`へ結び付け、本番preflightがPASSするまで参加者へ提示しない。
 
 ## 1. 中止の判断
 
@@ -24,15 +24,29 @@
 - [ ] 提示開始前に同意を確認・記録する方法を承認済み手順へ固定した
 - [ ] [Googleフォーム公開内容監査](FORM_AUDIT.md)の所見が0件で、二名照合と研究責任者承認を記録した
 - [ ] フォームに内部コードA/B/C/D、旧3提示説明、提示直後回答の説明、無題入力、必須の年齢自由記述、個人情報収集がない
-- [ ] フォームの研究用IDと、ローカルログの研究用IDで回答と提示順を連結する手順を承認した。フォームへ提示順や内部コードを置いていない
+- [ ] フォームの研究用ID欄は厳密なラベル「研究用ID」の必須短文入力1件で、`^SH26-[0-9]{3}$`の完全一致validationがある
+- [ ] フォームの研究用IDと、ローカルログの研究用IDで回答と提示順を連結する手順を承認した。フォームへ提示順、順序コード、内部コードを入力させない
 - [ ] `protocolVersion`、`UI_COPY.md`、フォーム説明、研究計画が一言一句整合している
 - [ ] `npm run lint`、`npm run typecheck`、`npm test`、`npm run test:e2e`、`npm run build`が成功した
-- [ ] productionリリースをクリーンなGit commitから生成し、manifestと設定SHA-256を二名で照合した
+- [ ] `npm run release:source-evidence`のappVersion・対象設定SHA-256・source tree SHA-256を二名が独立に照合し、productionリリースを固定設定がHEADと一致するクリーンなGit commitから生成した
 - [ ] 1366×768と1920×1080で全フェーズとC/Dの同一表示を確認し、6秒膨張・保持・6秒収縮、継続接続中のサーバ時刻同期、`result`/`reset`中の再読み込み時の安全停止・再開不能、他フェーズのOperator確認待ちを確認した
-- [ ] 参加者3〜5名相当のパイロットを承認済み手順で完走した
+- [ ] 研究チームの非参加者が専用`npm run screen-pilot`経路で、異なる`PILOT-xxx`を用いた技術パイロット3〜5件を完走し、候補commit・設定SHA-256・ログSHA-256を外部管理票へ記録した
+- [ ] `goEvidence`が研究計画、倫理判断、提示前同意、データ管理、3〜5件のscreenパイロット、独立二名照合を同じ対象設定SHA-256へ結び付け、全項目GOである
 - [ ] iPhoneとAndroidの未ログイン経路でGoogleフォームを完走した
 - [ ] 実ログ保存先をGit・クラウド同期・一般バックアップの対象外にした
 - [ ] 本番設定で`npm run preflight -- --config config/experiment.production.json`がPASSした
+
+### 2.1 初回GO前の非参加者screen-pilot
+
+初回GO前に実参加者を使って循環を解消してはならない。研究チームの非参加者だけが、必須5テスト済みのcleanな候補commitで次を実施する。
+
+1. `npm run screen-pilot`を起動する。`config/experiment.screen-pilot.json`以外へ差し替えず、`127.0.0.1:4174`で使用する。
+2. Operatorの「非参加者用の事前確認」「画面版・PILOT/テスト」、参加者側の「非参加者用の事前確認」、空フォーム、`PILOT-001`形式、`ScreenPufferDevice`を確認する。
+3. 異なる`PILOT-xxx`で3〜5件を完走し、正式時間、4順序、6秒膨張・保持・6秒収縮、STOP/DEFLATEを確認する。氏名、正式`SH26-xxx`、Googleフォーム、研究参加者を使用しない。
+4. 外部の承認済み管理票へsource commit、pilot設定SHA-256、完走ID、終了状態、対象JSONLのSHA-256、確認日を記録し、その管理票のSHA-256を`goEvidence.screenPilot`へ使用する。JSONLはGitやproductionリリースへ含めない。
+5. 固定値、文言、時間、順序、ScreenPufferDevice動作またはprotocolVersionを変更した場合は旧記録を破棄し、3〜5件を再実施する。
+
+この経路は非参加者技術確認専用で、production、同意取得、正式データ収集の代替ではない。実参加者による追加パイロットが研究計画で必要な場合は、初回production GO後に承認済み手順で実施する。
 
 ## 3. 画面刺激の確認
 
@@ -57,12 +71,12 @@ Mockの切断、ACK遅延、timeout、faultは`npm run rehearsal`または自動
 2. 実験PCと表示端末は単一PCまたは承認済み隔離LANに置く。Googleフォーム回答用端末は別経路とし、実験アプリはフォームを自動取得・送信しない。
 3. 物理フグ、USBシリアル機器、心拍・生体センサが接続されていないことを二名で確認する。
 4. GoogleフォームのURL、QR、公開payload、管理設定、未ログイン回答経路を二名で再確認する。HTTP 200やタイトル一致だけで済ませない。
-5. `VERIFY_RELEASE.cmd`を実行し、全ファイル、Node版、architecture、manifest SHA-256、source commit、設定SHA-256が承認記録と一致してPASSすることを確認する。
+5. `%ProgramFiles%\nodejs\node.exe`が承認済みNode版であることを確認して`VERIFY_RELEASE.cmd`を実行し、全ファイル、Node版、architecture、manifest schema version 4、manifest SHA-256、source commit、source tree SHA-256、appVersion、設定SHA-256、対象設定SHA-256、GO証跡SHA-256が承認記録と一致してPASSすることを確認する。
 6. `START_PRODUCTION.cmd`を実行する。manifest検証と本番preflightの両方がPASSした場合だけサーバを使用する。
 7. `CHECK_HEALTH.cmd`がPASSし、`protocolVersion=R8-010-2x2-screen-v1`、`deviceMode=screen`、設定hashが本番設定と一致することを確認する。
 8. `/operator`、参加者画面、`/device-test`を開き、前節の画面刺激確認を完了する。
 9. 参加者画面を承認済みChromiumのF11またはkioskモードで全画面表示する。全画面APIの通知だけでなく目視でも確認する。
-10. Mockリハーサルは別設定・別起動で事前に完走して終了する。production起動後は模擬IDを使用せず、`/device-test`と研究責任者が承認したパイロット手順だけで確認する。
+10. Mockリハーサルと非参加者screen-pilotは別設定・別起動で事前に完走して終了する。production起動後は`DEV-xxx`、`DEMO-xxx`、`PILOT-xxx`を使用せず、`/device-test`で承認済み画面刺激だけを確認する。
 
 ## 5. 参加者ごとの手順
 
@@ -78,7 +92,7 @@ Mockの切断、ACK遅延、timeout、faultは`npm run rehearsal`または自動
 ## 6. 切断・停電・異常時
 
 - 参加者画面の切断では進行を止める。`result`または`reset`中の切断はSTOP、DEFLATE、`error`とし、そのセッションを再開しない。それ以外のフェーズでは、中立な復旧表示とタイマー停止を維持し、再接続後もスタッフの明示確認まで再開しない。
-- 最後のスタッフ画面WebSocketが進行中に失われた場合は、無人進行を防ぐためSTOP、DEFLATE、`OPERATOR_CONNECTION_LOST`で`error`へ移す。
+- サーバはスタッフ画面へ1秒ごとにランダムchallengeを送り、同じnonceの応答を受信した往復確認済みleaseだけを5秒更新する。LAN断、上り・下りのhalf-open、ブラウザ停止を含め、最後の有効なleaseが進行中に失われた場合は、無人進行を防ぐためSTOP、DEFLATE、`OPERATOR_CONNECTION_LOST`で`error`へ移す。setup中に失効した場合も再接続確認までは提示準備・開始・再開できない。複数スタッフ画面のうち1つが有効なら継続する。
 - 画面上のフグがサーバ状態と一致しない、固定値72以外を示す、表示時間がずれる、文言が承認版と違う場合は中止する。
 - UPS作動または停電時は新しい提示を開始しない。進行中セッションを中止し、復旧後も続きから再開しない。
 - 未終端セッションのログは削除・書換えない。提示を1回以上開始した順序は割付の使用済み件数へ含める。
@@ -90,13 +104,15 @@ Mockの切断、ACK遅延、timeout、faultは`npm run rehearsal`または自動
 3. サーバ端末でCtrl+Cを1回押し、安全終了、ポート閉鎖を確認する。ウィンドウを先に閉じたり強制終了したりしない。
 4. JSONL件数、研究用ID、終了状態を確認し、必要なCSVを承認済みの暗号化ローカル保存先へ移す。
 5. 保持・削除期間は研究計画に従う。実ログをGit、チャット、issue、テストへ含めない。
+6. 撤回、分析除外、削除が必要な場合はサーバを停止し、[研究データの撤回・除外・保持期限手順](DATA_LIFECYCLE.md)に従って、研究責任者が事前承認した外部手順へ引き渡す。正式リリースに変更機能はない。Googleフォーム側も同じ研究用IDで別途手動照合する。
 
 ## 8. 最終GO記録
 
 - [ ] 画面刺激版の研究責任者承認・必要な倫理手続き
 - [ ] 提示前同意記録方法の承認
 - [ ] Googleフォーム所見0件、二名照合、7日以内の監査証跡
-- [ ] 封印済みリリース、全自動試験、screen現地試験、パイロット完了
+- [ ] 研究計画、倫理判断、提示前同意、データ管理、screenパイロット、独立二名照合の`goEvidence`が対象設定SHA-256と一致
+- [ ] 封印済みリリース、全自動試験、screen現地試験、非参加者screen-pilot 3〜5件完了
 - [ ] データ保護、研究用ID連結、保存・削除手順の確認
 - [ ] 本番preflight PASS
 

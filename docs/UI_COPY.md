@@ -282,31 +282,31 @@ Googleフォームを開くQRコード
 そのまま研究スタッフの案内をお待ちください。
 ```
 
-## 13. 模擬リハーサル専用表示
+## 13. 非参加者用の事前確認表示
 
-次の文言は、非参加者専用の`development`、`rehearsal`、`test`でだけ表示する。`development`は`device.mode=mock`、空のフォームURL、loopback限定、`DEV-001`形式のID、`data/dev-sessions`配下のログを必須とする。`rehearsal`は`device.mode=mock`、空のフォームURL、loopback限定、模擬専用ログを必須とする。`test`は`mock`または`screen`を許可するが、loopback限定、外部通信禁止、実GoogleフォームとGO監査証跡の禁止、フォーム誘導の非表示、隔離ログ、`TEST-001`または`DEMO-001`形式のID、Serial禁止を必須とする。正式productionでは必ず非表示にする。正式実験の刺激や参加者向け文言には含めない。
+次の文言は、非参加者専用の`development`、`rehearsal`、`screen-pilot`、`test`でだけ表示する。`development`は`device.mode=mock`、空のフォームURL、loopback限定、`DEV-001`形式のID、`data/dev-sessions`配下のログを必須とする。`rehearsal`は`device.mode=mock`、空のフォームURL、loopback限定、模擬専用ログを必須とする。`screen-pilot`は`device.mode=screen`と正式時間・固定値・順序を使用するが、loopback、空フォーム、`PILOT-001`形式、`data/screen-pilot-sessions`へ隔離し、研究参加者を扱わない。`test`は`mock`または`screen`を許可するが、loopback限定、外部通信禁止、実GoogleフォームとGO監査証跡の禁止、フォーム誘導の非表示、隔離ログ、`TEST-001`または`DEMO-001`形式のID、Serial禁止を必須とする。正式productionでは必ず非表示にする。正式実験の刺激や参加者向け文言には含めない。
 
 ### 常設表示
 
 ```text
-模擬リハーサル
+非参加者用の事前確認
 ```
 
 ```text
-研究参加用ではありません・回答送信なし・実機なし
+研究参加用ではありません・Googleフォームへの回答送信なし
 ```
 
-### 模擬サマリー
+### 事前確認サマリー
 
 ```text
-4つの模擬提示を確認しました。
+4つの非参加者向け提示を確認しました。
 Googleフォームへの回答や送信は行いません。
 ```
 
-### 模擬完了
+### 事前確認完了
 
 ```text
-模擬リハーサルを終了しました
+非参加者用の事前確認を終了しました
 ```
 
 ```text
