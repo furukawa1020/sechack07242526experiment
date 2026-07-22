@@ -1,12 +1,12 @@
 import {
   CONDITIONS,
   type ConditionCode as SharedConditionCode,
-  type ExperimentPhase as ServerExperimentPhase,
-  type FixedState as SharedFixedState,
   type OrderCode as SharedOrderCode,
   type PresentationMode as SharedPresentationMode,
   type ProcessingLocation as SharedProcessingLocation,
-} from "../../shared/index.js";
+} from "../../shared/conditions.js";
+import type { ExperimentPhase as ServerExperimentPhase } from "../../shared/experiment-machine.js";
+import type { FixedState as SharedFixedState } from "../../shared/schemas.js";
 
 export const EXPERIMENT_PHASES = [
   "idle",

@@ -11,6 +11,14 @@ const RETRY_INTERVAL_MS = 100;
 const INITIALIZATION_GRACE_MS = 500;
 const INITIALIZATION_RETRY_MS = 10;
 const TOKEN_PATTERN = /^[a-f0-9-]{36}$/u;
+const TRANSIENT_WINDOWS_LOCK_ERRORS = new Set(["EACCES", "EBUSY", "EPERM"]);
+
+function isTransientLockHandoffError(error) {
+  return process.platform === "win32"
+    && error instanceof Error
+    && "code" in error
+    && TRANSIENT_WINDOWS_LOCK_ERRORS.has(error.code);
+}
 
 function isInside(parent, candidate) {
   const pathFromParent = relative(parent, candidate);
@@ -46,6 +54,11 @@ async function readLockOnce(lockPath) {
     handle = await open(lockPath, "r");
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+    if (isTransientLockHandoffError(error)) {
+      return Object.freeze({
+        initializationError: "The release build lock was temporarily unavailable during owner handoff.",
+      });
+    }
     throw error;
   }
   try {
@@ -55,6 +68,11 @@ async function readLockOnce(lockPath) {
       pathStat = await lstat(lockPath);
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+      if (isTransientLockHandoffError(error)) {
+        return Object.freeze({
+          initializationError: "The release build lock was temporarily unavailable during owner handoff.",
+        });
+      }
       throw error;
     }
     if (

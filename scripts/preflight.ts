@@ -272,17 +272,17 @@ export function evaluatePreflightGates(
     name: "formUrl",
     status: config.formUrl === "" ? "pass" : production ? "fail" : "warning",
     detail: config.formUrl === ""
-      ? "フォームURLは未設定で、事後アンケートはアプリ外のスタッフ運用です。"
+      ? "外部アンケートURLは未設定で、案内はアプリ外のスタッフ運用です。"
       : production
-        ? "本番ランタイムへGoogleフォームURLを統合してはなりません。formUrlは空である必要があります。"
-        : "開発確認にフォームURLが設定されています。本番ランタイムには使用できません。",
+        ? "本番ランタイムへ外部アンケートURLを統合してはなりません。formUrlは空である必要があります。"
+        : "開発確認に外部アンケートURLが設定されています。本番ランタイムには使用できません。",
   });
 
   checks.push({
     name: "formAudit",
     status: config.formAudit === undefined ? "pass" : production ? "fail" : "warning",
     detail: config.formAudit === undefined
-      ? "アプリ内フォーム監査証跡はなく、事後アンケート運用から分離されています。"
+      ? "アプリ内アンケート監査証跡はなく、外部の回答運用から分離されています。"
       : production
         ? `本番ランタイムへformAuditを統合してはなりません（${productionPolicy.formIssues.join(", ")}）。`
         : "開発確認にformAuditが設定されています。本番ランタイムには使用できません。",
@@ -525,13 +525,8 @@ export function renderPreflightReport(
   writeLine(`  ACK timeout: ${report.ackTimeout} ms`);
   writeLine(`  allowMockInProduction: ${String(report.allowMockInProduction)}`);
   writeLine(`  固定状態: score=${report.fixedScore}, label=${report.fixedLabel}, pufferLevel=${report.pufferLevel}`);
-  writeLine(`  Google Forms URL: ${report.formUrl === "" ? "(未設定)" : report.formUrl}`);
-  writeLine(`  フォーム監査: ${report.formAuditStatus}`);
-  writeLine(`  監査対象protocolVersion: ${report.formAuditProtocolVersion === "" ? "(未設定)" : report.formAuditProtocolVersion}`);
-  writeLine(`  監査対象URL: ${report.formAuditFormUrl === "" ? "(未設定)" : report.formAuditFormUrl}`);
-  writeLine(`  監査日: ${report.formAuditAuditedOn ?? "(未設定)"}`);
-  writeLine(`  公開内容SHA-256: ${report.formAuditContentSha256 === "" ? "(未設定)" : report.formAuditContentSha256}`);
-  writeLine(`  二名確認: ${String(report.formAuditTwoPersonVerified)}`);
+  writeLine(`  外部アンケートURL: ${report.formUrl === "" ? "(未設定)" : report.formUrl}`);
+  writeLine(`  アプリ内アンケート監査証跡: ${report.formAuditStatus}`);
   writeLine(`  本番GO証跡: ${report.goEvidenceStatus}`);
   writeLine(`  証跡対象設定SHA-256: ${report.goEvidenceCriticalConfigSha256 === "" ? "(未設定)" : report.goEvidenceCriticalConfigSha256}`);
   writeLine(`  算出済み対象設定SHA-256: ${report.computedCriticalConfigSha256}`);

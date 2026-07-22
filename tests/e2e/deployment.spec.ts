@@ -186,6 +186,10 @@ test("built nonparticipant client keeps direct routes, caching, and runtime requ
     const assetResponse = await request.get(`${baseUrl}${assetPath}`);
     expect(assetResponse.status()).toBe(200);
     expect(assetResponse.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+    const assetText = await assetResponse.text();
+    expect(assetText).not.toMatch(
+      /Googleフォーム|forms\.gle|docs\.google\.com\/forms|QRコード|confirm-form-complete|qrcode|formUrl|formAudit/iu,
+    );
   }
   const firstAssetPath = assetPaths[0];
   if (firstAssetPath === undefined) throw new Error("The production index did not contain a built asset.");

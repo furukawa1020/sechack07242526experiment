@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { parseExperimentConfig, SCREEN_PROTOCOL_VERSION } from "../../../src/shared/index.js";
@@ -15,7 +19,12 @@ import type {
   ResearchIdReservationInput,
   SessionLogSummary,
 } from "../../../src/server/logging/index.js";
+import {
+  createLogEvent,
+  ExperimentLogger,
+} from "../../../src/server/logging/experiment-log.js";
 import { SessionController } from "../../../src/server/sessions/session-controller.js";
+import { createSession } from "../../../src/shared/experiment-machine.js";
 
 const CONFIG_HASH = "0".repeat(64);
 
@@ -560,6 +569,53 @@ describe("SessionController", () => {
       controller.create({ researchId: "SH26-001", consentConfirmed: true, orderCode: "ABDC" }),
     ).rejects.toMatchObject({ code: "DUPLICATE_RESEARCH_ID", status: 409 });
     controller.dispose();
+  });
+
+  it("rejects a logged research ID when its individual registry record is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sechack-controller-registry-fallback-"));
+    const directory = join(root, "sessions");
+    await mkdir(directory);
+    const logger = new ExperimentLogger({ directory });
+    const persistedSession = createSession({
+      id: "11111111-1111-4111-8111-111111111111",
+      researchId: "SH26-001",
+      orderCode: "ABDC",
+      fixedState: { score: 72, label: "高ストレス", pufferLevel: 0.6 },
+      deviceMode: "mock",
+      configHash: CONFIG_HASH,
+      protocolVersion: SCREEN_PROTOCOL_VERSION,
+      wallClockIso: "2026-07-21T00:00:00.000Z",
+      monotonicMs: 1,
+    });
+    await logger.append(createLogEvent({
+      session: persistedSession,
+      appVersion: "1.0.0",
+      eventType: "session.created",
+      wallClockIso: "2026-07-21T00:00:00.000Z",
+      monotonicMs: 1,
+    }));
+    await rm(join(root, "research-id-registry", "SH26-001.json"));
+
+    const device = new MockPufferDevice({ timingMode: "fast", initialConnected: true });
+    const controller = new SessionController({
+      config: testConfig(),
+      configHash: CONFIG_HASH,
+      appVersion: "1.0.0",
+      rehearsal: false,
+      device,
+      logger,
+      monotonicNow: () => Date.now(),
+    });
+    try {
+      await expect(controller.create({
+        researchId: "SH26-001",
+        consentConfirmed: true,
+        orderCode: "ABDC",
+      })).rejects.toMatchObject({ code: "DUPLICATE_RESEARCH_ID", status: 409 });
+    } finally {
+      controller.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("rejects start before the setup prerequisites and intro transition", async () => {

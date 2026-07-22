@@ -1,91 +1,128 @@
 # テスト報告
 
-対象プロトコル: `R8-010-2x2-screen-v1`
+対象プロトコル: `R8-010-2x2-screen-v2`
 
-最終確認日: 2026-07-21（Windows AMD64 / Node.js 24系）
+文書・受入基準更新日: 2026-07-22（Windows AMD64）
 
-判定:
+## 現在の判定
 
-- ソフトウェア・画面刺激: **試験合格**
-- 公開レビュー版: **デプロイ・外部確認済み**
-- 実参加者を対象とする本番: **NO-GO**
+- screen-v2仕様・固定文言・運用境界: 更新済み
+- screen-v2コードの最終5コマンド: この文書へ確定値を転記するまで未確定
+- 実参加者を対象とする本番: 6件の`goEvidence`と最終リリース照合が完了するまで**NO-GO**
 
-正式MVPは、参加者本人を測定しない固定模擬データと、参加者画面内のフグだけを使用する。USB機器、物理フグ、心拍その他の生体センサは不要である。現在のNO-GOは実機未接続によるものではなく、Googleフォーム、研究計画・同意手順、人による承認とパイロットが未完了であるためである。
+最終リリース候補で、次の5コマンドを同じcommitから実行し、件数・カバレッジ・実行日時をこの文書へ確定値で追記する。過去版の成功結果や部分実行をscreen-v2の合格記録として流用しない。
 
-## 1. 自動試験結果
+```powershell
+npm.cmd run lint
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run test:e2e
+npm.cmd run build
+```
 
-| コマンド | 結果 |
-| --- | --- |
-| `npm run lint` | 成功 |
-| `npm run typecheck` | 成功 |
-| `npm test` | 成功: 34ファイル、537テスト |
-| `npm run test:e2e` | 成功: Chromium 10テスト |
-| `npm run build` | 成功 |
-| `npm run test:public-demo` | 成功: 5画面幅、25テスト、skipなし |
-| 公開HTTPSに対するPlaywright | 成功: 1366×768、5テスト |
-| 公開デプロイスクリプト`--dry-run` | 成功: README、HTML 5件、同一originのCSS/JSだけを選択 |
-| Mockリハーサル用preflight | 成功。Mockは本番不可と警告した上で開発確認を許可 |
-| screen本番設定用preflight | 期待どおり拒否: `formAudit`と`goEvidence`の2項目がFAIL |
-| `npm run audit:form` | 期待どおりNO-GO: 公開内容ブロッカー12件 |
-| `npm run verify:form-release` | 期待どおり拒否: 公開フォーム不適合、GO証跡未完了 |
+## 1. screen-v2最終実測欄
+
+| コマンド | 結果 | 実測日時 |
+| --- | --- | --- |
+| `npm run lint` | 最終リリース候補で再実行待ち | |
+| `npm run typecheck` | 最終リリース候補で再実行待ち | |
+| `npm test` | 最終リリース候補で再実行待ち | |
+| `npm run test:e2e` | 最終リリース候補で再実行待ち | |
+| `npm run build` | 最終リリース候補で再実行待ち | |
 
 最終カバレッジ:
 
-- Statements: 93.24%（2152/2308）
-- Branches: 87.72%（1472/1678）
-- Functions: 96.00%（385/401）
-- Lines: 94.55%（2066/2185）
+- Statements:
+- Branches:
+- Functions:
+- Lines:
 
 重要領域の強制閾値:
 
-| 対象 | 最終値または判定 | 強制閾値 |
-| --- | --- | --- |
-| 条件対応・順序割付 | 全指標100% | 全指標100% |
-| ステートマシン | Statements 96.70%、Branches 96.17%、Functions 100%、Lines 96.59% | 全指標90%以上 |
-| ScreenPufferDevice | Statements 97.22%、Branches 90%、Functions 100%、Lines 99.24% | 全指標90%以上 |
-| MockPufferDevice | Statements 97.38%、Branches 90.90%、Functions 96.55%、Lines 97.35% | 全指標90%以上 |
-| SerialPufferDevice（将来境界） | Statements 96.55%、Branches 91.23%、Functions 95.91%、Lines 97.52% | 全指標90%以上 |
-| ログ許可フィールド | 全指標100% | 全指標100% |
+| 対象 | 強制閾値 |
+| --- | --- |
+| 条件対応・順序割付 | 全指標100% |
+| ステートマシン | 全指標90%以上 |
+| ScreenPufferDevice | 全指標90%以上 |
+| MockPufferDevice | 全指標90%以上 |
+| SerialPufferDevice（将来境界） | 全指標90%以上 |
+| ログ許可フィールド | 全指標100% |
 
-## 2. 研究条件と画面刺激
+## 2. 変更していない研究刺激
 
-自動試験で次を確認した。
+screen-v2への版更新理由は、4提示後の参加者向け文言と一般的なスタッフ引継ぎ方式の変更である。次の研究刺激はscreen-v1から変更していない。
 
-- A=cloud+label、B=local+label、C=local+puffer、D=cloud+pufferの固定対応
-- ABDC / BCAD / CDBA / DACBの4順序、位置均衡、直前・直後ペア均衡
-- 固定値72、高ストレス、pufferLevel 0.60、および全提示時間の一元管理
-- A/Bの右側DOM・文言が同一
-- C/Dの右側DOM・文言・命令列・画面フグ描画が同一
-- 画面フグの6秒膨張、保持、6秒収縮とサーバ時刻同期
-- `ScreenPufferDevice`がUSB・ネットワーク・障害注入なしで起動すること
-- ビルド済みクライアントを`device.mode=screen`の非参加者テスト用ローカルランタイムで完走できること
-- `test`モードがloopback、合成ID、隔離ログ、実フォーム非表示、GO証跡禁止、Serial禁止を強制し、参加者画面とOperatorへ非参加者表示を常設すること
-- `development`モードもMock、loopback、`DEV-001`形式、開発専用ログ、空フォームを強制し、参加者画面とOperatorへ非参加者表示を常設すること
-- `screen-pilot`モードがScreenPufferDevice、正式固定値・時間・4順序を保ちつつ、loopback、空フォーム、GO証跡禁止、`PILOT-001`形式、隔離ログ、非参加者表示を強制し、Mock・正式ID・本番ログ先・設定上書きを拒否すること
-- `screen-pilot`がGit worktreeルート、追跡・未追跡変更のないHEAD、固定pilot設定のGit追跡・HEADバイト完全一致を要求し、汎用`startServer`からの直接起動、dirtyな追跡ファイル、未追跡ファイル、Git statusから隠した設定バイト差分を拒否すること
-- `screen-pilot`の`sourceCommit`、`sourceTreeSha256`、`configFileHash`が起動結果へ返され、すべてのPILOT JSONLイベントへ同じ3値で記録されること
-- screen-pilotとproduction候補が、固定production設定だけを除外する同一のsource tree SHA-256定義を使用すること
-- `goEvidence.screenPilot`のsource tree SHA-256がrelease候補と異なる場合、または候補commitの固定pilot設定バイトSHA-256が承認済み`pilotConfigFileHash`と異なる場合にリリースを拒否すること
-- Mockは開発・E2E・明示的リハーサルだけに限定され、本番で拒否されること
-- 通常フェーズの再読み込みはOperator確認まで停止すること
-- result/reset中に実際に参加者ページを再読み込みすると、STOP、DEFLATE、errorとなり再開できないこと
-- 緊急停止、Mock装置切断、重複研究用ID、不正遷移のフェイルクローズ
-- Operatorの1秒challenge/nonce応答・5秒の往復leaseでsilent LAN断、上り・下りのhalf-open、ブラウザ停止を検出し、setup中のlease喪失後は`prepare`・`start`・`resume`を拒否し、進行中の最後のlease喪失ではSTOP・DEFLATE・`OPERATOR_CONNECTION_LOST`、複数接続の1つが生存中は継続すること
-- 参加者公開payloadに研究用ID、提示順、A〜D、pufferLevelを出さないこと
-- 許可外ログ項目とPII候補を拒否すること
-- 実験アプリから外部originへ自動通信しないこと
-- 封印済みproduction CLIだけが起動でき、manifest v4と一度だけ読み込んだ設定スナップショットのバイトhash、意味hash、protocolVersion、GO証跡、Git HEADのappVersion、production設定だけを除外した追跡source tree SHA-256、source commitを相互照合すること
-- `dist-server/index.js`が汎用`startServer`をexportせず、ソースからの直接production起動も拒否すること
-- リリース生成が共有build lockを保持し、検証済みtokenを持つ子ビルドだけを許可して、並行ビルドによる成果物混在を拒否すること
-- production設定が固定パスのGit追跡ファイルとバイト単位で一致し、build・依存導入の省略、hardlink、release直下の偽Node実行を拒否すること
-- productionリリース生成直前にGoogleフォーム公開内容を再取得し、承認済みhashとの不一致を拒否すること
-- 研究用IDをセッション作成時に永続registryへ排他予約し、ログ移動後も再利用しないこと
-- JSONLを同一FileHandleから読み、読了後もinode、link数、size、mtime、ctimeを再照合すること
-- 除外・削除APIが常に拒否し、読取り専用Preview・UTC保持期限レポートだけがファイルを変更せず動作すること
+- A=cloud+label、B=local+label、C=local+puffer、D=cloud+puffer
+- ABDC / BCAD / CDBA / DACBの4順序
+- 固定値72、高ストレス、pufferLevel 0.60
+- 8秒 / 3秒 / 15秒 / 7秒の提示時間
+- A/Bの同一右表示
+- C/Dの同一右表示・命令列・画面フグ描画
+- 6秒膨張、結果終了まで保持、6秒収縮
+- 継続接続中のサーバ時刻同期
 
-## 3. UI確認
+これらを既存回帰試験と全4順序E2Eで再確認する。
 
-Playwrightで次の9状態を1366×768と1920×1080の両方で生成し、計18枚を`artifacts/screenshots/`へ保存した。このディレクトリと写真形式はGit対象外である。
+## 3. screen-v2固有の受入試験
+
+### 参加者画面
+
+- サマリー見出しが `4つの提示は終了しました`
+- サマリー本文が次の2行と完全一致する
+
+```text
+4つの提示は以上です。
+研究スタッフの案内をお待ちください。
+```
+
+- 外部フォーム・外部調査の名称を表示しない
+- 外部回答導線を表示しない
+- 回答方法、回答完了確認を表示しない
+- 参加者向け固定文言に仮説や期待結果を表示しない
+
+### Operator・API
+
+- 完了操作は一般的なスタッフ引継ぎ確認である
+- `POST /api/sessions/:id/confirm-staff-handoff`だけがsummaryからcompletedへ進める
+- 外部回答の有無・内容・完了を入力または表示しない
+- 旧完了経路を正式UI・正式API契約として残さない
+
+### 設定とruntime
+
+- 正式設定は`R8-010-2x2-screen-v2`
+- `bindHost=127.0.0.1`
+- `device.mode=screen`
+- `serialPath=""`
+- `allowMockInProduction=false`
+- `network.allowExternalRuntimeRequests=false`
+- `formUrl=""`
+- `formAudit`が存在しない
+- 正式runtimeから外部originへのrequestが0件
+
+screen-v1の外部回答監査はscreen-v2のrelease/start gateとして試験しない。
+
+## 4. 回帰試験
+
+次を自動試験で確認する。
+
+- 条件対応、位置均衡、直前・直後ペア均衡
+- 全4順序をScreenPufferDeviceで完走
+- 通常フェーズの再読み込みはOperator確認まで停止
+- `result`/`reset`中の再読み込みはSTOP、DEFLATE、`error`となり再開不能
+- 緊急停止、装置境界切断、重複研究用ID、不正遷移のフェイルクローズ
+- 最後のOperator lease喪失でSTOP、DEFLATE、`OPERATOR_CONNECTION_LOST`
+- 参加者公開payloadに研究用ID、提示順、A〜D、pufferLevelを出さない
+- 許可外ログ項目とPII候補を拒否
+- 研究用IDregistryへ排他予約し、ログ移動後も再利用しない
+- JSONLを同一FileHandleから読み、読了後もfile identityとmetadataを再照合
+- 除外・削除APIが常に拒否し、読取り専用PreviewとUTC保持期限レポートだけが動作
+- production CLIが封印済みmanifest経由だけで起動
+- 直接production起動、設定差し替え、既存build流用、環境変数上書きを拒否
+- build lock、単一server lock、stale lock回復
+
+## 5. UI確認
+
+1366×768と1920×1080で、次の9状態を確認する。
 
 - スタッフ画面
 - 進行中のスタッフ画面
@@ -97,69 +134,66 @@ Playwrightで次の9状態を1366×768と1920×1080の両方で生成し、計18
 - 画面上フグ結果
 - 4提示サマリー
 
-目視と自動検査で、中央基準・全画面、日本語中心、英語eyebrowなし、1366×768 / 1920×1080の欠けなしを確認した。クラウドは端末内条件と同じ色・枠・線幅の中立な線画アイコンと日本語「クラウド」で識別できる。赤・緑、安全・危険、推奨・非推奨の価値判断表現はない。
+確認項目:
 
-## 4. 公開レビュー版
+- 中央基準・全画面・日本語中心
+- 英語eyebrow、同心円、軌道、浮遊点がない
+- 条件画面は左右2パネルで表示領域を使う
+- クラウドと端末内は同じ色・枠・線幅の中立な線画と日本語で識別
+- 赤・緑、安全・危険、推奨・非推奨がない
+- 表示欠け、不要なスクロールがない
+- C/Dの画面上フグが完全に同一
 
-公開URL:
+スクリーンショットは`artifacts/screenshots/`へローカル生成し、Git、正式成果物、公開物へ含めない。
 
-`https://furukawa1020-sechack-experiment-demo.static.hf.space/`
+## 6. 非参加者screenパイロット
 
-配信commit:
+研究チームの非参加者が、異なる`PILOT-xxx`で3〜5件を完走する。
 
-`72e4c23dd80b31290862fefe01eb3c25045e7ce1`
+- `研究参加用ではありません・外部回答送信なし`を参加者側とOperatorへ常設
+- 外部回答導線なし
+- 正式固定値、4順序、提示時間、ScreenPufferDeviceを使用
+- 実参加者、正式ID、外部回答を使用しない
+- source commit、source tree SHA-256、pilot設定バイトSHA-256、ログSHA-256を外部管理票へ記録
+- リリース候補のsource evidenceと一致
 
-ルート、operator、display、device-test、healthzの5経路が外部HTTPSからHTTP 200を返すことを確認した。配信commit、許可ファイル一覧、HTMLマーカー、JS/CSSのSHA-256も一致した。公開HTTPSを実ブラウザで5テスト完走し、外部originへの追加リクエストとWebSocketは0件だった。
+このパイロットと独立二名照合は`goEvidence`の必須項目であり、未完了なら本番はNO-GOである。
 
-この公開物はページ内メモリだけで動く表示レビュー用であり、研究参加、同意、研究用ID、Googleフォーム、ログ、API、WebSocket、装置アダプタを持たない。本番実験へ転用しない。
+## 7. 正式成果物検査
 
-## 5. Googleフォーム監査
+正式成果物に次が含まれないことをmanifestと独立ファイル一覧で確認する。
 
-対象URL: `https://forms.gle/BeShY7cY5zMjunto9`
+- `FORM_*`
+- `MOCK_REHEARSAL.md`とMock用資材
+- `PUBLIC_DEMO.md`と公開レビュー用資材
+- screen-pilot用設定・起動経路・ログ
+- ソース、テスト、E2E設定、スクリーンショット
+- 実ログ、CSV、`.env`
 
-安定公開payload SHA-256:
+正式deploymentは会場Windows PC 1台と`127.0.0.1`だけで行う。一般公開またはHugging Face上の静的レビュー版は正式productionとして検査・承認しない。
 
-`33762250e42e9cb63900ccd58a64923f4047693086a81a3737cfe7cbb72d9476`
+## 8. 本番GOまでに必要な人の作業
 
-読取り専用再監査の結果はNO-GOである。
-
-- 公開フォームタイトルが提示後評価専用の固定値ではなく、`研究説明・参加同意・アンケート`のままのためFAIL
-- 内部条件A〜Dと処理場所・伝え方の対応を28件検出
-- 「3種類」という旧説明を15件検出
-- screen版の必須説明6点はすべて0件
-- 各提示直後に回答させる旧説明を5件検出
-- 研究用ID欄のラベルが固定文言と一致せず、完全一致validationがない
-- 提示順・内部コードの入力指示を1件検出
-- 禁止された個人情報入力・収集を1件検出
-- 研究用ID以外の短文・段落自由記述を3件検出
-- 無題の回答入力項目を1件検出
-- 11評価質問は存在し、第1〜第4提示、7件法、任意回答で統一
-- 回答項目全体は許可された研究用ID 1件＋評価グリッド11件の計12件に一致せず、追加回答形式を含むためFAIL
-- メール収集、ログイン要求等は管理画面で二名確認が必要
-
-本番設定は、既知NO-GOのhash、`status=NO-GO`、`twoPersonVerified=false`を保持している。フラグだけを変更しても、preflightとリリース直前のlive照合が拒否する。
-
-## 6. 本番GOまでに必要な人の作業
-
-1. 研究責任者が、固定模擬データ、本人非測定、生体データ非取得、画面上フグへの刺激変更を承認する。
+1. 研究責任者が固定模擬データ、本人非測定、生体データ非取得、画面内フグ、v2固定文言とスタッフ引継ぎ方式を承認する。
 2. 所属機関が研究計画変更・倫理審査・変更届の要否を判断し、必要な手続きを完了する。
-3. Googleフォーム所有者が`FORM_OWNER_FIX_GUIDE.md`に従って修正する。
-4. 提示開始前の同意をどこへ記録するかを承認済み手順へ固定する。
-5. 研究用IDで回答とローカル提示順を結合する方法、撤回・除外・削除、保持期間、アクセス権を承認する。
-6. 修正後フォームを未ログイン、iPhone、Androidで二名が独立に完走し、機械監査を再実行する。
-7. 研究チームの非参加者が`npm run screen-pilot`で異なる`PILOT-xxx`を用いた3〜5件を完走し、表示距離、可読性、全画面、切断時中止、所要時間を確認して、候補commit・source tree SHA-256・pilot設定バイトSHA-256・ログSHA-256を承認済み外部管理票へ記録する。実参加者と正式研究用IDは初回GO前pilotに使用しない。
-8. `npm run release:source-evidence`のappVersion、対象設定SHA-256、pilot設定バイトSHA-256、source tree SHA-256を二名で照合し、screen-pilot実施時の2つのSHA-256と一致することを確認して本番設定へ記録する。
-9. preflight、liveフォーム照合、productionリリース生成、二名manifest照合をすべてPASSさせる。
+3. 提示前同意をアプリ外の承認済み手順へ固定する。
+4. データ管理、撤回、除外、削除、保持期間、アクセス権を承認する。
+5. 非参加者screenパイロット3〜5件を完了する。
+6. 二名がリリースsource evidence、設定、goEvidence、manifestを独立に照合する。
+7. 最終5コマンド、本番preflight、現地screen試験をPASSさせる。
 
-物理フグ、COMポート、USBシリアル安全試験は`R8-010-2x2-screen-v1`のGO条件ではない。将来物理フグを使用する場合だけ、別のprotocolVersion、研究責任者承認、必要な倫理手続き、物理安全試験を追加する。
+物理フグ、COMポート、USBシリアル安全試験はscreen-v2のGO条件ではない。将来物理フグを使用する場合だけ、別protocolVersionと物理安全試験を追加する。
 
-## 7. データ保護確認
+## 9. データ保護
 
 - 正式screenアプリはローカルサーバ内で動作し、クラウド条件でも外部送信しない
-- フォームは参加者の明示操作でのみ開き、アプリが自動取得・送信しない
+- 外部回答を取得、表示、送信、複製、完了確認しない
 - 氏名、メール、IP、位置、カメラ、マイク、ブラウザ指紋、生体データをログへ保存しない
 - 外部CDN、外部フォント、分析、広告、テレメトリを使用しない
-- 実ログ、スクリーンショット、会場・参加者写真をGitおよび公開成果物へ含めない
-- 不可逆な自動除外・自動削除機能を正式リリースへ同梱せず、承認済み外部手順へ限定する
-- 研究用ID registryと初期化anchorをセッションJSONLと独立に保全し、外部割付台帳で補完する
-- 公開レビュー版は入力・永続化・研究データ経路を持たない
+- 実ログ、スクリーンショット、会場・参加者写真をGitおよび正式成果物へ含めない
+- 不可逆な自動除外・自動削除機能を正式成果物へ同梱しない
+- 研究用IDregistryと初期化anchorをセッションJSONLと独立に保全する
+
+## 10. screen-v1の履歴値
+
+2026-07-21にscreen-v1で記録されたテスト件数・カバレッジ・公開レビュー確認は履歴であり、screen-v2正式リリースの合格記録ではない。必要な履歴はGit履歴またはscreen-v1当時の承認済み外部記録を参照し、上記のscreen-v2最終実測欄へ混在させない。

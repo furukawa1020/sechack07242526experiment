@@ -15,7 +15,6 @@ import {
   hashExperimentConfig,
   hashProductionCriticalConfig,
 } from "../../../src/shared/config-loader.js";
-import { STUDY_FORM_URL } from "../../../src/shared/form-audit.js";
 import {
   parseExperimentConfig,
   SCREEN_PROTOCOL_VERSION,
@@ -38,7 +37,6 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
   const deviceMode = overrides.deviceMode ?? "screen";
   const protocolVersion = overrides.protocolVersion
     ?? (deviceMode === "screen" ? SCREEN_PROTOCOL_VERSION : "health-test-v1");
-  const formUrl = deviceMode === "mock" ? "" : STUDY_FORM_URL;
   const source = {
     schemaVersion: 1,
     protocolVersion,
@@ -63,15 +61,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
       ackTimeout: 1_000,
       allowMockInProduction: false,
     },
-    formUrl,
-    formAudit: {
-      status: deviceMode === "mock" ? "NO-GO" : "GO",
-      protocolVersion,
-      formUrl,
-      auditedOn: TODAY_IN_JAPAN,
-      contentSha256: "a".repeat(64),
-      twoPersonVerified: deviceMode !== "mock",
-    },
+    formUrl: "",
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,

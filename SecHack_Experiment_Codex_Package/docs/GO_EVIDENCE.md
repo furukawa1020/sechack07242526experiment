@@ -46,7 +46,7 @@
 ### 非参加者screen-pilotの実施経路
 
 1. 必須5テストが成功した候補をcommitし、Git worktreeのルートで`git status --short --untracked-files=all`が空であることを確認して`npm.cmd run screen-pilot`を実行する。このコマンドは毎回再ビルドし、worktreeルート、cleanなHEAD、固定pilot設定のGit追跡とHEADバイト完全一致を再検証する。`node dist-server/screen-pilot.js`の直接実行や、既存・コピー済み`dist-server/`の流用は承認経路に含めない。
-2. Operatorに「非参加者用の事前確認」「画面版・PILOT/テスト」、参加者側表示に「非参加者用の事前確認」「外部回答送信なし」が常設され、外部URL、リンク、QRがないことを確認する。
+2. Operatorに「非参加者用の事前確認」「画面版・PILOT/テスト」、参加者側表示に「非参加者用の事前確認」「外部回答送信なし」が常設され、外部回答導線がないことを確認する。
 3. 氏名等を使わず、異なる`PILOT-xxx`を用いて3〜5件を完走する。研究参加者、正式`SH26-xxx`、外部回答を使用しない。
 4. 起動時に表示された`sourceCommit`、`sourceTreeSha256`、`configFileHash`を保存し、各対象JSONLイベントの同名3フィールドが完全一致することを確認する。外部の承認済み管理票へ、この3値、完走した非個人識別ID、終了状態、対象JSONLのSHA-256、確認日を記録する。JSONLや個人情報をGit、設定、manifestへ転記しない。
 5. その管理票の版とSHA-256に加え、記録済み`sourceTreeSha256`を`screenPilot.sourceTreeSha256`へ、記録済み`configFileHash`を`screenPilot.pilotConfigFileHash`へ転記する。protocolVersion、固定値、文言、提示時間、順序、ScreenPufferDevice動作、pilot設定またはproduction設定以外の追跡ファイルを変更した場合は旧記録を流用せず、3〜5件を再実施する。

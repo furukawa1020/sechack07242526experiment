@@ -275,10 +275,17 @@ export class ExperimentLogger {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(researchId)) {
       return false;
     }
-    return hasReservedResearchId(this.directory, researchId);
+    if (await hasReservedResearchId(this.directory, researchId)) {
+      return true;
+    }
+    const events = await this.listEvents();
+    return events.some((event) => event.researchId === researchId);
   }
 
   public async reserveResearchId(input: ResearchIdReservationInput): Promise<boolean> {
+    if (await this.hasResearchId(input.researchId)) {
+      return false;
+    }
     return reserveResearchId(this.directory, input);
   }
 

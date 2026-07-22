@@ -919,14 +919,21 @@ describe("startServer production safeguards", () => {
   });
 
   it("rejects all production evidence and log overrides in screen-pilot mode", async () => {
-    const production = record(JSON.parse(
-      await readFile(resolve("config", "experiment.production.json"), "utf8"),
-    ) as unknown);
     const formEvidenceRoot = await createScreenPilotFixture((config) => {
-      config["formAudit"] = production["formAudit"];
+      config["formAudit"] = {
+        status: "NO-GO",
+        protocolVersion: SCREEN_PROTOCOL_VERSION,
+        formUrl: "",
+        auditedOn: "2026-07-22",
+        contentSha256: "a".repeat(64),
+        twoPersonVerified: false,
+      };
     });
     await expect(startVerifiedScreenPilot(formEvidenceRoot)).rejects.toThrow(/form-audit evidence/iu);
 
+    const production = record(JSON.parse(
+      await readFile(resolve("config", "experiment.production.json"), "utf8"),
+    ) as unknown);
     const goEvidenceRoot = await createScreenPilotFixture((config) => {
       config["goEvidence"] = production["goEvidence"];
     });

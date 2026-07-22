@@ -1,4 +1,4 @@
-import { link, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, parse, resolve } from "node:path";
 
@@ -18,6 +18,7 @@ import { loadExperimentConfig } from "../../../../src/shared/config-loader.js";
 import { createSession, type Session } from "../../../../src/shared/experiment-machine.js";
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
+const SECOND_SESSION_ID = "22222222-2222-4222-8222-222222222222";
 
 function session(overrides: Partial<Session> = {}): Session {
   return {
@@ -184,6 +185,76 @@ describe("ExperimentLogger", () => {
     const csv = await logger.exportCsv();
     expect(csv.split("\r\n")).toHaveLength(3);
     expect(csv).toContain("SH26-001,ABDC");
+  });
+
+  it("keeps a logged research ID reserved when its individual registry record is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sechack-log-registry-record-"));
+    const directory = join(root, "sessions");
+    await mkdir(directory);
+    const logger = new ExperimentLogger({ directory });
+    await logger.append(event());
+    await rm(join(root, "research-id-registry", "SH26-001.json"));
+
+    await expect(logger.hasResearchId("SH26-001")).resolves.toBe(true);
+    await expect(logger.reserveResearchId({
+      researchId: "SH26-001",
+      sessionId: SECOND_SESSION_ID,
+      reservedAt: "2026-07-19T12:01:00.000Z",
+    })).resolves.toBe(false);
+  });
+
+  it("keeps a logged research ID reserved when the registry and anchor are both missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sechack-log-registry-all-"));
+    const directory = join(root, "sessions");
+    await mkdir(directory);
+    const logger = new ExperimentLogger({ directory });
+    await logger.append(event());
+    await Promise.all([
+      rm(join(root, "research-id-registry"), { recursive: true }),
+      rm(join(root, ".research-id-registry-initialized.json")),
+    ]);
+
+    await expect(logger.hasResearchId("SH26-001")).resolves.toBe(true);
+    await expect(logger.reserveResearchId({
+      researchId: "SH26-001",
+      sessionId: SECOND_SESSION_ID,
+      reservedAt: "2026-07-19T12:01:00.000Z",
+    })).resolves.toBe(false);
+  });
+
+  it("propagates incomplete registry failures and preserves exclusive concurrent reservation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sechack-log-registry-guard-"));
+    const directory = join(root, "sessions");
+    await mkdir(directory);
+    const firstLogger = new ExperimentLogger({ directory });
+    const secondLogger = new ExperimentLogger({ directory });
+    await firstLogger.reserveResearchId({
+      researchId: "SH26-000",
+      sessionId: SESSION_ID,
+      reservedAt: "2026-07-19T11:59:00.000Z",
+    });
+
+    const concurrent = await Promise.all([
+      firstLogger.reserveResearchId({
+        researchId: "SH26-002",
+        sessionId: SESSION_ID,
+        reservedAt: "2026-07-19T12:00:00.000Z",
+      }),
+      secondLogger.reserveResearchId({
+        researchId: "SH26-002",
+        sessionId: SECOND_SESSION_ID,
+        reservedAt: "2026-07-19T12:00:00.000Z",
+      }),
+    ]);
+    expect(concurrent.sort()).toEqual([false, true]);
+
+    await rm(join(root, "research-id-registry"), { recursive: true });
+    await expect(firstLogger.hasResearchId("SH26-003")).rejects.toThrow(/removed|incomplete/iu);
+    await expect(firstLogger.reserveResearchId({
+      researchId: "SH26-003",
+      sessionId: SECOND_SESSION_ID,
+      reservedAt: "2026-07-19T12:01:00.000Z",
+    })).rejects.toThrow(/removed|incomplete/iu);
   });
 
   it("returns empty collections when the log directory does not exist", async () => {

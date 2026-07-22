@@ -98,7 +98,7 @@
 - 参加者向けの4提示サマリー
 - 参加者サマリーの固定文言`4つの提示は終了しました`と`4つの提示は以上です。\n研究スタッフの案内をお待ちください。`
 - 汎用的なスタッフ引継ぎ確認`confirm-staff-handoff`
-- 正式participant/Operator UIにフォーム、外部アンケート、URL、リンク、QR、回答誘導・完了確認が存在しないこと
+- 正式participant/Operator UIに外部回答に関する名称、導線、回答誘導・完了確認が存在しないこと
 - セッション削除
 - 中断・エラー・未完了の明確な記録
 - `intro`、`handling`、`processing`、`summary`中のリロードはOperatorの明示確認後だけ復旧し、`result`または`reset`中のリロードはSTOP、DEFLATE、`error`として再開不能にする
