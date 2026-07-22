@@ -314,28 +314,21 @@ describe("config file loading", () => {
       .rejects.toThrow(/Mock device mode is unconditionally disabled/iu);
   });
 
-  it("fails production loading closed unless a current, bound two-person GO exists", async () => {
+  it("fails production loading closed unless form integration is absent and a current, bound two-person GO exists", async () => {
     const root = await mkdtemp(join(tmpdir(), "sechack-production-audit-"));
     const configDirectory = join(root, "config");
     await mkdir(configDirectory);
     const source = {
       ...validConfig(),
       protocolVersion: SCREEN_PROTOCOL_VERSION,
-      formUrl: STUDY_FORM_URL,
+      formUrl: "",
       device: {
         ...(validConfig()["device"] as Record<string, unknown>),
         mode: "screen",
         serialPath: "",
       },
-      formAudit: {
-        status: "NO-GO",
-        protocolVersion: SCREEN_PROTOCOL_VERSION,
-        formUrl: STUDY_FORM_URL,
-        auditedOn: "2026-07-21",
-        contentSha256: AUDIT_CONTENT_SHA256,
-        twoPersonVerified: false,
-      },
     };
+    Reflect.deleteProperty(source, "formAudit");
     const configPath = join(configDirectory, "production.json");
     await writeFile(configPath, JSON.stringify(source), "utf8");
 
@@ -343,30 +336,9 @@ describe("config file loading", () => {
       rootDirectory: root,
       production: true,
       currentDate: new Date("2026-07-21T12:00:00Z"),
-    })).rejects.toThrow(/status-not-go/iu);
-
-    await writeFile(configPath, JSON.stringify({
-      ...source,
-      formAudit: {
-        ...(source.formAudit as Record<string, unknown>),
-        status: "GO",
-        twoPersonVerified: true,
-      },
-    }), "utf8");
-    await expect(loadExperimentConfig("config/production.json", {
-      rootDirectory: root,
-      production: true,
-      currentDate: new Date("2026-07-21T12:00:00Z"),
     })).rejects.toThrow(/GO evidence gate.*missing/iu);
 
-    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
-      ...source,
-      formAudit: {
-        ...(source.formAudit as Record<string, unknown>),
-        status: "GO",
-        twoPersonVerified: true,
-      },
-    })), "utf8");
+    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence(source)), "utf8");
     await expect(loadExperimentConfig("config/production.json", {
       rootDirectory: root,
       production: true,
@@ -375,34 +347,44 @@ describe("config file loading", () => {
       config: { protocolVersion: SCREEN_PROTOCOL_VERSION, device: { mode: "screen" } },
     });
 
-    const withoutAudit: Record<string, unknown> = { ...source };
-    Reflect.deleteProperty(withoutAudit, "formAudit");
-    await writeFile(configPath, JSON.stringify(withoutAudit), "utf8");
+    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
+      ...source,
+      formUrl: STUDY_FORM_URL,
+    })), "utf8");
     await expect(loadExperimentConfig("config/production.json", {
       rootDirectory: root,
       production: true,
       currentDate: new Date("2026-07-21T12:00:00Z"),
-    })).rejects.toThrow(/missing/iu);
+    })).rejects.toThrow(/production-form-url-not-empty/iu);
+
+    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
+      ...source,
+      formAudit: {
+        status: "GO",
+        protocolVersion: SCREEN_PROTOCOL_VERSION,
+        formUrl: STUDY_FORM_URL,
+        auditedOn: "2026-07-21",
+        contentSha256: AUDIT_CONTENT_SHA256,
+        twoPersonVerified: true,
+      },
+    })), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+      currentDate: new Date("2026-07-21T12:00:00Z"),
+    })).rejects.toThrow(/production-form-audit-present/iu);
   });
 
   it("applies the same production device policy during direct config loading", async () => {
     const root = await mkdtemp(join(tmpdir(), "sechack-production-device-policy-"));
     const configDirectory = join(root, "config");
     await mkdir(configDirectory);
-    const approvedScreenAudit = {
-      status: "GO",
-      protocolVersion: SCREEN_PROTOCOL_VERSION,
-      formUrl: STUDY_FORM_URL,
-      auditedOn: "2026-07-21",
-      contentSha256: AUDIT_CONTENT_SHA256,
-      twoPersonVerified: true,
-    };
     const screenBase = {
       ...validConfig(),
       protocolVersion: SCREEN_PROTOCOL_VERSION,
-      formUrl: STUDY_FORM_URL,
-      formAudit: approvedScreenAudit,
+      formUrl: "",
     };
+    Reflect.deleteProperty(screenBase, "formAudit");
     const configPath = join(configDirectory, "production.json");
 
     await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
@@ -439,11 +421,7 @@ describe("config file loading", () => {
 
     await writeFile(configPath, JSON.stringify({
       ...validConfig(),
-      formUrl: STUDY_FORM_URL,
-      formAudit: {
-        ...approvedScreenAudit,
-        protocolVersion: "R8-010-2x2-mock-v3",
-      },
+      formUrl: "",
       device: {
         ...(validConfig()["device"] as Record<string, unknown>),
         mode: "serial",

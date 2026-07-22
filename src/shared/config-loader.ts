@@ -141,9 +141,9 @@ export async function loadExperimentConfig(
         `Production screen protocol policy rejected the config (${productionPolicy.protocolIssues.join(", ")}).`,
       );
     }
-    if (!productionPolicy.formUrlMatchesStudy || !productionPolicy.formAudit.approved) {
+    if (productionPolicy.formIssues.length > 0) {
       throw new Error(
-        `Production Google Form audit gate rejected the config (${productionPolicy.formAudit.issues.join(", ")}).`,
+        `Production form integration policy rejected the config (${productionPolicy.formIssues.join(", ")}).`,
       );
     }
     if (!productionPolicy.goEvidence.approved) {

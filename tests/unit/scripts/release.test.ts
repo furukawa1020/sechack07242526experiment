@@ -12,8 +12,8 @@ import {
   hashTrackedSourceTreeAtCommit,
   inspectProductionSourceEvidence,
   parseCreateReleaseArguments,
+  runCreateRelease,
 } from "../../../scripts/create-release.js";
-import { EXPECTED_FORM_TITLE } from "../../../scripts/audit-public-form.js";
 import {
   createReleaseManifest,
   isCredentialFreeSourceRepository,
@@ -43,6 +43,7 @@ interface ConfigOverrides {
   readonly allowMockInProduction?: boolean;
   readonly bindHost?: string;
   readonly formUrl?: string;
+  readonly formAudit?: Readonly<Record<string, unknown>>;
   readonly loggingDirectory?: string;
   readonly allowExternalRuntimeRequests?: boolean;
   readonly researchIdPattern?: string;
@@ -52,68 +53,18 @@ const execFileAsync = promisify(execFile);
 const SYNTHETIC_SOURCE_COMMIT = "1".repeat(40);
 const SYNTHETIC_SOURCE_REPOSITORY = "https://github.com/example/sechack-release-fixture.git";
 const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
-const EXPECTED_FORM_FINAL_URL =
-  "https://docs.google.com/forms/d/e/1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q/viewform?usp=send_form";
 const TODAY_IN_JAPAN = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
 
 function fixtureDigest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function approvedFormPayload(): { readonly html: string; readonly sha256: string } {
-  const content = [
-    "この実験では、同じ固定模擬データを4つの方法で提示します。",
-    "表示される値は、あなた自身を測定したものではありません。",
-    "この実験では、心拍その他の生体データを取得しません。",
-    "状態は画面上のフグのふくらみで表します。",
-    "アンケート回答は、Googleフォームの送信時にGoogleへ送信・保存されます。",
-    "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存することはありません。",
-    "4つの提示をすべて見終え、サマリーが表示された後、このフォームへ戻ってください。",
-    "各提示の直後には回答せず、4つの提示がすべて終了してから回答してください。",
-    "第1提示から第4提示までを、11問でそれぞれ評価してください。",
-  ].join(" ");
-  const rows = ["第1提示", "第2提示", "第3提示", "第4提示"];
-  const scale = ["1全くそう思わない", "2", "3", "4", "5", "6", "7非常にそう思う"];
-  const items = [
-    [
-      null,
-      "研究用ID",
-      "研究スタッフから伝えられた研究用IDを入力してください。",
-      0,
-      [[null, null, 1, null, [[4, 301, ["^SH26-[0-9]{3}$"], "形式を確認してください"]]]],
-    ],
-    ...Array.from({ length: 11 }, (_unused, questionIndex) => [
-      null,
-      `評価質問${String(questionIndex + 1)}`,
-      null,
-      7,
-      rows.map((row) => [null, scale.map((label) => [label]), 0, [row]]),
-    ]),
-  ];
-  const payload = JSON.stringify([content, [null, items]]);
-  return Object.freeze({
-    html: `<title>${EXPECTED_FORM_TITLE}</title><script>var FB_PUBLIC_LOAD_DATA_ = ${payload};</script>`,
-    sha256: createHash("sha256").update(payload, "utf8").digest("hex"),
-  });
-}
-
-const APPROVED_FORM = approvedFormPayload();
-
-const approvedFormFetch = (async (): Promise<Response> => {
-  const response = new Response(APPROVED_FORM.html, {
-    status: 200,
-    headers: { "Content-Type": "text/html; charset=utf-8" },
-  });
-  Object.defineProperty(response, "url", { value: EXPECTED_FORM_FINAL_URL });
-  return response;
-}) as typeof fetch;
-
 function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
   const mode = overrides.mode ?? "screen";
   const protocolVersion = overrides.protocolVersion
     ?? (mode === "screen" ? SCREEN_PROTOCOL_VERSION : "release-test-v1");
-  const formUrl = overrides.formUrl ?? STUDY_FORM_URL;
-  const source = {
+  const formUrl = overrides.formUrl ?? "";
+  const source: Record<string, unknown> = {
     schemaVersion: 1,
     protocolVersion,
     studyTitle: "リリース合成設定",
@@ -139,14 +90,6 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
       allowMockInProduction: overrides.allowMockInProduction ?? false,
     },
     formUrl,
-    formAudit: {
-      status: formUrl === "" ? "NO-GO" : "GO",
-      protocolVersion,
-      formUrl,
-      auditedOn: TODAY_IN_JAPAN,
-      contentSha256: formUrl === "" ? "0".repeat(64) : APPROVED_FORM.sha256,
-      twoPersonVerified: formUrl !== "",
-    },
     logging: {
       directory: overrides.loggingDirectory ?? "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -156,7 +99,8 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
       allowExternalRuntimeRequests: overrides.allowExternalRuntimeRequests ?? false,
     },
   };
-  if (mode !== "screen" || formUrl !== STUDY_FORM_URL) return source;
+  if (overrides.formAudit !== undefined) source["formAudit"] = overrides.formAudit;
+  if (mode !== "screen" || formUrl !== "" || overrides.formAudit !== undefined) return source;
   let criticalConfigSha256: string;
   try {
     criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
@@ -1003,23 +947,22 @@ describe("release creation", () => {
     );
   });
 
-  it("requires live Google Form verification when createRelease is called directly", async () => {
-    const root = await createReleaseSource();
-    let fetchCount = 0;
+  it("does not perform a live request before the production CLI delegates release creation", async () => {
     vi.stubGlobal("fetch", async () => {
-      fetchCount += 1;
-      throw new Error("live form unavailable");
+      throw new Error("production release attempted a network request");
     });
-    await expect(
-      createRelease({
-        rootDirectory: root,
-        configPath: "config/experiment.production.json",
-        outputPath: "release/no-live-form",
-        writeLine: () => undefined,
-      }),
-    ).rejects.toThrow("live form unavailable");
-    expect(fetchCount).toBe(1);
-    expect(await pathExists(join(root, "release", "no-live-form"))).toBe(false);
+    let delegated = false;
+    await expect(runCreateRelease(
+      ["--config", "config/experiment.production.json"],
+      () => undefined,
+      {
+        createRelease: async () => {
+          delegated = true;
+          return "release/approved";
+        },
+      },
+    )).resolves.toBe(0);
+    expect(delegated).toBe(true);
   });
 
   it.each([
@@ -1035,7 +978,21 @@ describe("release creation", () => {
       { allowMockInProduction: true } satisfies ConfigOverrides,
       "device.allowMockInProduction",
     ],
-    ["missing approved form", { formUrl: "" } satisfies ConfigOverrides, "formUrl"],
+    ["configured form", { formUrl: STUDY_FORM_URL } satisfies ConfigOverrides, "formUrl"],
+    [
+      "legacy form audit",
+      {
+        formAudit: {
+          status: "NO-GO",
+          protocolVersion: SCREEN_PROTOCOL_VERSION,
+          formUrl: "",
+          auditedOn: TODAY_IN_JAPAN,
+          contentSha256: fixtureDigest("legacy-form-audit"),
+          twoPersonVerified: false,
+        },
+      } satisfies ConfigOverrides,
+      "formAudit",
+    ],
     [
       "external runtime requests",
       { allowExternalRuntimeRequests: true } satisfies ConfigOverrides,
@@ -1203,7 +1160,9 @@ describe("release creation", () => {
 
   it("creates only the approved offline payload and a self-consistent manifest", async () => {
     const root = await createReleaseSource();
-    vi.stubGlobal("fetch", approvedFormFetch);
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("production release attempted a network request");
+    });
     const sourceCommit = await runGit(root, ["rev-parse", "HEAD"]);
     const sourceConfigBytes = await readFile(
       join(root, "config", "experiment.production.json"),
@@ -1237,13 +1196,8 @@ describe("release creation", () => {
         "docs/DEVICE_PROTOCOL.md",
         "docs/DEPLOYMENT.md",
         "docs/EXPERIMENT_SPEC.md",
-        "docs/FORM_AUDIT.md",
-        "docs/FORM_RELEASE_GATE.md",
-        "docs/FORM_OWNER_FIX_GUIDE.md",
         "docs/GO_EVIDENCE.md",
-        "docs/MOCK_REHEARSAL.md",
         "docs/PROTOCOL_CHANGELOG.md",
-        "docs/PUBLIC_DEMO.md",
         "docs/RELEASE_CHECKLIST.md",
         "docs/RUNBOOK.md",
         "docs/TEST_REPORT.md",
@@ -1254,6 +1208,31 @@ describe("release creation", () => {
         "VERIFY_RELEASE.cmd",
       ].sort((left, right) => left.localeCompare(right)),
     );
+    expect(actualFiles).not.toEqual(expect.arrayContaining([
+      "docs/FORM_AUDIT.md",
+      "docs/FORM_RELEASE_GATE.md",
+      "docs/MOCK_REHEARSAL.md",
+      "docs/PUBLIC_DEMO.md",
+    ]));
+    const forbiddenReleaseText = [
+      /forms\.gle/iu,
+      /docs\.google\.com\/forms/iu,
+      /Googleフォーム/iu,
+      /QRコード/iu,
+      /confirm-form-complete/iu,
+      /qrcode/iu,
+      /FORM_AUDIT/iu,
+      /FORM_RELEASE_GATE/iu,
+      /MOCK_REHEARSAL/iu,
+      /PUBLIC_DEMO/iu,
+    ] as const;
+    for (const releasedPath of actualFiles) {
+      if (releasedPath === RELEASE_MANIFEST_NAME) continue;
+      const content = await readFile(join(output, ...releasedPath.split("/")), "utf8");
+      for (const forbidden of forbiddenReleaseText) {
+        expect(content, `${releasedPath} contains ${String(forbidden)}`).not.toMatch(forbidden);
+      }
+    }
 
     const releasedConfig = JSON.parse(
       await readFile(join(output, "config", "experiment.json"), "utf8"),
@@ -1305,8 +1284,18 @@ describe("release creation", () => {
     expect(launcher).not.toContain("DATA_DIRECTORY");
     expect(launcher).toContain('if not exist "%ProgramFiles%\\nodejs\\node.exe"');
     expect(launcher).not.toMatch(/(?:^|\r?\n)node /u);
+    expect(launcher).toContain("-NoProfile -NonInteractive -WindowStyle Hidden");
+    expect(launcher).toContain("http://127.0.0.1:4173/healthz");
+    expect(launcher).toContain("http://127.0.0.1:4173/operator");
+    expect(launcher).toContain("Invoke-WebRequest -UseBasicParsing -Uri $health");
+    expect(launcher).toContain("if ($response.StatusCode -eq 200) { Start-Process $operator");
+    expect(launcher).toContain("remain in this window for safe Ctrl+C shutdown");
+    expect(launcher).not.toMatch(/https?:\/\/(?!127\.0\.0\.1:4173(?:\/|$))/u);
     expect(launcher.indexOf("verify-release.js")).toBeLessThan(launcher.indexOf("preflight.js"));
     expect(launcher.indexOf("preflight.js")).toBeLessThan(
+      launcher.indexOf("http://127.0.0.1:4173/healthz"),
+    );
+    expect(launcher.indexOf("http://127.0.0.1:4173/healthz")).toBeLessThan(
       launcher.indexOf("dist-server\\index.js"),
     );
     const healthLauncher = await readFile(join(output, "CHECK_HEALTH.cmd"), "utf8");
@@ -1321,7 +1310,6 @@ describe("release creation", () => {
 
   it("rejects output outside or below a nested release path and never overwrites an existing release", async () => {
     const root = await createReleaseSource();
-    vi.stubGlobal("fetch", approvedFormFetch);
     await expect(
       createRelease({
         rootDirectory: root,

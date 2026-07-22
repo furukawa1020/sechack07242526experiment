@@ -612,7 +612,7 @@ describe("startServer production safeguards", () => {
     expect(created.status).toBe(201);
     const payload = record(await created.json());
     expect(record(payload["snapshot"])["rehearsal"]).toBe(true);
-    expect(record(payload["snapshot"])["formUrl"]).toBeNull();
+    expect(record(payload["snapshot"])).not.toHaveProperty("formUrl");
   });
 
   it("rejects a real form, formal ID, and production log path in development mode", async () => {
@@ -874,7 +874,7 @@ describe("startServer production safeguards", () => {
     expect(created.status).toBe(201);
     const payload = record(await created.json());
     expect(record(payload["snapshot"])["rehearsal"]).toBe(true);
-    expect(record(payload["snapshot"])["formUrl"]).toBeNull();
+    expect(record(payload["snapshot"])).not.toHaveProperty("formUrl");
     const logger = new ExperimentLogger({
       directory: join(root, "data", "screen-pilot-sessions"),
     });

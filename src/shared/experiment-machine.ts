@@ -110,7 +110,7 @@ export interface TransitionContext {
   readonly durationMs?: number;
   readonly prerequisites?: SetupPrerequisites;
   readonly deviceReady?: boolean;
-  readonly formCompletionConfirmed?: boolean;
+  readonly staffHandoffConfirmed?: boolean;
   readonly errorCode?: string;
 }
 
@@ -150,7 +150,6 @@ export interface PublicSnapshot {
   readonly remainingMs: number | null;
   readonly result: SessionResult;
   readonly summary: readonly PublicPresentationSummary[];
-  readonly formUrl: string | null;
 }
 
 const phases = (...values: ExperimentPhase[]): readonly ExperimentPhase[] => Object.freeze(values);
@@ -270,8 +269,8 @@ function assertTransitionGuard(
     }
   }
 
-  if (session.phase === "summary" && target === "completed" && context.formCompletionConfirmed !== true) {
-    throw new InvalidSessionTransitionError("Form completion must be confirmed before completion.");
+  if (session.phase === "summary" && target === "completed" && context.staffHandoffConfirmed !== true) {
+    throw new InvalidSessionTransitionError("Staff handoff must be confirmed before completion.");
   }
 
   if (target === "error" && (context.errorCode === undefined || context.errorCode.length === 0)) {
@@ -421,7 +420,6 @@ export function toPublicSnapshot(
   session: Session,
   monotonicMs: number,
   timingMs: TimingConfig,
-  formUrl = "",
   rehearsal = false,
   serverNow = session.updatedAt,
 ): PublicSnapshot {
@@ -461,6 +459,5 @@ export function toPublicSnapshot(
     remainingMs: getRemainingMs(session, monotonicMs),
     result: session.result,
     summary,
-    formUrl: showSummary && !rehearsal && formUrl !== "" ? formUrl : null,
   });
 }

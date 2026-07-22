@@ -60,7 +60,6 @@ export interface ParticipantSnapshot {
   /** Server-monotonic time remaining in the current phase. */
   readonly remainingMs: number | null;
   readonly summary: readonly PublicCondition[];
-  readonly formUrl: string | null;
 }
 
 export interface DeviceStatus {
@@ -149,7 +148,6 @@ export const EMPTY_PARTICIPANT_SNAPSHOT: ParticipantSnapshot = {
   serverNow: null,
   remainingMs: null,
   summary: [],
-  formUrl: null,
 };
 
 type JsonRecord = Readonly<Record<string, unknown>>;
@@ -254,16 +252,6 @@ function conditionCodeValue(value: unknown): ConditionCode | null {
   return value === "A" || value === "B" || value === "C" || value === "D" ? value : null;
 }
 
-function safeHttpsUrl(value: unknown): string | null {
-  if (typeof value !== "string" || value.length === 0) return null;
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" ? parsed.toString() : null;
-  } catch {
-    return null;
-  }
-}
-
 function parseFixedState(record: JsonRecord): FixedState {
   const fixed = nestedRecord(record, "fixedState") ?? record;
   return {
@@ -346,7 +334,6 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot | 
     serverNow,
     remainingMs,
     summary: parseSummary(value["summary"] ?? value["presentations"]),
-    formUrl: safeHttpsUrl(value["formUrl"]),
   };
 }
 

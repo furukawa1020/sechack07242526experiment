@@ -65,7 +65,7 @@ async function mockCommandHistory(request: APIRequestContext): Promise<readonly 
 async function action(
   request: APIRequestContext,
   sessionId: string,
-  name: "prepare" | "start" | "resume" | "abort" | "emergency-stop" | "confirm-form-complete",
+  name: "prepare" | "start" | "resume" | "abort" | "emergency-stop" | "confirm-staff-handoff",
 ): Promise<JsonRecord> {
   const response = await request.post(
     `/api/sessions/${encodeURIComponent(sessionId)}/${name}`,
@@ -164,9 +164,9 @@ test("4つの固定提示順をMockDeviceで完走し、参加者へ内部コー
     expect(publicSnapshot.rehearsal).toBe(true);
     expect(publicSnapshot.fixedState).toBeNull();
     expect(JSON.stringify(publicSnapshot)).not.toContain("pufferLevel");
-    expect(publicSnapshot.formUrl).toBeNull();
+    expect(publicSnapshot).not.toHaveProperty("formUrl");
     await expect(
-      page.getByText("研究参加用ではありません・Googleフォームへの回答送信なし"),
+      page.getByText("研究参加用ではありません・外部回答送信なし"),
     ).toBeVisible();
     const presentations = publicSnapshot.summary as JsonRecord[];
     expect(presentations).toHaveLength(4);
@@ -178,8 +178,9 @@ test("4つの固定提示順をMockDeviceで完走し、参加者へ内部コー
 
     const participantText = await page.locator("body").innerText();
     expect(participantText).not.toMatch(/(?:^|\s)[ABCD](?=\s|$)/m);
+    expect(participantText).not.toMatch(/Googleフォーム|forms\.gle|QRコード|アンケート/iu);
     expect(participantText).toContain("この表示は医療上の診断ではありません。");
-    await action(request, sessionId, "confirm-form-complete");
+    await action(request, sessionId, "confirm-staff-handoff");
     await expect(
       page.getByRole("heading", { name: "非参加者用の事前確認を終了しました" }),
     ).toBeVisible();
@@ -224,7 +225,7 @@ test("途中リロード後は明示的な復旧確認まで進行しない", as
   await expect(page.getByRole("heading", { name: "4つの提示は終了しました" })).toBeVisible({
     timeout: 15_000,
   });
-  await action(request, created.sessionId, "confirm-form-complete");
+  await action(request, created.sessionId, "confirm-staff-handoff");
 });
 
 test("画面フグのresult中の実リロードはSTOP・収縮後にerrorとなり再開できない", async ({ page, request }) => {

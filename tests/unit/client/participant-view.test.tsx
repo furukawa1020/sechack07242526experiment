@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import QRCode from "qrcode";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { UI_COPY, formatPresentationPosition } from "../../../src/shared/copy.js";
 import { ParticipantView } from "../../../src/client/participant/ParticipantView.js";
 import {
@@ -14,7 +13,6 @@ import {
 
 afterEach(() => {
   cleanup();
-  vi.restoreAllMocks();
 });
 
 function snapshot(
@@ -35,7 +33,6 @@ function snapshot(
     serverNow: "2026-07-19T12:00:00.000Z",
     remainingMs: 15_000,
     summary: [],
-    formUrl: null,
     ...overrides,
   };
 }
@@ -353,23 +350,21 @@ describe("participant presentation invariants", () => {
     expect(document.body).not.toHaveTextContent("D");
   });
 
-  it("uses the configured form URL verbatim only for the explicit link and local QR generation", async () => {
-    const formUrl = "https://forms.gle/BeShY7cY5zMjunto9";
-    const qrSpy = vi.spyOn(QRCode, "toDataURL");
-    const locationBeforeRender = window.location.href;
-
-    render(<ParticipantView snapshot={snapshot("local", "label", {
+  it("keeps the participant summary free of form destinations and response guidance", () => {
+    const view = render(<ParticipantView snapshot={snapshot("local", "label", {
       phase: "summary",
-      formUrl,
+      summary: [
+        { processing: "cloud", presentation: "label" },
+        { processing: "local", presentation: "label" },
+        { processing: "cloud", presentation: "puffer" },
+        { processing: "local", presentation: "puffer" },
+      ],
     })} />);
 
-    const formLink = screen.getByRole("link", { name: UI_COPY.summary.formCta });
-    expect(formLink).toHaveAttribute("href", formUrl);
-    expect(formLink).toHaveAttribute("target", "_blank");
-    expect(formLink).toHaveAttribute("rel", "noreferrer");
-    await waitFor(() => expect(qrSpy).toHaveBeenCalledTimes(1));
-    expect(qrSpy.mock.calls[0]?.[0]).toBe(formUrl);
-    expect(window.location.href).toBe(locationBeforeRender);
+    expect(view.container).toHaveTextContent("4つの提示は以上です。");
+    expect(view.container).toHaveTextContent("研究スタッフの案内をお待ちください。");
+    expect(view.container.textContent).not.toMatch(/Googleフォーム|フォーム|QRコード|アンケート|回答する/iu);
+    expect(view.container.querySelectorAll("a, img")).toHaveLength(0);
   });
 
   it("labels a hardware-free rehearsal and removes every form instruction", () => {
@@ -392,16 +387,12 @@ describe("participant presentation invariants", () => {
       rehearsal: true,
       phase: "summary",
       summary,
-      formUrl: "https://forms.gle/BeShY7cY5zMjunto9",
     })} />);
     expect(view.container.querySelector(".summary-heading")).toHaveTextContent(
       UI_COPY.rehearsal.summary.replace("\n", " "),
     );
-    expect(view.container).not.toHaveTextContent("下のボタンからGoogleフォームを開き");
-    expect(view.container).not.toHaveTextContent("同じ数字を複数の提示に選んでも構いません");
-    expect(view.container).not.toHaveTextContent("答えたくない項目は空欄のままにできます");
+    expect(view.container.textContent).not.toMatch(/Googleフォーム|フォーム|QRコード|アンケート|回答する/iu);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(view.container).not.toHaveTextContent("Googleフォームへ戻り");
 
     view.rerender(<ParticipantView snapshot={snapshot("cloud", "label", {
       rehearsal: true,
@@ -426,7 +417,7 @@ describe("participant snapshot boundary", () => {
       serverNow: null,
       remainingMs: null,
       summary: [],
-      formUrl: null,
+      formUrl: "https://forms.gle/legacy-destination",
       conditionCode: "A",
       researchId: "must-not-cross-boundary",
     });
@@ -439,6 +430,7 @@ describe("participant snapshot boundary", () => {
     });
     expect(parsed).not.toHaveProperty("conditionCode");
     expect(parsed).not.toHaveProperty("researchId");
+    expect(parsed).not.toHaveProperty("formUrl");
     expect(parsed?.fixedState).toEqual({ score: 72, label: "高ストレス" });
     expect(parsed?.fixedState).not.toHaveProperty("pufferLevel");
   });
@@ -456,7 +448,6 @@ describe("participant snapshot boundary", () => {
       serverNow: null,
       remainingMs: null,
       summary: [],
-      formUrl: null,
     });
     expect(parsed?.rehearsal).toBe(true);
   });
@@ -474,7 +465,6 @@ describe("participant snapshot boundary", () => {
       serverNow: null,
       remainingMs: null,
       summary: [],
-      formUrl: null,
     });
     expect(parsed?.phase).toBe("recovery");
   });

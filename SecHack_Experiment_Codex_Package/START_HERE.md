@@ -12,18 +12,19 @@
 2. `docs/EXPERIMENT_SPEC.md`
 3. `docs/UI_COPY.md`
 4. `docs/DEVICE_PROTOCOL.md`
-5. `docs/FORM_RELEASE_GATE.md`
-6. `docs/GO_EVIDENCE.md`
-7. `docs/DATA_LIFECYCLE.md`
-8. `config/experiment.example.json`（開発・Mock用）
-9. `config/experiment.screen-pilot.example.json`（非参加者の画面版技術パイロット用）
-10. `config/experiment.production.example.json`（正式screen用。フォーム監査完了までNO-GO）
+5. `docs/GO_EVIDENCE.md`
+6. `docs/DATA_LIFECYCLE.md`
+7. `config/experiment.example.json`（開発・Mock用）
+8. `config/experiment.screen-pilot.example.json`（非参加者の画面版技術パイロット用）
+9. `config/experiment.production.example.json`（正式screen用。GO証跡完了までNO-GO）
+
+`docs/FORM_*`はv1の履歴またはアプリ外アンケートの任意資料であり、v2の正式release/start gateではない。
 
 このタスクは、説明だけ、モック画像だけ、途中の雛形だけで終了しないでください。実装、テスト、ビルド、実行手順、運用手順、スクリーンショット生成まで完了してください。
 
 ## 最重要の前提
 
-- 正式MVPのプロトコルは`R8-010-2x2-screen-v1`である。
+- 正式MVPのプロトコルは`R8-010-2x2-screen-v2`である。
 - 実験は、参加者本人を測定したものではない同一の固定模擬データを4条件で提示する参加者内2×2実験である。この版では心拍その他の生体データを取得しない。
 - 比較要因は「処理場所：クラウド／この端末内」と「伝え方：状態ラベル／画面上のフグのふくらみ」である。
 - 条件は次の固定対応とし、勝手に変更しない。
@@ -32,8 +33,8 @@
   - C = この端末内 × 画面上のフグのふくらみ
   - D = クラウド × 画面上のフグのふくらみ
 - 「クラウド」は比較用シナリオであり、アプリから身体データや研究データを外部へ送信してはならない。
-- 提示前の研究説明と参加同意は、Googleフォームとは別の承認済み経路で提示開始前に提供・記録する。Googleフォームは固定タイトル`身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜提示後アンケート`の事後評価専用とし、回答項目は研究用ID 1件と11評価グリッドだけに限定する。スタッフ画面の確認欄は同意記録そのものではなく、今回のアプリは研究説明・同意・回答を置き換えない。
-- 現在のGoogleフォーム監査はNO-GOである。`docs/FORM_RELEASE_GATE.md`の解除条件、二名照合、研究責任者承認が完了するまで本番起動や参加者案内を行わない。
+- 提示前の研究説明と参加同意は、アプリ外の承認済み経路で提示開始前に提供・記録する。フォームその他の外部アンケートを用いる場合の告知・運用も研究スタッフがアプリ外で行い、アプリは取得・表示・誘導・送信・完了確認しない。スタッフ画面の確認欄は同意記録そのものではなく、今回のアプリは研究説明・同意・外部回答を置き換えない。
+- `goEvidence`の研究計画、倫理判断、提示前同意、データ管理計画、非参加者screen pilot 3〜5件、独立二名reviewがすべて承認済みになるまで、本番起動や参加者案内を行わない。フォーム監査はv2の本番ゲートではない。
 - 参加者画面にはA/B/C/Dの内部コード、仮説、期待される結果、条件の優劣を表示しない。
 - 参加者画面で変えてよいのは、原則として「処理場所の説明」と「伝え方」の2点だけである。
 - クラウドを赤、ローカルを緑にするなど、条件の安全性・危険性を色で暗示してはならない。
@@ -43,8 +44,8 @@
 - 本番アプリはローカルで動作し、デフォルトでは `127.0.0.1` のみにバインドする。
 - 正式MVPは`device.mode=screen`と`ScreenPufferDevice`を使用し、USB機器を接続せず、画面上のフグだけを動かす。フグ制御のための外部通信を行わない。
 - `mock`は開発、自動テスト、明示的な模擬リハーサル専用とし、正式実施に使用しない。
-- 初回GO前の画面版パイロットは、研究チームの非参加者だけがcleanなGit worktreeルートから`npm run screen-pilot`を使用する。このコマンドで毎回再ビルドし、固定pilot設定の追跡・HEADバイト一致を検証し、`sourceCommit`、固定production設定だけを除外した`sourceTreeSha256`、pilot設定バイトの`configFileHash`を全PILOT JSONLへ結び付ける。後二者はGO証跡へ記録してproduction候補と機械照合する。直接のビルド済みentryは使わない。正式固定値・時間・順序と`ScreenPufferDevice`を保ち、loopback、空フォーム、`PILOT-xxx`、隔離ログ、非参加者表示を強制し、実参加者や正式研究用IDを使用しない。
-- `serial`による物理フグは将来の別プロトコルとし、`R8-010-2x2-screen-v1`へ混在させない。
+- 初回GO前の画面版パイロットは、研究チームの非参加者だけがcleanなGit worktreeルートから`npm run screen-pilot`を使用する。このコマンドで毎回再ビルドし、固定pilot設定の追跡・HEADバイト一致を検証し、`sourceCommit`、固定production設定だけを除外した`sourceTreeSha256`、pilot設定バイトの`configFileHash`を全PILOT JSONLへ結び付ける。後二者はGO証跡へ記録してproduction候補と機械照合する。直接のビルド済みentryは使わない。正式固定値・時間・順序と`ScreenPufferDevice`を保ち、loopback、外部回答送信なし、`PILOT-xxx`、隔離ログ、非参加者表示を強制し、実参加者や正式研究用IDを使用しない。
+- `serial`による物理フグは将来の別プロトコルとし、`R8-010-2x2-screen-v2`へ混在させない。
 - C/Dでは、`result`開始から6秒で画面上のフグを同じ形状まで膨張させ、結果終了まで保持し、`reset`開始から6秒で収縮させる。描画はサーバ時刻へ同期する。`result`または`reset`中の切断・再読み込みは刺激欠損として安全停止し、そのセッションを再開しない。他フェーズではOperatorの復旧確認まで停止する。
 - 参加者向け文言は `docs/UI_COPY.md` を単一の正として実装し、独自に言い換えない。
 - 研究実施中に文言や条件定義を変更できないようにする。変更は設定ファイルとプロトコルバージョンの更新として扱う。
@@ -95,7 +96,9 @@
 - ローカルJSONLログ
 - CSVエクスポート
 - 参加者向けの4提示サマリー
-- Googleフォームへ戻る案内と、設定されている場合のみフォームURLのQR表示
+- 参加者サマリーの固定文言`4つの提示は終了しました`と`4つの提示は以上です。\n研究スタッフの案内をお待ちください。`
+- 汎用的なスタッフ引継ぎ確認`confirm-staff-handoff`
+- 正式participant/Operator UIにフォーム、外部アンケート、URL、リンク、QR、回答誘導・完了確認が存在しないこと
 - セッション削除
 - 中断・エラー・未完了の明確な記録
 - `intro`、`handling`、`processing`、`summary`中のリロードはOperatorの明示確認後だけ復旧し、`result`または`reset`中のリロードはSTOP、DEFLATE、`error`として再開不能にする

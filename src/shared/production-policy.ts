@@ -1,9 +1,4 @@
 import {
-  assessFormAudit,
-  STUDY_FORM_URL,
-  type FormAuditAssessment,
-} from "./form-audit.js";
-import {
   SCREEN_PROTOCOL_VERSION,
   type ApprovalEvidence,
   type ExperimentConfig,
@@ -26,6 +21,10 @@ export type ProductionProtocolPolicyIssueCode =
   | "screen-timing-mismatch"
   | "screen-orders-mismatch"
   | "screen-research-id-pattern-mismatch";
+
+export type ProductionFormPolicyIssueCode =
+  | "production-form-url-not-empty"
+  | "production-form-audit-present";
 
 export const SCREEN_PRODUCTION_FIXED_STATE = Object.freeze({
   score: 72,
@@ -55,8 +54,7 @@ export interface ProductionPolicyAssessment {
   readonly approved: boolean;
   readonly deviceIssues: readonly ProductionDevicePolicyIssueCode[];
   readonly protocolIssues: readonly ProductionProtocolPolicyIssueCode[];
-  readonly formUrlMatchesStudy: boolean;
-  readonly formAudit: FormAuditAssessment;
+  readonly formIssues: readonly ProductionFormPolicyIssueCode[];
   readonly goEvidence: ProductionGoEvidenceAssessment;
 }
 
@@ -343,9 +341,10 @@ export function isWindowsComPath(value: string): boolean {
 }
 
 /**
- * Evaluates the device and Google Form evidence that every production entry
- * point must enforce. It never fetches the form or turns human evidence into
- * an approval automatically.
+ * Evaluates every production entry point. The formal runtime has no Google
+ * Form integration: questionnaire handoff is an external staff operation, so
+ * both the runtime URL and the legacy in-app form-audit record must be absent.
+ * Human-subject GO evidence remains a separate mandatory fail-closed gate.
  */
 export function assessProductionPolicy(
   subject: ProductionPolicySubject,
@@ -354,6 +353,7 @@ export function assessProductionPolicy(
 ): ProductionPolicyAssessment {
   const deviceIssues: ProductionDevicePolicyIssueCode[] = [];
   const protocolIssues: ProductionProtocolPolicyIssueCode[] = [];
+  const formIssues: ProductionFormPolicyIssueCode[] = [];
 
   if (subject.device.mode === "mock") {
     deviceIssues.push("mock-device-not-allowed");
@@ -413,8 +413,12 @@ export function assessProductionPolicy(
     protocolIssues.push("screen-research-id-pattern-mismatch");
   }
 
-  const formUrlMatchesStudy = subject.formUrl === STUDY_FORM_URL;
-  const formAudit = assessFormAudit(subject, now);
+  if (subject.formUrl !== "") {
+    formIssues.push("production-form-url-not-empty");
+  }
+  if (subject.formAudit !== undefined) {
+    formIssues.push("production-form-audit-present");
+  }
   const goEvidence = assessProductionGoEvidence(
     subject.goEvidence,
     subject.protocolVersion,
@@ -425,13 +429,11 @@ export function assessProductionPolicy(
   return Object.freeze({
     approved: deviceIssues.length === 0
       && protocolIssues.length === 0
-      && formUrlMatchesStudy
-      && formAudit.approved
+      && formIssues.length === 0
       && goEvidence.approved,
     deviceIssues: Object.freeze(deviceIssues),
     protocolIssues: Object.freeze(protocolIssues),
-    formUrlMatchesStudy,
-    formAudit,
+    formIssues: Object.freeze(formIssues),
     goEvidence,
   });
 }

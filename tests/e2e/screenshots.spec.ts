@@ -38,7 +38,7 @@ async function create(
 async function sessionAction(
   request: APIRequestContext,
   id: string,
-  action: "prepare" | "start" | "abort" | "confirm-form-complete",
+  action: "prepare" | "start" | "abort" | "confirm-staff-handoff",
 ): Promise<void> {
   const response = await request.post(`/api/sessions/${encodeURIComponent(id)}/${action}`);
   expect(response.ok()).toBeTruthy();
@@ -313,7 +313,6 @@ async function openStableParticipantPhase(
         serverNow: null,
         remainingMs: null,
         summary: [],
-        formUrl: null,
       },
       status: 200,
     });
@@ -459,13 +458,13 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await expect(page.locator(".message-eyebrow")).toHaveCount(0);
     await expect(page.getByTestId("participant-app")).toHaveAttribute("data-rehearsal", "true");
     await expect(page.getByRole("note")).toContainText(
-      "研究参加用ではありません・Googleフォームへの回答送信なし",
+      "研究参加用ではありません・外部回答送信なし",
     );
     await expect(page.locator(".summary-heading .multiline-copy")).toHaveText(
-      /4つの非参加者向け提示を確認しました。\s*Googleフォームへの回答や送信は行いません。/u,
+      /4つの非参加者向け提示を確認しました。\s*外部回答の送信は行いません。/u,
     );
-    await expect(page.getByRole("link", { name: "Googleフォームを開いて回答する" })).toHaveCount(0);
-    await expect(page.getByRole("img", { name: "Googleフォームを開くQRコード" })).toHaveCount(0);
+    expect(await page.locator("body").innerText()).not.toMatch(/Googleフォーム|forms\.gle|QRコード|アンケート/iu);
+    await expect(page.locator("a[href^='http']")).toHaveCount(0);
     await expectParticipantSurfaceFillsViewport(page);
     await expectChildrenCenteredWithin(
       page.locator(".participant-summary"),
@@ -473,7 +472,7 @@ test("主要画面の承認用スクリーンショットを生成する", async
       { horizontal: false, vertical: true },
     );
     await capture(page, `participant-summary-${viewport.label}`);
-    await sessionAction(request, labelSession.id, "confirm-form-complete");
+    await sessionAction(request, labelSession.id, "confirm-staff-handoff");
     await operatorPage.close();
 
     const pufferSession = await create(request, `TEST-94${viewportIndex * 2 + 1}`, "CDBA");

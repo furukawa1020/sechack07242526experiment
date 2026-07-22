@@ -299,15 +299,14 @@ test("built nonparticipant client keeps direct routes, caching, and runtime requ
   const displayToken = decodeURIComponent(displayPath.slice("/display/".length));
   const publicResponse = await request.get(`${baseUrl}/api/display/${encodeURIComponent(displayToken)}`);
   expect(publicResponse.ok()).toBeTruthy();
-  expect(record(record(await publicResponse.json()).snapshot)["formUrl"]).toBeNull();
+  expect(record(record(await publicResponse.json()).snapshot)).not.toHaveProperty("formUrl");
   await expect(
-    display.getByText("研究参加用ではありません・Googleフォームへの回答送信なし"),
+    display.getByText("研究参加用ではありません・外部回答送信なし"),
   ).toBeVisible();
 
-  const formLink = display.getByRole("link", { name: "Googleフォームを開いて回答する" });
-  await expect(formLink).toHaveCount(0);
-  const qr = display.getByRole("img", { name: "Googleフォームを開くQRコード" });
-  await expect(qr).toHaveCount(0);
+  expect(await display.locator("body").innerText()).not.toMatch(/Googleフォーム|forms\.gle|QRコード|アンケート/iu);
+  await expect(display.locator("a[href^='http']")).toHaveCount(0);
+  await expect(display.getByRole("img")).toHaveCount(0);
 
   expect(display.url()).toBe(`${baseUrl}${displayPath}`);
   expect(context.pages()).toHaveLength(2);

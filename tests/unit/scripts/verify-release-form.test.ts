@@ -9,7 +9,6 @@ import {
   EXPECTED_FORM_TITLE,
   type PublicFormAuditReport,
 } from "../../../scripts/audit-public-form.js";
-import { runCreateRelease } from "../../../scripts/create-release.js";
 import {
   assessReleaseFormVerification,
   isExpectedStudyFormFinalUrl,
@@ -383,76 +382,4 @@ describe("production release Google Form verification", () => {
     expect(requestCount).toBe(0);
   });
 
-  it("blocks production release creation before sealing when live verification fails", async () => {
-    let releaseCreated = false;
-    const exitCode = await runCreateRelease(
-      ["--config", "config/experiment.production.json"],
-      () => undefined,
-      {
-        verifyReleaseForm: async () => ({
-          approved: false,
-          issues: ["payload-sha256-mismatch"],
-          report: report({ contentSha256: "b".repeat(64) }),
-        }),
-        createRelease: async () => {
-          releaseCreated = true;
-          return "unused";
-        },
-      },
-    );
-    expect(exitCode).toBe(1);
-    expect(releaseCreated).toBe(false);
-  });
-
-  it("defaults production release creation to the production config", async () => {
-    let verifiedConfigPath: string | undefined;
-    let sealedConfigPath: string | undefined;
-    const exitCode = await runCreateRelease(
-      [],
-      () => undefined,
-      {
-        verifyReleaseForm: async (options) => {
-          verifiedConfigPath = options?.configPath;
-          return {
-            approved: true,
-            issues: [],
-            report: report(),
-          };
-        },
-        createRelease: async (options) => {
-          sealedConfigPath = options?.configPath;
-          return "production-release";
-        },
-      },
-    );
-    expect(exitCode).toBe(0);
-    expect(verifiedConfigPath).toBe("config/experiment.production.json");
-    expect(sealedConfigPath).toBe("config/experiment.production.json");
-  });
-
-  it("does not perform the live form check for a sealed Mock rehearsal", async () => {
-    let verificationCalled = false;
-    let releaseCreated = false;
-    const exitCode = await runCreateRelease(
-      ["--mock-rehearsal", "--config", "config/experiment.mock-rehearsal.json"],
-      () => undefined,
-      {
-        verifyReleaseForm: async () => {
-          verificationCalled = true;
-          return {
-            approved: false,
-            issues: ["must-not-run"],
-            report: report(),
-          };
-        },
-        createRelease: async () => {
-          releaseCreated = true;
-          return "mock-release";
-        },
-      },
-    );
-    expect(exitCode).toBe(0);
-    expect(verificationCalled).toBe(false);
-    expect(releaseCreated).toBe(true);
-  });
 });

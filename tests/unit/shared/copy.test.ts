@@ -14,13 +14,13 @@ describe("participant UI copy", () => {
       + "表示される値は、あなた自身を測定したものではありません。\n"
       + "この実験では、心拍その他の生体データを取得しません。\n\n"
       + "これから表示されるデータの取扱いは、比較のためのシナリオです。\n"
-      + "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存することはありません。\n"
-      + "アンケート回答は、あなたがGoogleフォームで送信したときにGoogleへ送信・保存されます。\n\n"
+      + "この実験用Webアプリから、固定模擬身体データを外部へ送信・保存することはありません。\n\n"
       + "画面上のフグは表示だけの表現で、USB機器や実機は接続・動作していません。",
     );
     expect(UI_COPY.header.sameData).toBe("同じ固定模擬データを使用しています");
     expect(UI_COPY.processing).toBe("固定模擬データを処理しています…");
-    expect(UI_COPY.summary.formCta).toBe("Googleフォームを開いて回答する");
+    expect(UI_COPY.summary.body).toBe("4つの提示は以上です。\n研究スタッフの案内をお待ちください。");
+    expect(JSON.stringify(UI_COPY)).not.toMatch(/Googleフォーム|forms\.gle|QRコード|アンケート/iu);
     expect(UI_COPY.intro.physicalScenario).not.toContain("USB機器や実機は接続・動作していません");
   });
 
@@ -76,12 +76,8 @@ describe("participant UI copy", () => {
       ...Object.values(UI_COPY.reset),
       UI_COPY.summary.title,
       UI_COPY.summary.body,
-      UI_COPY.summary.note,
       ...UI_COPY.summary.cards,
       ...Object.values(UI_COPY.summary.screenPufferLabels),
-      UI_COPY.summary.formCta,
-      UI_COPY.summary.qrHelp,
-      UI_COPY.summary.qrAlt,
       UI_COPY.summary.listLabel,
       ...Object.values(UI_COPY.completed),
       ...Object.values(UI_COPY.aborted),

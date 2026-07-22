@@ -9,9 +9,6 @@ import {
   loadExperimentConfig,
 } from "../src/shared/config-loader.js";
 import {
-  STUDY_FORM_URL,
-} from "../src/shared/form-audit.js";
-import {
   assessProductionPolicy,
   isWindowsComPath,
 } from "../src/shared/production-policy.js";
@@ -265,33 +262,30 @@ export function evaluatePreflightGates(
         ? "fail"
         : "warning",
     detail: productionPolicy.protocolIssues.length === 0
-      ? "screen-v1の固定状態、提示時間、膨張時間、収縮時間、提示順、ID形式が正式値と一致しています。"
+      ? "screen-v2の固定状態、提示時間、膨張時間、収縮時間、提示順、ID形式が正式値と一致しています。"
       : production
-        ? `screen-v1の固定パラメータが正式値と一致しません（${productionPolicy.protocolIssues.join(", ")}）。`
-        : "開発用Mockでは短縮時間を許可しますが、本番screen-v1には使用できません。",
+        ? `screen-v2の固定パラメータが正式値と一致しません（${productionPolicy.protocolIssues.join(", ")}）。`
+        : "開発用Mockでは短縮時間を許可しますが、本番screen-v2には使用できません。",
   });
 
-  const approvedFormUrl = isApprovedGoogleFormsUrl(config.formUrl);
-  const expectedFormUrl = config.formUrl === STUDY_FORM_URL;
   checks.push({
     name: "formUrl",
-    status: approvedFormUrl && expectedFormUrl ? "pass" : production ? "fail" : "warning",
-    detail: approvedFormUrl && expectedFormUrl
-      ? "指定された研究用Google Forms URLと完全一致しています。"
+    status: config.formUrl === "" ? "pass" : production ? "fail" : "warning",
+    detail: config.formUrl === ""
+      ? "フォームURLは未設定で、事後アンケートはアプリ外のスタッフ運用です。"
       : production
-        ? `本番ではformUrlを${STUDY_FORM_URL}と完全一致させる必要があります。`
-        : "開発確認のため、指定フォームURLとの不一致または未設定を警告扱いにしました。",
+        ? "本番ランタイムへGoogleフォームURLを統合してはなりません。formUrlは空である必要があります。"
+        : "開発確認にフォームURLが設定されています。本番ランタイムには使用できません。",
   });
 
-  const formAudit = productionPolicy.formAudit;
   checks.push({
     name: "formAudit",
-    status: formAudit.approved ? "pass" : production ? "fail" : "warning",
-    detail: formAudit.approved
-      ? `フォーム監査のGO、二名確認、設定との一致、有効期限内（${String(formAudit.ageDays)}日前）を確認しました。`
+    status: config.formAudit === undefined ? "pass" : production ? "fail" : "warning",
+    detail: config.formAudit === undefined
+      ? "アプリ内フォーム監査証跡はなく、事後アンケート運用から分離されています。"
       : production
-        ? `本番フォーム監査ゲートを通過できません（${formAudit.issues.join(", ")}）。`
-        : "フォーム監査は未承認です。開発用Mock確認には影響しませんが、本番リリースは生成できません。",
+        ? `本番ランタイムへformAuditを統合してはなりません（${productionPolicy.formIssues.join(", ")}）。`
+        : "開発確認にformAuditが設定されています。本番ランタイムには使用できません。",
   });
 
   const goEvidence = productionPolicy.goEvidence;

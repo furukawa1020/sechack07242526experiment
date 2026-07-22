@@ -19,7 +19,7 @@ import { SessionController } from "../../../src/server/sessions/session-controll
 
 const CONFIG_HASH = "0".repeat(64);
 
-function testConfig(formUrl = "") {
+function testConfig() {
   return parseExperimentConfig({
     schemaVersion: 1,
     protocolVersion: SCREEN_PROTOCOL_VERSION,
@@ -44,7 +44,7 @@ function testConfig(formUrl = "") {
       ackTimeout: 100,
       allowMockInProduction: false,
     },
-    formUrl,
+    formUrl: "",
     logging: { directory: "./data/test", includeAbortedInOrderBalancing: true },
     network: { allowLan: false, allowExternalRuntimeRequests: false },
   });
@@ -236,7 +236,6 @@ function makeController(
   options: {
     readonly logger?: MemoryLogger;
     readonly device?: MockPufferDevice;
-    readonly formUrl?: string;
     readonly rehearsal?: boolean;
     readonly config?: ReturnType<typeof testConfig>;
   } = {},
@@ -244,7 +243,7 @@ function makeController(
   const device = options.device ?? new MockPufferDevice({ timingMode: "fast", initialConnected: true });
   const logger = options.logger ?? new MemoryLogger();
   const controller = new SessionController({
-    config: options.config ?? testConfig(options.formUrl),
+    config: options.config ?? testConfig(),
     configHash: CONFIG_HASH,
     appVersion: "1.0.0",
     rehearsal: options.rehearsal ?? false,
@@ -322,11 +321,11 @@ describe("SessionController", () => {
     expect(participant.pufferRamp).toEqual({ inflateMs: 1, deflateMs: 1 });
     expect(participant.phaseStartedAt).not.toBeNull();
     expect(participant.serverNow).toBe("2026-07-19T00:00:00.170Z");
-    expect(JSON.stringify(participant)).not.toMatch(/SH26|ABDC|"A"|conditionCode|researchId|sessionId/u);
+    expect(JSON.stringify(participant)).not.toMatch(/SH26|ABDC|"A"|conditionCode|researchId|sessionId|formUrl/u);
     expect(JSON.stringify(participant)).not.toContain("pufferLevel");
     expect(logger.events.filter((event) => event.eventType === "phase.result")).toHaveLength(4);
 
-    const completed = await controller.confirmFormComplete(created.snapshot.id);
+    const completed = await controller.confirmStaffHandoff(created.snapshot.id);
     expect(completed.phase).toBe("completed");
     expect(completed.result).toBe("ok");
     controller.dispose();
@@ -642,7 +641,7 @@ describe("SessionController", () => {
     await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
     expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("summary");
 
-    const completion = controller.confirmFormComplete(created.snapshot.id);
+    const completion = controller.confirmStaffHandoff(created.snapshot.id);
     const emergency = controller.emergencyStop(created.snapshot.id);
     const [completedView, emergencyView] = await Promise.all([completion, emergency]);
 
@@ -1085,7 +1084,7 @@ describe("SessionController", () => {
     const terminalCreated = await preparedSession(terminal.controller, "ABDC");
     await terminal.controller.start(terminalCreated.snapshot.id);
     await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
-    const completion = terminal.controller.confirmFormComplete(terminalCreated.snapshot.id);
+    const completion = terminal.controller.confirmStaffHandoff(terminalCreated.snapshot.id);
     await logger.started;
     await terminal.controller.shutdown();
     logger.release();
@@ -1192,34 +1191,36 @@ describe("SessionController", () => {
     controller.dispose();
   });
 
-  it("exposes the configured form link only after all four presentations", async () => {
-    const formUrl = "https://docs.google.com/forms/d/e/test/viewform";
-    const { controller } = makeController(0, { formUrl });
+  it("never exposes an external handoff destination in participant or operator snapshots", async () => {
+    const { controller } = makeController();
     const created = await preparedSession(controller, "ABDC");
-    expect(controller.getPublicSnapshot(created.displayToken).formUrl).toBeNull();
+    expect(controller.getPublicSnapshot(created.displayToken)).not.toHaveProperty("formUrl");
     await controller.start(created.snapshot.id);
     await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
 
-    expect(controller.getPublicSnapshot(created.displayToken)).toMatchObject({
-      phase: "summary",
-      formUrl,
-    });
+    expect(controller.getPublicSnapshot(created.displayToken)).toMatchObject({ phase: "summary" });
+    expect(controller.getPublicSnapshot(created.displayToken)).not.toHaveProperty("formUrl");
+    expect(controller.getOperatorSnapshot(created.snapshot.id)).not.toHaveProperty("formUrl");
     controller.dispose();
   });
 
-  it("suppresses the configured form link throughout a rehearsal", async () => {
-    const formUrl = "https://docs.google.com/forms/d/e/test/viewform";
-    const { controller } = makeController(0, { formUrl, rehearsal: true });
+  it("requires a confirmed Operator lease before accepting the staff handoff", async () => {
+    const { controller } = makeController();
     const created = await preparedSession(controller, "ABDC");
     await controller.start(created.snapshot.id);
     await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
 
-    expect(controller.getPublicSnapshot(created.displayToken)).toMatchObject({
-      rehearsal: true,
-      phase: "summary",
-      formUrl: null,
+    controller.enableOperatorLeaseSupervision();
+    await expect(controller.confirmStaffHandoff(created.snapshot.id)).rejects.toMatchObject({
+      code: "OPERATOR_CONNECTION_REQUIRED",
     });
-    expect(controller.getOperatorSnapshot(created.snapshot.id).formUrl).toBeNull();
+    expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("summary");
+
+    controller.markOperatorConnected();
+    await expect(controller.confirmStaffHandoff(created.snapshot.id)).resolves.toMatchObject({
+      phase: "completed",
+      result: "ok",
+    });
     controller.dispose();
   });
 });

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { STUDY_FORM_URL } from "../../../src/shared/form-audit.js";
 import { hashProductionCriticalConfig } from "../../../src/shared/config-loader.js";
 import {
   assessProductionPolicy,
@@ -98,15 +97,7 @@ function productionConfig(mode: "mock" | "serial" | "screen"): ExperimentConfig 
       ackTimeout: 1_000,
       allowMockInProduction: false,
     },
-    formUrl: STUDY_FORM_URL,
-    formAudit: {
-      status: "GO",
-      protocolVersion,
-      formUrl: STUDY_FORM_URL,
-      auditedOn: "2026-07-21",
-      contentSha256: "a".repeat(64),
-      twoPersonVerified: true,
-    },
+    formUrl: "",
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -230,18 +221,30 @@ describe("shared production policy", () => {
     }
   });
 
-  it("keeps the human form-audit evidence gate intact for screen production", () => {
+  it("rejects every legacy in-app Google Form integration in screen production", () => {
     const base = productionConfig("screen");
-    const notApproved = {
+    const withUrl = {
       ...base,
-      formAudit: { ...base.formAudit!, status: "NO-GO", twoPersonVerified: false },
+      formUrl: "https://forms.gle/legacy-form",
     } as ExperimentConfig;
-    expect(assess(notApproved)).toMatchObject({
-      approved: false,
+    const withAudit = {
+      ...base,
       formAudit: {
-        approved: false,
-        issues: expect.arrayContaining(["status-not-go", "two-person-not-verified"]),
+        status: "NO-GO",
+        protocolVersion: base.protocolVersion,
+        formUrl: "",
+        auditedOn: "2026-07-21",
+        contentSha256: fixtureDigest("legacy-form-audit"),
+        twoPersonVerified: false,
       },
+    } as ExperimentConfig;
+    expect(assess(withUrl)).toMatchObject({
+      approved: false,
+      formIssues: ["production-form-url-not-empty"],
+    });
+    expect(assess(withAudit)).toMatchObject({
+      approved: false,
+      formIssues: ["production-form-audit-present"],
     });
   });
 
@@ -251,7 +254,7 @@ describe("shared production policy", () => {
     const assessment = assessProductionPolicy(withoutEvidence, NOW, {
       criticalConfigSha256: hashProductionCriticalConfig(withoutEvidence),
     });
-    expect(assessment.formAudit.approved).toBe(true);
+    expect(assessment.formIssues).toEqual([]);
     expect(assessment.goEvidence).toMatchObject({ approved: false, issues: ["missing"] });
     expect(assessment.approved).toBe(false);
   });
@@ -432,7 +435,7 @@ describe("shared production policy", () => {
       .toContain("screen-protocol-mode-mismatch");
   });
 
-  it("publishes the immutable formal screen-v1 parameter set", () => {
+  it("publishes the immutable formal screen-v2 parameter set", () => {
     expect(SCREEN_PRODUCTION_FIXED_STATE).toEqual({
       score: 72,
       label: "高ストレス",
@@ -454,7 +457,7 @@ describe("shared production policy", () => {
   });
 
   it.each(SCREEN_PROTOCOL_MUTATIONS)(
-    "rejects a modified formal screen-v1 %s",
+    "rejects a modified formal screen-v2 %s",
     (_label, mutate, issueCode) => {
       const assessment = assess(mutate(productionConfig("screen")));
       expect(assessment.approved).toBe(false);

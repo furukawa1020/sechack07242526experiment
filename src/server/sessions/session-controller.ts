@@ -479,7 +479,8 @@ export class SessionController {
     return this.operatorSnapshot(this.get(sessionId));
   }
 
-  public async confirmFormComplete(sessionId: string): Promise<OperatorSessionSnapshot> {
+  public async confirmStaffHandoff(sessionId: string): Promise<OperatorSessionSnapshot> {
+    this.requireOperatorLease();
     const session = this.requireActive(sessionId);
     this.requirePhase(session, "summary");
     const updated = await this.enterTerminalPhase(session, "completed", "ok", null, "session.completed");
@@ -1261,7 +1262,6 @@ export class SessionController {
       displayUrl: this.displayUrl(token),
       current: publicView.current,
       summary: publicView.summary,
-      formUrl: publicView.formUrl,
       recentEvents: [...(this.recentEvents.get(session.id) ?? [])],
       displayFullscreen: this.displayFullscreenStates.get(session.id) ?? null,
     };
@@ -1306,10 +1306,6 @@ export class SessionController {
       recoveryRequired: session.recoveryRequired,
       result: session.result,
       summary,
-      formUrl:
-        showSummary && !this.rehearsal && this.config.formUrl.length > 0
-          ? this.config.formUrl
-          : null,
     };
     return base;
   }

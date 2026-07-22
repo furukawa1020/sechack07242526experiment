@@ -207,7 +207,7 @@ function SetupForm({
             : "提示開始前に、承認済み手順で研究説明・参加同意を確認済み"}</strong>
           <small>{isRehearsal
             ? "実参加者・実回答には使用しません"
-            : "口頭確認だけでは開始しません。Googleフォームで事後送信する方式は、責任者承認済みの手順に限ります。"}</small>
+            : "口頭確認だけでは開始しません。責任者が承認した提示前の手順を完了してください。"}</small>
         </span>
       </label>
 
@@ -307,10 +307,10 @@ function ActionPanel({
   session,
   busy,
   emergencyPending,
-  formComplete,
+  staffHandoffConfirmed,
   fullscreenConfirmed,
   isRehearsal,
-  onFormComplete,
+  onStaffHandoffConfirmed,
   onFullscreenConfirmed,
   onAction,
   onEmergency,
@@ -319,12 +319,12 @@ function ActionPanel({
   readonly session: OperatorSnapshot;
   readonly busy: boolean;
   readonly emergencyPending: boolean;
-  readonly formComplete: boolean;
+  readonly staffHandoffConfirmed: boolean;
   readonly fullscreenConfirmed: boolean;
   readonly isRehearsal: boolean;
-  readonly onFormComplete: (checked: boolean) => void;
+  readonly onStaffHandoffConfirmed: (checked: boolean) => void;
   readonly onFullscreenConfirmed: (checked: boolean) => void;
-  readonly onAction: (action: "prepare" | "start" | "resume" | "abort" | "confirm-form-complete") => void;
+  readonly onAction: (action: "prepare" | "start" | "resume" | "abort" | "confirm-staff-handoff") => void;
   readonly onEmergency: () => void;
   readonly onReset: () => void;
 }): React.JSX.Element {
@@ -395,18 +395,22 @@ function ActionPanel({
         ) : null}
         {session.phase === "summary" ? (
           <label className="check-row compact-check">
-            <input type="checkbox" checked={formComplete} onChange={(event) => onFormComplete(event.target.checked)} />
-            {isRehearsal ? "リハーサルの確認を完了済み" : "Googleフォームの回答完了を確認済み"}
+            <input
+              type="checkbox"
+              checked={staffHandoffConfirmed}
+              onChange={(event) => onStaffHandoffConfirmed(event.target.checked)}
+            />
+            {isRehearsal ? "リハーサルの確認を完了済み" : "参加者への次の手順の案内を完了済み"}
           </label>
         ) : null}
         {session.phase === "summary" ? (
           <button
             type="button"
             className="primary-button"
-            onClick={() => onAction("confirm-form-complete")}
-            disabled={busy || !formComplete}
+            onClick={() => onAction("confirm-staff-handoff")}
+            disabled={busy || !staffHandoffConfirmed}
           >
-            {isRehearsal ? "確認を完了してリハーサル終了" : "回答完了を確認してセッション完了"}
+            {isRehearsal ? "確認を完了してリハーサル終了" : "案内完了を確認してセッション完了"}
           </button>
         ) : null}
         {session.phase === "completed" || session.phase === "aborted" ? (
@@ -492,7 +496,7 @@ export function OperatorScreen(): React.JSX.Element {
   const [manualOrder, setManualOrder] = useState<OrderCode>("ABDC");
   const [session, setSession] = useState<OperatorSnapshot | null>(null);
   const [device, setDevice] = useState<DeviceStatus>(EMPTY_DEVICE_STATUS);
-  const [formComplete, setFormComplete] = useState(false);
+  const [staffHandoffConfirmed, setStaffHandoffConfirmed] = useState(false);
   const [fullscreenConfirmed, setFullscreenConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [emergencyPending, setEmergencyPending] = useState(false);
@@ -581,7 +585,7 @@ export function OperatorScreen(): React.JSX.Element {
   };
 
   const sessionAction = async (
-    action: "prepare" | "start" | "resume" | "abort" | "confirm-form-complete",
+    action: "prepare" | "start" | "resume" | "abort" | "confirm-staff-handoff",
   ): Promise<void> => {
     if (session === null) return;
     if (action === "abort" && !window.confirm("実験を中止します。セッションは再開できません。よろしいですか？")) return;
@@ -654,7 +658,7 @@ export function OperatorScreen(): React.JSX.Element {
       setSession(null);
       setResearchId("");
       setConsentConfirmed(false);
-      setFormComplete(false);
+      setStaffHandoffConfirmed(false);
       setFullscreenConfirmed(false);
       setNotice("次の参加者を受け付けられます。");
     } catch (error) {
@@ -747,10 +751,10 @@ export function OperatorScreen(): React.JSX.Element {
                 session={session}
                 busy={busy}
                 emergencyPending={emergencyPending}
-                formComplete={formComplete}
+                staffHandoffConfirmed={staffHandoffConfirmed}
                 fullscreenConfirmed={fullscreenConfirmed}
                 isRehearsal={isRehearsal}
-                onFormComplete={setFormComplete}
+                onStaffHandoffConfirmed={setStaffHandoffConfirmed}
                 onFullscreenConfirmed={setFullscreenConfirmed}
                 onAction={(action) => { void sessionAction(action); }}
                 onEmergency={() => { void emergencyStop(); }}

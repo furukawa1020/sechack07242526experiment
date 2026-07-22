@@ -196,8 +196,23 @@ export async function verifyReleaseForm(
   const now = options.now ?? new Date();
   const loaded = await loadExperimentConfig(
     options.configPath ?? DEFAULT_CONFIG_PATH,
-    { rootDirectory, production: true, currentDate: now },
+    // This is a detached audit utility for a separately supplied legacy form
+    // config. It is intentionally not a production runtime/release entry point.
+    { rootDirectory, production: false, currentDate: now },
   );
+  const productionPolicy = assessProductionPolicy(loaded.config, now, {
+    criticalConfigSha256: hashProductionCriticalConfig(loaded.config),
+  });
+  const nonFormPolicyIssues = [
+    ...productionPolicy.deviceIssues,
+    ...productionPolicy.protocolIssues,
+    ...productionPolicy.goEvidence.issues,
+  ];
+  if (nonFormPolicyIssues.length > 0) {
+    throw new Error(
+      `Standalone form audit config failed non-form production policy (${nonFormPolicyIssues.join(", ")}).`,
+    );
+  }
   if (loaded.config.formUrl !== STUDY_FORM_URL) {
     throw new Error(`Production formUrl must exactly match ${STUDY_FORM_URL}.`);
   }

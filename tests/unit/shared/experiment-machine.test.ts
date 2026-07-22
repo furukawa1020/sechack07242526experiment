@@ -107,9 +107,9 @@ describe("experiment state machine", () => {
     expect(session.phase).toBe("summary");
     expect(session.currentCondition).toBeNull();
     expect(() => transitionSession(session, "completed", context(now + 1)))
-      .toThrow(/Form completion/iu);
+      .toThrow(/Staff handoff/iu);
     session = transitionSession(session, "completed", context(now + 1, {
-      formCompletionConfirmed: true,
+      staffHandoffConfirmed: true,
     }));
     expect(session.result).toBe("ok");
     expect(session.remainingMs).toBeNull();
@@ -239,9 +239,9 @@ describe("experiment state machine", () => {
       phaseEndsMonotonicMs: 100,
       remainingMs: 100,
     };
-    const snapshot = toPublicSnapshot(active, 25, timing, "https://example.test/form", false, iso(25));
+    const snapshot = toPublicSnapshot(active, 25, timing, false, iso(25));
     expect(snapshot.current).toEqual({ position: 1, processing: "cloud", presentation: "label" });
-    expect(snapshot.formUrl).toBeNull();
+    expect(snapshot).not.toHaveProperty("formUrl");
     expect(snapshot.remainingMs).toBe(75);
     expect(snapshot.summary).toEqual([]);
     expect(snapshot.pufferSurface).toBe("screen");
@@ -255,7 +255,6 @@ describe("experiment state machine", () => {
       { ...active, phase: "summary", currentCondition: null },
       100,
       timing,
-      "https://example.test/form",
     );
     expect(summary.summary).toEqual([
       { position: 1, processing: "cloud", presentation: "label" },
@@ -263,15 +262,14 @@ describe("experiment state machine", () => {
       { position: 3, processing: "cloud", presentation: "puffer" },
       { position: 4, processing: "local", presentation: "puffer" },
     ]);
-    expect(summary.formUrl).toBe("https://example.test/form");
+    expect(summary).not.toHaveProperty("formUrl");
     expect(toPublicSnapshot(
       { ...active, phase: "summary", currentCondition: null },
       25,
       timing,
-      "https://example.test/form",
       true,
       iso(25),
-    ).formUrl).toBeNull();
+    )).not.toHaveProperty("formUrl");
     expect(toPublicSnapshot({ ...active, deviceMode: "serial" }, 25, timing).pufferSurface)
       .toBe("physical");
     expect(getRemainingMs(newSession(), 10)).toBeNull();

@@ -49,7 +49,6 @@ const ACTIVE_PUFFER_SNAPSHOT: ParticipantSnapshot = {
   serverNow: "2026-07-21T00:00:03.000Z",
   remainingMs: 12_000,
   summary: [],
-  formUrl: null,
 };
 
 describe("ParticipantScreen synchronization boundary", () => {

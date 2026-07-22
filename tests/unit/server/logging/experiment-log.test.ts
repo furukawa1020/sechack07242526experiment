@@ -94,14 +94,14 @@ describe("ExperimentLogEvent allowlist", () => {
     const pilot = event({
       researchId: "PILOT-001",
       deviceMode: "screen",
-      protocolVersion: "R8-010-2x2-screen-v1",
+      protocolVersion: "R8-010-2x2-screen-v2",
     }, { screenPilotSourceEvidence: sourceEvidence });
     expect(pilot).toMatchObject(sourceEvidence);
 
     expect(() => event({
       researchId: "PILOT-001",
       deviceMode: "screen",
-      protocolVersion: "R8-010-2x2-screen-v1",
+      protocolVersion: "R8-010-2x2-screen-v2",
     })).toThrow(/require verified source evidence/iu);
     expect(() => parseLogEvent({ ...pilot, sourceTreeSha256: undefined }))
       .toThrow(/must be present together|require verified source evidence/iu);

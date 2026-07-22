@@ -1,5 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
-import QRCode from "qrcode";
+import type { CSSProperties } from "react";
 import { UI_COPY, formatPresentationPosition } from "../../shared/copy.js";
 import type {
   ParticipantFixedState,
@@ -353,39 +352,6 @@ function conditionLabel(condition: PublicCondition, pufferSurface: PufferSurface
   return UI_COPY.summary.conditionLabels[condition.processing][condition.presentation];
 }
 
-function FormQr({ url }: { readonly url: string }): React.JSX.Element {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let current = true;
-    void QRCode.toDataURL(url, {
-      errorCorrectionLevel: "M",
-      margin: 1,
-      width: 128,
-      color: { dark: "#172033", light: "#FFFFFF" },
-    }).then((generated) => {
-      if (current) setDataUrl(generated);
-    }).catch(() => {
-      if (current) setDataUrl(null);
-    });
-    return () => { current = false; };
-  }, [url]);
-
-  return (
-    <div className="form-actions">
-      <a className="form-link" href={url} target="_blank" rel="noreferrer">
-        {UI_COPY.summary.formCta}
-      </a>
-      <div className="form-qr">
-        {dataUrl === null ? <span className="qr-placeholder" aria-hidden="true" /> : (
-          <img src={dataUrl} width="104" height="104" alt={UI_COPY.summary.qrAlt} />
-        )}
-        <p>{UI_COPY.summary.qrHelp}</p>
-      </div>
-    </div>
-  );
-}
-
 function Summary({ snapshot }: { readonly snapshot: ParticipantSnapshot }): React.JSX.Element {
   return (
     <main className="participant-summary">
@@ -403,8 +369,6 @@ function Summary({ snapshot }: { readonly snapshot: ParticipantSnapshot }): Reac
           </li>
         ))}
       </ol>
-      {snapshot.rehearsal ? null : <p className="summary-note">{UI_COPY.summary.note}</p>}
-      {snapshot.rehearsal || snapshot.formUrl === null ? null : <FormQr url={snapshot.formUrl} />}
     </main>
   );
 }

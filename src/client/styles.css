@@ -675,58 +675,6 @@ select:focus-visible {
   line-height: 1.35;
 }
 
-.summary-note {
-  margin: 18px 0 0;
-  color: var(--muted-text);
-  font-size: 18px;
-  line-height: 1.5;
-  text-align: center;
-  white-space: pre-line;
-}
-
-.form-link {
-  padding: 13px 26px;
-  border-radius: 2px;
-  color: #fff;
-  background: var(--heading);
-  font-size: 19px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.form-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 22px;
-  margin-top: 14px;
-}
-
-.form-qr {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: 430px;
-  text-align: left;
-}
-
-.form-qr img,
-.qr-placeholder {
-  width: 104px;
-  height: 104px;
-  flex: 0 0 auto;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  background: #fff;
-}
-
-.form-qr p {
-  margin: 0;
-  color: var(--muted-text);
-  font-size: 15px;
-  line-height: 1.5;
-}
-
 /* Operator --------------------------------------------------------------- */
 
 .operator-app,

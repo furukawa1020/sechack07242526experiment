@@ -51,7 +51,7 @@ function configSource(overrides: {
   readonly formAudit?: Record<string, unknown>;
   readonly omitFormAudit?: boolean;
 } = {}): Record<string, unknown> {
-  const formUrl = overrides.formUrl ?? STUDY_FORM_URL;
+  const formUrl = overrides.formUrl ?? "";
   const mode = overrides.mode ?? "screen";
   const protocolVersion = overrides.protocolVersion ?? (mode === "screen"
     ? SCREEN_PROTOCOL_VERSION
@@ -81,7 +81,6 @@ function configSource(overrides: {
       allowMockInProduction: overrides.allowMockInProduction ?? false,
     },
     formUrl,
-    formAudit: overrides.formAudit ?? goFormAudit({ formUrl, protocolVersion }),
     logging: {
       directory: "./data/sessions",
       includeAbortedInOrderBalancing: true,
@@ -91,7 +90,9 @@ function configSource(overrides: {
       allowExternalRuntimeRequests: false,
     },
   };
-  if (overrides.omitFormAudit === true) Reflect.deleteProperty(source, "formAudit");
+  if (overrides.formAudit !== undefined && overrides.omitFormAudit !== true) {
+    source["formAudit"] = overrides.formAudit;
+  }
   if (mode === "screen") {
     const criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
     const approval = (documentId: string, contentSha256: string) => ({
@@ -228,7 +229,7 @@ describe("preflight production gates", () => {
     )?.status).toBe("pass");
   });
 
-  it("rejects a GO form audit when the broader production evidence is absent", () => {
+  it("keeps GO evidence fail-closed when form integration is absent", () => {
     const complete = parseExperimentConfig(configSource({ mode: "screen" }));
     const formOnly = { ...complete, goEvidence: undefined } as ExperimentConfig;
     const checks = evaluatePreflightGates(formOnly, false, AUDIT_NOW);
@@ -241,14 +242,13 @@ describe("preflight production gates", () => {
     const arbitrary = {
       ...base,
       protocolVersion: "arbitrary-screen-v2",
-      formAudit: { ...base.formAudit!, protocolVersion: "arbitrary-screen-v2" },
     } as ExperimentConfig;
     expect(evaluatePreflightGates(arbitrary, false, AUDIT_NOW).find(
       (check) => check.name === "protocolVersion",
     )).toMatchObject({ status: "fail" });
   });
 
-  it("fails modified screen-v1 parameters only at the production gate", () => {
+  it("fails modified screen-v2 parameters only at the production gate", () => {
     const base = parseExperimentConfig(configSource({ mode: "screen" }));
     const modified = {
       ...base,
@@ -265,11 +265,10 @@ describe("preflight production gates", () => {
     )?.status).toBe("warning");
   });
 
-  it("rejects a different Google Forms URL even when its shape and audit are valid", () => {
+  it("rejects every non-empty Google Forms URL", () => {
     const differentUrl = "https://docs.google.com/forms/d/example/viewform";
     const config = parseExperimentConfig(configSource({
       formUrl: differentUrl,
-      formAudit: goFormAudit({ formUrl: differentUrl }),
     }));
     expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
       (check) => check.name === "formUrl",
@@ -277,17 +276,15 @@ describe("preflight production gates", () => {
   });
 
   it.each([
-    ["NO-GO", { formAudit: goFormAudit({ status: "NO-GO" }) }],
-    ["protocol mismatch", { formAudit: goFormAudit({ protocolVersion: "other-protocol" }) }],
-    ["form URL mismatch", { formAudit: goFormAudit({ formUrl: "https://forms.gle/different" }) }],
-    ["stale", { formAudit: goFormAudit({ auditedOn: "2026-07-13" }) }],
-    ["missing", { omitFormAudit: true }],
-    ["two-person false", { formAudit: goFormAudit({ twoPersonVerified: false }) }],
-  ] as const)("rejects %s form audit evidence in production but permits Mock development", (
+    ["GO", goFormAudit()],
+    ["NO-GO", goFormAudit({ status: "NO-GO" })],
+    ["protocol mismatch", goFormAudit({ protocolVersion: "other-protocol" })],
+    ["stale", goFormAudit({ auditedOn: "2026-07-13" })],
+  ] as const)("rejects %s legacy form audit evidence in production but permits Mock development", (
     _label,
-    overrides,
+    formAudit,
   ) => {
-    const config = parseExperimentConfig(configSource(overrides));
+    const config = parseExperimentConfig(configSource({ formAudit }));
     expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
       (check) => check.name === "formAudit",
     )?.status).toBe("fail");
@@ -296,7 +293,14 @@ describe("preflight production gates", () => {
     )?.status).toBe("warning");
   });
 
-  it("fails Mock and missing form data in production but permits development Mock checking", () => {
+  it("passes only when formAudit is absent", () => {
+    const config = parseExperimentConfig(configSource({ omitFormAudit: true }));
+    expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
+      (check) => check.name === "formAudit",
+    )?.status).toBe("pass");
+  });
+
+  it("fails Mock and legacy form-audit data in production but permits development Mock checking", () => {
     const mock = parseExperimentConfig(configSource({
       mode: "mock",
       serialPath: "",
@@ -313,7 +317,6 @@ describe("preflight production gates", () => {
     expect(productionFailures).toEqual(expect.arrayContaining([
       "device.mode",
       "device.serialPath",
-      "formUrl",
       "formAudit",
     ]));
     expect(evaluatePreflightGates(mock, true, AUDIT_NOW).some((check) => check.status === "fail"))

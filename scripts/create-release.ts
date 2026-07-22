@@ -15,18 +15,12 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { collectPreflightReport, type PreflightReport } from "./preflight.js";
-import { fetchPublicFormAudit } from "./audit-public-form.js";
 import {
   createReleaseManifest,
   isCredentialFreeSourceRepository,
   verifyReleaseDirectoryDetailed,
   writeReleaseManifest,
 } from "./release-manifest.js";
-import {
-  assessReleaseFormVerification,
-  renderReleaseFormVerification,
-  verifyReleaseForm,
-} from "./verify-release-form.js";
 import {
   hashProductionCriticalConfig,
   loadExperimentConfig,
@@ -87,7 +81,6 @@ export interface CreateReleaseOptions {
 }
 
 export interface RunCreateReleaseDependencies {
-  readonly verifyReleaseForm?: typeof verifyReleaseForm;
   readonly createRelease?: typeof createRelease;
 }
 
@@ -576,6 +569,9 @@ const PRODUCTION_WINDOWS_LAUNCHERS = Object.freeze({
     "if errorlevel 1 exit /b 1",
     '"%ProgramFiles%\\nodejs\\node.exe" dist-server\\preflight.js --config config\\experiment.json',
     "if errorlevel 1 exit /b 1",
+    `start "" /b powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "$health='http://127.0.0.1:4173/healthz'; $operator='http://127.0.0.1:4173/operator'; 1..60 | ForEach-Object { try { $response=Invoke-WebRequest -UseBasicParsing -Uri $health -TimeoutSec 2 -ErrorAction Stop; if ($response.StatusCode -eq 200) { Start-Process $operator; exit 0 } } catch {}; Start-Sleep -Milliseconds 500 }; exit 1"`,
+    "echo Production server will remain in this window for safe Ctrl+C shutdown.",
+    "echo Operator URL: http://127.0.0.1:4173/operator",
     '"%ProgramFiles%\\nodejs\\node.exe" dist-server\\index.js',
   ],
   "CHECK_HEALTH.cmd": [
@@ -689,6 +685,8 @@ function assertProductionReleaseMetadata(report: PreflightReport): void {
   if (report.researchIdPattern !== SCREEN_PRODUCTION_RESEARCH_ID_PATTERN) {
     failures.push("researchIdPattern");
   }
+  if (report.formUrl !== "") failures.push("formUrl");
+  if (report.formAuditStatus !== "MISSING") failures.push("formAudit");
   if (report.goEvidenceStatus !== "GO") failures.push("goEvidence.status");
   if (
     report.goEvidenceCriticalConfigSha256 !== report.computedCriticalConfigSha256
@@ -847,18 +845,6 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       sourceTreeSha256,
       pilotConfigFileHash,
     );
-    const publicFormReport = await fetchPublicFormAudit(
-      configSnapshot.config.formUrl,
-      globalThis.fetch,
-    );
-    const formVerification = assessReleaseFormVerification(
-      configSnapshot.config,
-      publicFormReport,
-    );
-    renderReleaseFormVerification(formVerification, writeLine);
-    if (!formVerification.approved) {
-      throw new Error("Production Google Form live verification failed.");
-    }
   }
 
   if (options.buildArtifacts ?? true) {
@@ -964,12 +950,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
         "PROTOCOL_CHANGELOG.md",
         "TEST_REPORT.md",
         "RELEASE_CHECKLIST.md",
-        "FORM_AUDIT.md",
-        "FORM_RELEASE_GATE.md",
-        "FORM_OWNER_FIX_GUIDE.md",
         "DEPLOYMENT.md",
-        "MOCK_REHEARSAL.md",
-        "PUBLIC_DEMO.md",
         "GO_EVIDENCE.md",
         "DATA_LIFECYCLE.md",
       ] as const) {
@@ -1094,15 +1075,6 @@ export async function runCreateRelease(
     }
     const configPath = parsed.configPath
       ?? (parsed.mockRehearsal ? DEFAULT_MOCK_REHEARSAL_CONFIG_PATH : DEFAULT_CONFIG_PATH);
-    if (!parsed.mockRehearsal) {
-      const formVerification = await (dependencies.verifyReleaseForm ?? verifyReleaseForm)({
-        configPath,
-      });
-      renderReleaseFormVerification(formVerification, writeLine);
-      if (!formVerification.approved) {
-        throw new Error("Production Google Form live verification failed.");
-      }
-    }
     await (dependencies.createRelease ?? createRelease)({
       configPath,
       ...(parsed.outputPath === undefined ? {} : { outputPath: parsed.outputPath }),

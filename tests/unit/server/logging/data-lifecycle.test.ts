@@ -31,7 +31,7 @@ const roots: string[] = [];
 function logEvent(researchId: string, sessionId: string): object {
   return {
     schemaVersion: 1,
-    protocolVersion: "R8-010-2x2-screen-v1",
+    protocolVersion: "R8-010-2x2-screen-v2",
     appVersion: "1.0.0",
     configHash: "a".repeat(64),
     sessionId,
