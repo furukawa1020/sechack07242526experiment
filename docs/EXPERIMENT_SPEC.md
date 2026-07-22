@@ -476,14 +476,17 @@ stateDiagram-v2
 - `session.error`
 - `device.status`
 - `display.command`
+- `operator.heartbeatChallenge`
+- `operator.heartbeatAck`
 
 画面→サーバ：
 
 - `display.ready`
 - `display.fullscreenState`
 - `display.heartbeat`
+- `operator.heartbeat`
 
-参加者画面は状態変更コマンドを送れない。
+参加者画面は状態変更コマンドを送れない。Operatorの状態変更は検証済みRESTだけで行う。サーバは1秒間隔でランダムnonce付き`operator.heartbeatChallenge`を送り、Operatorは受信・JSON検証できたchallengeと同じnonceを`operator.heartbeat`で返す。サーバは一致する応答だけを`operator.heartbeatAck`で確認し、5秒のleaseを更新する。これにより、上り・下りのhalf-open、LAN断、ブラウザevent loop停止を含む期限切れ接続を強制終了する。確認済みleaseがない間は`prepare`、`start`、`resume`を`OPERATOR_CONNECTION_REQUIRED`で拒否する。進行中に全Operator leaseが失効した場合はSTOP、DEFLATE、`OPERATOR_CONNECTION_LOST`、`error`へ移す。複数Operatorのうち1接続でも往復確認済みleaseを更新している間は進行を維持する。
 
 ## 9. 設定
 
@@ -506,6 +509,10 @@ stateDiagram-v2
 設定のSHA-256ハッシュをセッションログへ記録する。
 
 `R8-010-2x2-screen-v1`の正式設定は`device.mode=screen`、`allowMockInProduction=false`、空の`serialPath`とする。`mock`は開発・テスト・明示的な模擬リハーサルだけに許可する。`serial`は将来の別プロトコルへ移行しない限り本番ゲートで拒否する。
+
+正式productionは、Googleフォーム公開内容の`formAudit`に加え、研究計画、倫理判断、提示開始前の同意手順、データ管理計画、研究チームの非参加者による3〜5件の画面版技術パイロット、および独立二名の設定候補照合を`goEvidence`として検証する。証跡は同じprotocolVersionと、`goEvidence`自体を除く正式設定のcanonical SHA-256へ結び付ける。確認者の氏名、メールアドレス、署名画像、参加者情報は設定やmanifestへ入れず、外部管理された文書の非個人識別ID、版、SHA-256、承認日、今回の実施への適用期限だけを記録する。
+
+本番preflight、リリース生成、manifest検証、production起動のすべてが、欠落、NO-GO、期限切れ、protocolVersion不一致、設定SHA-256不一致、仮識別子、ゼロSHA、同一照合者コードをフェイルクローズで拒否する。フォーム監査だけがGOでも正式実施を許可しない。
 
 ## 10. ログ
 
@@ -561,6 +568,19 @@ type ExperimentLogEvent = {
 
 CSVは1セッション1行のサマリーとする。
 
+### 撤回・除外・削除・保持期限
+
+- 正式ログは研究用ID単位で読取り専用Previewできる
+- Previewは各exact targetの相対パス、session ID、サイズ、更新時刻、SHA-256から決定的なplan IDを作る
+- アプリと正式リリースは分析除外・変更・削除機能を持たず、内部APIも常にfail-closedで拒否する
+- 撤回・除外・削除はサーバ停止後、研究責任者が事前承認した外部データ管理手順へ引き渡す
+- 開発用Previewと保持期限レポートは候補を示すだけで、自動除外・自動削除しない
+- 研究用IDはセッション作成時に排他的に永続registryへ記録し、FileHandleをfsyncする
+- 永続registryはセッションJSONLの移動・削除と独立して保持し、研究用IDを再割付しない
+- registryと初期化anchorの同時消失は未初期化と区別できないため、独立バックアップと外部割付台帳で補完する
+- Googleフォーム回答は取得・複製せず、フォーム管理者が同じ研究用IDを承認済み手順で手動照合する
+- 外部手順の独立監査記録も、Git、リリース再配布物、テストへ含めない
+
 ## 11. デバイス抽象化
 
 ```ts
@@ -587,7 +607,7 @@ MockDevice：
 - 実時間モードと高速テストモード
 - 状態遷移を再現
 - ACK遅延、切断、エラーを注入可能
-- 専用模擬リハーサルでは、参加者画面へ「模擬リハーサル」「研究参加用ではありません・回答送信なし・実機なし」を常設
+- 専用模擬リハーサルでは、参加者画面へ「非参加者用の事前確認」「研究参加用ではありません・Googleフォームへの回答送信なし」を常設
 - 専用模擬リハーサルのサマリーではGoogleフォームへの回答を案内しない
 - 上記の模擬表示は本番では非表示
 - Operatorには常にMockであることを明示
@@ -600,6 +620,8 @@ MockDevice：
 - ビルド済み`screen`画面の試験であっても、本番GO、同意取得、参加者セッションとして扱わない
 
 ソース用`development`ランタイムも非参加者専用とし、Mock、loopback、外部通信なし、空フォーム、GO監査証跡なし、`DEV-001`形式、`data/dev-sessions`配下のログを起動時に強制する。参加者画面とOperatorへ同じ模擬表示を常設し、正式研究用IDや実参加者を扱わない。
+
+初回GO前の`screen-pilot`ランタイムは、研究チームの非参加者が同じ画面刺激を3〜5件確認する専用経路とする。`npm run screen-pilot`は`device.mode=screen`、正式固定値・4順序・提示時間、loopback、外部通信なし、空フォーム、GO監査証跡なし、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。Mockリハーサル、公開レビュー、自動E2E、実参加者は事前技術パイロット件数へ含めない。候補commit、pilot設定SHA-256、3〜5件の終了状態とログSHA-256を外部管理票へ記録し、その管理票のSHA-256だけを`goEvidence.screenPilot`へ結び付ける。正式リリースへこの起動entryとpilot設定・ログを同梱しない。
 
 ScreenPufferDevice：
 
@@ -672,6 +694,7 @@ SerialDevice：
 - HTMLを動的注入しない
 - 設定パスのパストラバーサル防止
 - ログの改行・CSV injection対策
+- 撤回・削除のアプリ内実行を拒否し、サーバ停止後の責任者承認済み外部手順を必須とする
 - フォームURLは許可されたHTTPS URLだけ
 - リンクは参加者の明示操作で開く
 - 自動リダイレクトしない
@@ -791,6 +814,7 @@ E2Eサーバは明示的な`test`モードで起動し、参加者画面とOpera
 
 - `npm ci`と`npm run build`が成功
 - 非参加者の動作確認は`npm run rehearsal`で起動でき、本番データ・本番割付へ混入しない
+- 非参加者の画面版技術パイロットは`npm run screen-pilot`でだけ起動し、正式固定値・時間・順序とScreenPufferDeviceを使いながら、`PILOT-xxx`、空フォーム、loopback、隔離ログ、本番利用不可を強制する
 - 正式起動は承認済みproduction設定を明示し、preflightがPASSした場合だけ成功する。現在のNO-GO設定では起動とリリース生成を拒否する
 - `ScreenPufferDevice`だけで実機なしの正式画面を実行可能
 - MockDeviceだけで開発・模擬リハーサルを実演可能
@@ -804,6 +828,8 @@ E2Eサーバは明示的な`test`モードで起動し、参加者画面とOpera
 - 外部自動通信なし
 - 全ログが研究用IDで対応
 - PIIなし
+- `formAudit`だけをGOにしても、統合`goEvidence`が未承認なら本番preflight・リリース・起動が失敗する
+- 研究用ID単位の読み取り専用Previewと保持期限レポートが正式ログだけを対象に動作し、Googleフォーム回答を取得しない。分析除外・削除はアプリ内で常時拒否され、研究責任者が承認した外部手順にだけ引き渡す
 - 緊急停止が動作
 - 全テスト成功
 - READMEだけで第三者が起動可能
@@ -827,9 +853,11 @@ E2Eサーバは明示的な`test`モードで起動し、参加者画面とOpera
 - 提示順
 - 同意
 - 15分以内
-- 参加者3〜5名のパイロット
+- 研究チームの非参加者によるscreen技術パイロット3〜5件と、候補commit・設定SHA-256・ログSHA-256の外部記録
 - iPhone/Androidでフォーム確認
 - 研究責任者による最終文言確認
+- 研究計画、倫理判断、提示前同意、データ管理、3〜5件のscreenパイロット、独立二名照合のGO証跡と対象設定SHA-256が一致
+- 撤回・除外・削除・保持期限とGoogleフォーム側の手動照合手順をデータ管理計画で承認
 - 固定模擬データ、本人非測定、生体データ非取得の説明が承認済み研究計画と一致
 - 物理フグから画面上フグへの刺激変更について、研究責任者の承認と所属機関で必要な倫理審査・変更手続きが完了
 

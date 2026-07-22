@@ -14,7 +14,7 @@
 
 画面だけを外部ブラウザで確認する場合は、[公開デモ（模擬表示）](PUBLIC_DEMO.md)の静的な自動リハーサルを使用する。トップ画面は、ページメモリ内だけで4提示を8秒・3秒・15秒・7秒の固定時間で進行し、フグも画面上だけで6秒膨張・保持・6秒収縮する。研究用ID、同意、フォーム、ログ、API、WebSocket、装置アダプタ、実機命令は使用しない。`npm.cmd run test:public-demo`は1366×768、1920×1080、390×844、320×568、844×390の5画面幅を25テスト・skipなしで確認する。これも表示レビュー専用であり、本番GO判定やローカルサーバ同期試験の代替ではない。
 
-現在の人対象本番判定は**NO-GO**です。ソフトウェアは、固定模擬データと画面上のフグを用いる実機不要の正式`screen`モードへ移行しています。一方、[公開内容監査](FORM_AUDIT.md)では内部条件対応の公開、旧新説明の併存、回答タイミングの不整合、screen版の必須説明不足、無題の必須入力が残っています。画面刺激版の研究計画・同意方法の承認、フォーム修正・二名照合、本番preflightを完了し、新しいmanifestを封印するまで参加者へ提示してはなりません。
+現在の人対象本番判定は**NO-GO**です。ソフトウェアは、固定模擬データと画面上のフグを用いる実機不要の正式`screen`モードへ移行しています。一方、[公開内容監査](FORM_AUDIT.md)では内部条件対応の公開、旧新説明の併存、回答タイミングの不整合、screen版の必須説明不足、無題入力、研究用ID欄のラベル・形式検証、提示順コードの入力指示が残っています。画面刺激版の研究計画・同意方法・データ管理・倫理判断・パイロットの承認、フォーム修正・二名照合、本番preflightを完了し、新しいmanifestを封印するまで参加者へ提示してはなりません。
 
 ## 1. 完了条件
 
@@ -26,13 +26,15 @@
 - 指定済みGoogleフォームURL`https://forms.gle/BeShY7cY5zMjunto9`を設定済み
 - [Googleフォーム公開内容監査](FORM_AUDIT.md)の未解決所見が0件で、11問とメール非収集を二名が実回答経路で照合済み
 - 本番設定の`formAudit`が`status=GO`、対象`protocolVersion`と`formUrl`の完全一致、公開payload SHA-256の一致、`twoPersonVerified=true`、未来日でない7日以内の`auditedOn`をすべて満たす
+- 本番設定の`goEvidence`が、研究計画、倫理判断、提示前同意、データ管理、3〜5件のscreenパイロット、独立二名照合を同じprotocolVersionと対象設定SHA-256へ結び付け、すべて有効期限内の`GO`である
 - `device.mode`が`screen`で`serialPath`が空、物理フグ・USBシリアル・生体センサが未接続
 - `allowMockInProduction`が`false`
 - `allowExternalRuntimeRequests`が`false`
 - 全自動テストと本番preflightが成功
 - 6秒膨張・保持・6秒収縮を確認済み。継続接続中の再描画はサーバ時刻へ同期し、`result`/`reset`中の再読み込み・切断はSTOP、DEFLATE、`error`で再開不能、他フェーズはOperator確認まで停止する
-- 生成元Git作業ツリーがクリーンで、manifestの40文字`sourceCommit`が承認対象commitと一致
-- 生成時と検証時に表示されるmanifest SHA-256、`sourceCommit`、設定SHA-256を2名で照合済み
+- 生成元Git作業ツリーがクリーンで、固定パス`config/experiment.production.json`がGit追跡済みかつHEADのバイト列と完全一致
+- `releaseVerification.appVersion`がGit HEADの`package.json.version`、`sourceTreeSha256`がproduction設定だけを除外したHEADの全追跡tree SHA-256と一致
+- manifest schema version 4の40文字`sourceCommit`が最終commitと一致し、生成時と検証時のmanifest SHA-256、source tree SHA-256、appVersion、設定SHA-256を2名で照合済み
 
 一つでも未確認なら、リリース生成または起動を失敗させたままにします。
 
@@ -61,11 +63,13 @@ productionサーバは`device.mode=mock`を無条件に拒否します。`screen
 
 二名照合と研究責任者承認の完了後に限り、本番設定の`formAudit`へ`GO`、同じ`protocolVersion`と`formUrl`、監査日、`npm.cmd run audit:form`が表示した安定した`FB_PUBLIC_LOAD_DATA_` payloadのSHA-256、`twoPersonVerified=true`を転記する。本番preflightとproductionサーバ起動は、欠落、不一致、未来日、8日以上の経過、SHA-256形式不正、および既知のNO-GO公開payload SHA-256をすべて拒否する。監査コマンドは読取り専用であり、設定を自動更新したりNO-GOをGOへ変更したりしない。
 
+`goEvidence`は[本番GO証跡の作成・照合手順](GO_EVIDENCE.md)に従って作成する。承認者名、メールアドレス、署名画像は設定へ入れず、外部管理された承認文書の非個人識別ID、版、SHA-256、承認日、今回の実施への適用期限だけを記録する。preflightが算出した`criticalConfigSha256`と、二名の独立した照合記録が一致しなければ本番は失敗する。
+
 `screen`モードでは`serialPath`を必ず空文字にし、物理装置を接続しません。COMポートを指定するとschemaと本番preflightが失敗します。将来の`serial`物理版は別プロトコルとして作成し、この設定や承認記録を流用しません。
 
 ## 3. 封印済みリリースを生成する
 
-リリース対象をcommitした後、ビルドPCで`git status --short`が何も出力しないことを確認します。未追跡ファイルを含む変更が1件でもある場合、リリース生成は失敗します。対象commitは`git rev-parse HEAD`で得られる40文字の値として二名照合票へ転記します。
+リリース対象をcommitした後、ビルドPCで`git status --short`が何も出力しないことを確認します。未追跡ファイルを含む変更が1件でもある場合、リリース生成は失敗します。`npm.cmd run release:source-evidence`で表示されるGit HEAD由来の`appVersion`、`criticalConfigSha256`、`sourceTreeSha256`、40文字の`sourceCommit`を二名照合票へ転記します。production設定だけを最終更新してcommitした後に同コマンドを再実行し、appVersion、対象設定SHA-256、source tree SHA-256が照合時と同一であることを確認します。
 
 続けて次を実行します。
 
@@ -73,21 +77,21 @@ productionサーバは`device.mode=mock`を無条件に拒否します。`screen
 npm.cmd run deploy:prepare -- --config config/experiment.production.json
 ```
 
-このコマンドは、Lint、型検査、単体・統合テスト、E2E、ビルド、公開フォームの読取り専用照合、本番preflightを順に実行します。その後、Git作業ツリーのクリーン状態を生成開始時とmanifest作成直前の2回確認し、`release/`の新しいディレクトリへ許可ファイルだけをコピーして、lockfileからproduction依存関係を導入します。途中でHEAD、origin、追跡・未追跡ファイルが変わった場合も失敗します。最新の件数とカバレッジは[テスト報告](TEST_REPORT.md)へ記録します。フォームがNO-GOの間は、意図どおりproduction成果物の生成に失敗します。
+このコマンドは、Lint、型検査、単体・統合テスト、E2E、ビルド、公開フォームの読取り専用照合、本番preflightを順に実行します。その後、Git作業ツリーのクリーン状態、固定production設定の追跡・HEAD完全一致、source tree SHA-256、appVersionを照合し、`release/`の新しいディレクトリへ許可ファイルだけをコピーして、lockfileからproduction依存関係を導入します。productionでは既存build成果物の再利用と依存導入の省略を拒否します。コピー元は通常ファイル・単一hardlinkであることを確認し、open後のfile identityと読取り後のmetadataを再照合します。途中でHEAD、origin、追跡・未追跡ファイルが変わった場合も失敗します。最新の件数とカバレッジは[テスト報告](TEST_REPORT.md)へ記録します。フォームまたは統合GO証跡がNO-GOの間は、意図どおりproduction成果物の生成に失敗します。
 
 成果物には次が含まれます。
 
 - ビルド済みクライアントとサーバ
-- コンパイル済みpreflight、healthcheck、manifest検証ツール
+- コンパイル済みpreflight、healthcheck、manifest検証
 - production依存関係
 - 承認済み設定1ファイル
-- RUNBOOK、装置仕様、実験仕様、固定文言、Googleフォーム公開内容監査
+- RUNBOOK、装置仕様、実験仕様、固定文言、Googleフォーム公開内容監査、GO証跡手順、データlifecycle手順
 - 全管理対象ファイルのサイズとSHA-256、生成元commitを記録した`DEPLOYMENT_MANIFEST.json`
 - Windows用の検証・起動・ヘルスチェックランチャー
 
-実ログ、CSV、`.env`、ソース、テスト、E2E設定、Mock設定、スクリーンショットは入りません。既存の出力先を上書きしないため、設定を直した場合は新しいリリースを生成します。
+実ログ、CSV、`.env`、ソース、テスト、E2E設定、Mock設定、screen-pilot設定・起動entry・ログ、スクリーンショットは入りません。既存の出力先を上書きしないため、設定を直した場合は新しいリリースを生成します。
 
-manifest schema version 2はappVersion、protocolVersion、設定ファイルと設定内容のSHA-256、40文字の`sourceCommit`、認証情報を含まない場合に限る`sourceRepository`、ビルド時Node・OS・architecture、および全管理対象ファイルのサイズ・SHA-256を保持します。appVersionは管理対象`package.json.version`と一致しなければ検証失敗とします。実行用ランチャー、production設定、文書、production依存関係も検証対象です。`data/`は実行時書込み領域としてmanifest対象外ですが、生成直後は`.gitkeep`以外を含まないことを確認します。production CLIは固定設定を一度だけ読み、そのバイトSHA-256、意味SHA-256、protocolVersionを検証済みmanifestと照合した同一スナップショットでサーバを起動し、実行時表示と監査ログのappVersionにも検証済みmanifest値を使用します。
+manifest schema version 4はappVersion、protocolVersion、設定ファイルと設定内容のSHA-256、GO証跡を除く対象設定SHA-256、GO証跡SHA-256、40文字の`sourceCommit`、production設定だけを除外したHEADの全追跡tree SHA-256、これらのbinding SHA-256、認証情報を含まない場合に限る`sourceRepository`、ビルド時Node・OS・architecture、および全管理対象ファイルのサイズ・SHA-256を保持します。appVersionは管理対象`package.json.version`およびGO証跡、source tree SHA-256はGO証跡と一致しなければ検証失敗とします。manifest自身を含む管理対象ファイルは通常ファイルかつhardlink数1だけを許可します。実行用ランチャー、production設定、文書、production依存関係も検証対象です。`data/`は実行時書込み領域としてmanifest対象外ですが、生成直後は`.gitkeep`以外を含まないことを確認します。production CLIは固定設定を一度だけ読み、そのバイトSHA-256、意味SHA-256、対象設定SHA-256、GO証跡SHA-256、protocolVersionを検証済みmanifestと照合した同一スナップショットでサーバを起動し、実行時表示と監査ログのappVersionにも検証済みmanifest値を使用します。
 
 リリース生成は`release/.build.lock`を生成前から最終renameまで排他的に保持する。子のclient/serverビルドだけがランダムtokenを継承でき、同時に開始された無関係なビルドまたは別リリースは失敗する。通常ビルド同士は短い上限時間内で直列化する。異常終了でlockが残った場合は自動削除しない。タスクマネージャー等で関連するNode/npm/Codexプロセスが存在しないことを確認し、lockの内容と未完了`.staging-*`を調査してから、運用責任者が手動で対処する。
 
@@ -98,7 +102,7 @@ manifest schema version 2はappVersion、protocolVersion、設定ファイルと
 ## 4. 会場PCへ配置する
 
 1. リリースディレクトリ全体を、クラウド同期対象外のローカルディスクへコピーします。
-2. ビルド時と完全に同じNode.jsバージョン、Windowsアーキテクチャを使用します。値は`DEPLOYMENT_MANIFEST.json`の`buildRuntime`で確認します。
+2. ビルド時と完全に同じNode.jsバージョン、Windowsアーキテクチャを`%ProgramFiles%\nodejs\node.exe`へ導入します。production用`.cmd`はこの絶対パスの存在確認後にだけ起動し、release直下の`node.cmd`等を実行しません。値は`DEPLOYMENT_MANIFEST.json`の`buildRuntime`で確認します。
 3. 会場PCでは`npm install`、`npm ci`、buildを実行しません。
 4. `VERIFY_RELEASE.cmd`を実行し、`Deployment manifest SHA-256`、`Source commit`、`PASS`を確認します。
 5. 検証時のmanifest SHA-256と`sourceCommit`が生成時に2名で転記した値と一致し、manifestのconfig SHA-256が別経路で保管した承認記録と一致することを2名で照合します。
@@ -130,6 +134,8 @@ LAN公開時のOperator tokenは起動端末にだけ表示されます。写真
 
 実ログはリリース内の`data/sessions/YYYY-MM-DD/`にだけ保存されます。終了後、件数・研究用ID・終了状態を確認し、研究計画で承認された暗号化保存先へ移します。実ログをリリース再配布物、Git、チャット、issue、テストへ含めません。
 
+撤回、分析除外、削除は、サーバ停止後に研究責任者が事前承認した外部手順へ引き渡す。正式リリースは`DATA_LIFECYCLE.cmd`、変更用CLI、変更用npm scriptを同梱せず、アプリ内APIも常に拒否する。開発リポジトリの読取り専用Preview/保持期限レポートは対象確認の参考に限り、変更権限を与えない。Googleフォーム側は同じ研究用IDを管理者が別途手動照合する。詳細は[研究データの撤回・除外・保持期限手順](DATA_LIFECYCLE.md)に従う。
+
 ## 8. 最終GO判定
 
 [リリース二名照合票](RELEASE_CHECKLIST.md)を2名で確認します。特に次は書類上の確認だけで済ませてはなりません。
@@ -141,5 +147,6 @@ LAN公開時のOperator tokenは起動端末にだけ表示されます。写真
 - ScreenPufferDeviceの論理ready/status、6秒膨張、保持、6秒収縮、収縮完了。継続接続中だけサーバ時刻へ同期し、`result`/`reset`中の再読み込みは安全停止して再開不能、他フェーズはOperator確認まで停止する
 - STOP、DEFLATE、参加者画面・スタッフ画面切断、停電・PC断時の中断
 - 提示開始前の同意記録方法、研究用ID連結、画面刺激版の責任者承認
+- `goEvidence`の研究計画、倫理判断、提示前同意、データ管理、screenパイロット、独立二名照合と、算出済み対象設定SHA-256の一致
 
 一つでも未完了または結果不明なら判定は**NO-GO**です。設定を変更した場合は既存成果物を手編集せず、ビルドPCで新しい自己完結リリースとmanifestを生成し直します。Hugging Face上の公開静的版は表示レビュー専用であり、本番サーバ、同意、割付、監査ログの代替にはなりません。
