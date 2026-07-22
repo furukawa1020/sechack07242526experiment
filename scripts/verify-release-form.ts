@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  EXPECTED_FORM_TITLE,
   fetchPublicFormAudit,
   type PublicFormAuditReport,
 } from "./audit-public-form.js";
@@ -19,8 +20,6 @@ import {
 const DEFAULT_CONFIG_PATH = "config/experiment.production.json";
 const EXPECTED_FORM_ID =
   "1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q";
-const EXPECTED_FORM_TITLE =
-  "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜研究説明・参加同意・アンケート";
 const ADMINISTRATOR_ONLY_FINDING = "administrator-only-settings";
 const REQUIRED_MACHINE_FINDING_IDS = Object.freeze([
   "canonical-public-payload",

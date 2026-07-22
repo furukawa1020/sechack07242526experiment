@@ -22,9 +22,9 @@
 
 - 研究責任者が、本人を測定しない固定模擬データ、生体データ非取得、画面上のフグ、参加者向け文言を承認済み
 - 物理フグ版から画面刺激版への変更について、所属機関で必要な研究計画変更・倫理手続きを完了済み
-- 提示開始前の同意確認・記録方法と、研究用IDによるフォーム回答・ローカル提示順の連結方法を承認済み
+- 提示開始前の同意を事後評価フォームとは別の承認済み経路で記録し、研究用IDによるフォーム回答・ローカル提示順の連結方法も承認済み
 - 指定済みGoogleフォームURL`https://forms.gle/BeShY7cY5zMjunto9`を設定済み
-- [Googleフォーム公開内容監査](FORM_AUDIT.md)の未解決所見が0件で、11問とメール非収集を二名が実回答経路で照合済み
+- [Googleフォーム公開内容監査](FORM_AUDIT.md)の未解決所見が0件で、研究用ID 1件＋11評価グリッドだけという回答項目契約とメール非収集を二名が実回答経路で照合済み
 - 本番設定の`formAudit`が`status=GO`、対象`protocolVersion`と`formUrl`の完全一致、公開payload SHA-256の一致、`twoPersonVerified=true`、未来日でない7日以内の`auditedOn`をすべて満たす
 - 本番設定の`goEvidence`が、研究計画、倫理判断、提示前同意、データ管理、3〜5件のscreenパイロット、独立二名照合を同じprotocolVersionと対象設定SHA-256へ結び付け、すべて有効期限内の`GO`である
 - `device.mode`が`screen`で`serialPath`が空、物理フグ・USBシリアル・生体センサが未接続
@@ -33,7 +33,7 @@
 - 全自動テストと本番preflightが成功
 - 6秒膨張・保持・6秒収縮を確認済み。継続接続中の再描画はサーバ時刻へ同期し、`result`/`reset`中の再読み込み・切断はSTOP、DEFLATE、`error`で再開不能、他フェーズはOperator確認まで停止する
 - 生成元Git作業ツリーがクリーンで、固定パス`config/experiment.production.json`がGit追跡済みかつHEADのバイト列と完全一致
-- `releaseVerification.appVersion`がGit HEADの`package.json.version`、`sourceTreeSha256`がproduction設定だけを除外したHEADの全追跡tree SHA-256と一致
+- `releaseVerification.appVersion`がGit HEADの`package.json.version`、`releaseVerification.sourceTreeSha256`と`screenPilot.sourceTreeSha256`がproduction設定だけを除外したHEADの全追跡tree SHA-256と一致し、`screenPilot.pilotConfigFileHash`がHEADの固定pilot設定バイトSHA-256と一致
 - manifest schema version 4の40文字`sourceCommit`が最終commitと一致し、生成時と検証時のmanifest SHA-256、source tree SHA-256、appVersion、設定SHA-256を2名で照合済み
 
 一つでも未確認なら、リリース生成または起動を失敗させたままにします。
@@ -59,7 +59,7 @@ productionサーバは`device.mode=mock`を無条件に拒否します。`screen
 }
 ```
 
-フォームURLは上記の値に固定します。ただし、URLが正しいこととフォーム内容が承認済みであることは別です。現在の公開フォームは[公開内容監査](FORM_AUDIT.md)のNO-GO所見を解消していません。フォーム所有者による修正後、URL、QR、研究説明、同意、4提示後の回答手順、11問、メールその他の個人情報を収集しない設定を2名で照合します。アプリはこのURLを自動取得・送信しません。
+フォームURLは上記の値に固定します。ただし、URLが正しいこととフォーム内容が承認済みであることは別です。現在の公開フォームは[公開内容監査](FORM_AUDIT.md)のNO-GO所見を解消していません。フォーム所有者による修正後、URL、QR、研究説明、4提示後の回答手順、研究用ID 1件＋11評価グリッドだけという回答項目契約、メールその他の個人情報を収集しない設定を2名で照合します。提示前同意はこの事後評価フォームとは別の承認済み経路を二名で確認します。アプリはこのURLを自動取得・送信しません。
 
 二名照合と研究責任者承認の完了後に限り、本番設定の`formAudit`へ`GO`、同じ`protocolVersion`と`formUrl`、監査日、`npm.cmd run audit:form`が表示した安定した`FB_PUBLIC_LOAD_DATA_` payloadのSHA-256、`twoPersonVerified=true`を転記する。本番preflightとproductionサーバ起動は、欠落、不一致、未来日、8日以上の経過、SHA-256形式不正、および既知のNO-GO公開payload SHA-256をすべて拒否する。監査コマンドは読取り専用であり、設定を自動更新したりNO-GOをGOへ変更したりしない。
 
@@ -69,7 +69,7 @@ productionサーバは`device.mode=mock`を無条件に拒否します。`screen
 
 ## 3. 封印済みリリースを生成する
 
-リリース対象をcommitした後、ビルドPCで`git status --short`が何も出力しないことを確認します。未追跡ファイルを含む変更が1件でもある場合、リリース生成は失敗します。`npm.cmd run release:source-evidence`で表示されるGit HEAD由来の`appVersion`、`criticalConfigSha256`、`sourceTreeSha256`、40文字の`sourceCommit`を二名照合票へ転記します。production設定だけを最終更新してcommitした後に同コマンドを再実行し、appVersion、対象設定SHA-256、source tree SHA-256が照合時と同一であることを確認します。
+リリース対象をcommitした後、ビルドPCで`git status --short`が何も出力しないことを確認します。未追跡ファイルを含む変更が1件でもある場合、リリース生成は失敗します。`npm.cmd run release:source-evidence`で表示されるGit HEAD由来の`appVersion`、`criticalConfigSha256`、`pilotConfigFileHash`、`sourceTreeSha256`、40文字の`sourceCommit`を二名照合票へ転記します。screen-pilot実施時の`sourceTreeSha256`と`configFileHash`が、それぞれこの`sourceTreeSha256`と`pilotConfigFileHash`に一致しなければパイロットを再実施します。production設定だけを最終更新してcommitした後に同コマンドを再実行し、appVersion、対象設定SHA-256、pilot設定バイトSHA-256、source tree SHA-256が照合時と同一であることを確認します。
 
 続けて次を実行します。
 

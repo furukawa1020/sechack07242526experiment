@@ -18,7 +18,7 @@
 | --- | --- |
 | `npm run lint` | 成功 |
 | `npm run typecheck` | 成功 |
-| `npm test` | 成功: 34ファイル、523テスト |
+| `npm test` | 成功: 34ファイル、537テスト |
 | `npm run test:e2e` | 成功: Chromium 10テスト |
 | `npm run build` | 成功 |
 | `npm run test:public-demo` | 成功: 5画面幅、25テスト、skipなし |
@@ -26,15 +26,15 @@
 | 公開デプロイスクリプト`--dry-run` | 成功: README、HTML 5件、同一originのCSS/JSだけを選択 |
 | Mockリハーサル用preflight | 成功。Mockは本番不可と警告した上で開発確認を許可 |
 | screen本番設定用preflight | 期待どおり拒否: `formAudit`と`goEvidence`の2項目がFAIL |
-| `npm run audit:form` | 期待どおりNO-GO: 公開内容ブロッカー10件 |
+| `npm run audit:form` | 期待どおりNO-GO: 公開内容ブロッカー12件 |
 | `npm run verify:form-release` | 期待どおり拒否: 公開フォーム不適合、GO証跡未完了 |
 
 最終カバレッジ:
 
-- Statements: 93.26%（2147/2302）
-- Branches: 87.73%（1467/1672）
+- Statements: 93.24%（2152/2308）
+- Branches: 87.72%（1472/1678）
 - Functions: 96.00%（385/401）
-- Lines: 94.58%（2061/2179）
+- Lines: 94.55%（2066/2185）
 
 重要領域の強制閾値:
 
@@ -64,6 +64,8 @@
 - `screen-pilot`モードがScreenPufferDevice、正式固定値・時間・4順序を保ちつつ、loopback、空フォーム、GO証跡禁止、`PILOT-001`形式、隔離ログ、非参加者表示を強制し、Mock・正式ID・本番ログ先・設定上書きを拒否すること
 - `screen-pilot`がGit worktreeルート、追跡・未追跡変更のないHEAD、固定pilot設定のGit追跡・HEADバイト完全一致を要求し、汎用`startServer`からの直接起動、dirtyな追跡ファイル、未追跡ファイル、Git statusから隠した設定バイト差分を拒否すること
 - `screen-pilot`の`sourceCommit`、`sourceTreeSha256`、`configFileHash`が起動結果へ返され、すべてのPILOT JSONLイベントへ同じ3値で記録されること
+- screen-pilotとproduction候補が、固定production設定だけを除外する同一のsource tree SHA-256定義を使用すること
+- `goEvidence.screenPilot`のsource tree SHA-256がrelease候補と異なる場合、または候補commitの固定pilot設定バイトSHA-256が承認済み`pilotConfigFileHash`と異なる場合にリリースを拒否すること
 - Mockは開発・E2E・明示的リハーサルだけに限定され、本番で拒否されること
 - 通常フェーズの再読み込みはOperator確認まで停止すること
 - result/reset中に実際に参加者ページを再読み込みすると、STOP、DEFLATE、errorとなり再開できないこと
@@ -121,6 +123,7 @@ Playwrightで次の9状態を1366×768と1920×1080の両方で生成し、計18
 
 読取り専用再監査の結果はNO-GOである。
 
+- 公開フォームタイトルが提示後評価専用の固定値ではなく、`研究説明・参加同意・アンケート`のままのためFAIL
 - 内部条件A〜Dと処理場所・伝え方の対応を28件検出
 - 「3種類」という旧説明を15件検出
 - screen版の必須説明6点はすべて0件
@@ -131,6 +134,7 @@ Playwrightで次の9状態を1366×768と1920×1080の両方で生成し、計18
 - 研究用ID以外の短文・段落自由記述を3件検出
 - 無題の回答入力項目を1件検出
 - 11評価質問は存在し、第1〜第4提示、7件法、任意回答で統一
+- 回答項目全体は許可された研究用ID 1件＋評価グリッド11件の計12件に一致せず、追加回答形式を含むためFAIL
 - メール収集、ログイン要求等は管理画面で二名確認が必要
 
 本番設定は、既知NO-GOのhash、`status=NO-GO`、`twoPersonVerified=false`を保持している。フラグだけを変更しても、preflightとリリース直前のlive照合が拒否する。
@@ -143,8 +147,8 @@ Playwrightで次の9状態を1366×768と1920×1080の両方で生成し、計18
 4. 提示開始前の同意をどこへ記録するかを承認済み手順へ固定する。
 5. 研究用IDで回答とローカル提示順を結合する方法、撤回・除外・削除、保持期間、アクセス権を承認する。
 6. 修正後フォームを未ログイン、iPhone、Androidで二名が独立に完走し、機械監査を再実行する。
-7. 研究チームの非参加者が`npm run screen-pilot`で異なる`PILOT-xxx`を用いた3〜5件を完走し、表示距離、可読性、全画面、切断時中止、所要時間を確認して、候補commit・設定SHA-256・ログSHA-256を承認済み外部管理票へ記録する。実参加者と正式研究用IDは初回GO前pilotに使用しない。
-8. `npm run release:source-evidence`のappVersion、対象設定SHA-256、source tree SHA-256を二名で照合し、承認済みhashと日付を本番設定へ記録する。
+7. 研究チームの非参加者が`npm run screen-pilot`で異なる`PILOT-xxx`を用いた3〜5件を完走し、表示距離、可読性、全画面、切断時中止、所要時間を確認して、候補commit・source tree SHA-256・pilot設定バイトSHA-256・ログSHA-256を承認済み外部管理票へ記録する。実参加者と正式研究用IDは初回GO前pilotに使用しない。
+8. `npm run release:source-evidence`のappVersion、対象設定SHA-256、pilot設定バイトSHA-256、source tree SHA-256を二名で照合し、screen-pilot実施時の2つのSHA-256と一致することを確認して本番設定へ記録する。
 9. preflight、liveフォーム照合、productionリリース生成、二名manifest照合をすべてPASSさせる。
 
 物理フグ、COMポート、USBシリアル安全試験は`R8-010-2x2-screen-v1`のGO条件ではない。将来物理フグを使用する場合だけ、別のprotocolVersion、研究責任者承認、必要な倫理手続き、物理安全試験を追加する。

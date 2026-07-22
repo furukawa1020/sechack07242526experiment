@@ -104,8 +104,8 @@ export const CONDITIONS = {
 
 - 研究スタッフのPCでローカルサーバを起動
 - 同じPCの別ウィンドウ、または外部ディスプレイで参加者画面を表示
-- 参加者は提示開始前に、承認済みの方法で研究説明を読み、参加同意を記録する
-- 同じGoogleフォームを提示後だけ送信する方式でよいか、同意だけを別フォームまたは書面で記録するかは、研究責任者が承認済み手順へ固定する
+- 参加者は提示開始前に、事後評価用Googleフォームとは別の承認済み経路で研究説明を読み、参加同意を記録する。この別経路は研究説明と同意の双方を提示前に提供・記録する
+- 事後評価用Googleフォームは固定タイトル`身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜提示後アンケート`とし、回答項目は研究用ID 1件と11評価グリッドだけに限定する
 - スタッフは同意記録そのものをアプリへ複製せず、承認済み手順で同意済みを確認する
 - スタッフ画面で研究用IDと提示順を設定
 - 正式装置モードが`screen`であり、USB実機が接続されていないことを確認
@@ -512,6 +512,8 @@ stateDiagram-v2
 
 正式productionは、Googleフォーム公開内容の`formAudit`に加え、研究計画、倫理判断、提示開始前の同意手順、データ管理計画、研究チームの非参加者による3〜5件の画面版技術パイロット、および独立二名の設定候補照合を`goEvidence`として検証する。証跡は同じprotocolVersionと、`goEvidence`自体を除く正式設定のcanonical SHA-256へ結び付ける。確認者の氏名、メールアドレス、署名画像、参加者情報は設定やmanifestへ入れず、外部管理された文書の非個人識別ID、版、SHA-256、承認日、今回の実施への適用期限だけを記録する。
 
+`goEvidence.screenPilot`は、承認管理票に加えて実施時の`sourceTreeSha256`と`pilotConfigFileHash`を必須とする。pilotのsource treeは`releaseVerification.sourceTreeSha256`と完全一致させる。両経路のtree SHA-256は、自己参照を避けるため固定production設定だけを除外し、固定pilot設定を含む他の全追跡entryを対象にする。productionリリース生成時は候補commitの`config/experiment.screen-pilot.json`のバイトSHA-256を再計算し、`pilotConfigFileHash`と一致しなければ拒否する。
+
 本番preflight、リリース生成、manifest検証、production起動のすべてが、欠落、NO-GO、期限切れ、protocolVersion不一致、設定SHA-256不一致、仮識別子、ゼロSHA、同一照合者コードをフェイルクローズで拒否する。フォーム監査だけがGOでも正式実施を許可しない。
 
 ## 10. ログ
@@ -626,7 +628,7 @@ MockDevice：
 
 ソース用`development`ランタイムも非参加者専用とし、Mock、loopback、外部通信なし、空フォーム、GO監査証跡なし、`DEV-001`形式、`data/dev-sessions`配下のログを起動時に強制する。参加者画面とOperatorへ同じ模擬表示を常設し、正式研究用IDや実参加者を扱わない。
 
-初回GO前の`screen-pilot`ランタイムは、研究チームの非参加者が同じ画面刺激を3〜5件確認する専用経路とする。`npm run screen-pilot`は毎回再ビルドし、Git worktreeルート、追跡・未追跡変更のないHEAD、固定pilot設定のGit追跡とHEADバイト完全一致を検証してから起動する。`device.mode=screen`、正式固定値・4順序・提示時間、loopback、外部通信なし、空フォーム、GO監査証跡なし、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。検証した`sourceCommit`、全追跡treeの`sourceTreeSha256`、pilot設定バイトの`configFileHash`を表示し、全PILOT JSONLイベントへ同じ3値を結び付ける。汎用`startServer`からの直接起動は拒否し、`node dist-server/screen-pilot.js`の直接実行や古い・改変済みビルドの流用は承認された運用経路としない。Mockリハーサル、公開レビュー、自動E2E、実参加者は事前技術パイロット件数へ含めない。3〜5件の終了状態とログSHA-256を外部管理票へ記録し、その管理票のSHA-256だけを`goEvidence.screenPilot`へ結び付ける。正式リリースへこの起動entryとpilot設定・ログを同梱しない。
+初回GO前の`screen-pilot`ランタイムは、研究チームの非参加者が同じ画面刺激を3〜5件確認する専用経路とする。`npm run screen-pilot`は毎回再ビルドし、Git worktreeルート、追跡・未追跡変更のないHEAD、固定pilot設定のGit追跡とHEADバイト完全一致を検証してから起動する。`device.mode=screen`、正式固定値・4順序・提示時間、loopback、外部通信なし、空フォーム、GO監査証跡なし、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。検証した`sourceCommit`、固定production設定だけを除外した全追跡treeの`sourceTreeSha256`、pilot設定バイトの`configFileHash`を表示し、全PILOT JSONLイベントへ同じ3値を結び付ける。汎用`startServer`からの直接起動は拒否し、`node dist-server/screen-pilot.js`の直接実行や古い・改変済みビルドの流用は承認された運用経路としない。Mockリハーサル、公開レビュー、自動E2E、実参加者は事前技術パイロット件数へ含めない。3〜5件の終了状態とログSHA-256を外部管理票へ記録し、その管理票のSHA-256、実施時`sourceTreeSha256`、実施時`configFileHash`をそれぞれ`goEvidence.screenPilot.contentSha256`、`sourceTreeSha256`、`pilotConfigFileHash`へ結び付ける。正式リリースへこの起動entryとpilot設定・ログを同梱しない。
 
 ScreenPufferDevice：
 

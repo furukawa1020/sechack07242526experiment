@@ -16,8 +16,10 @@
 - Googleフォーム公開payload監査へ、研究用ID欄の固定ラベル・必須設定・形式validationと、提示順・内部コード入力の不存在を追加した。
 - 初回GO前のscreenパイロット循環を解消するため、研究チームの非参加者専用`screen-pilot`経路を追加した。正式固定値・時間・順序とScreenPufferDeviceを使う一方、`PILOT-xxx`、空フォーム、loopback、隔離ログ、非参加者表示を強制し、正式リリースへ同梱しない。
 - `screen-pilot`起動を、毎回の再ビルド、cleanなGit HEAD、固定pilot設定の追跡・HEADバイト完全一致へ拘束した。起動時に`sourceCommit`、`sourceTreeSha256`、`configFileHash`を表示し、全PILOT JSONLイベントへ同じ3値を記録する。汎用サーバ起動からの迂回と既存ビルドの運用上の流用を禁止した。
+- screen-pilotとproduction候補のsource tree SHA-256定義を、固定production設定だけを除外する同一算法へ統一した。`goEvidence.screenPilot`へ実施時source tree SHA-256とpilot設定バイトSHA-256を必須化し、release候補treeとの一致および候補commit上の固定pilot設定blobとの一致を機械検証する。これは運用証跡の強化で参加者向け刺激を変更しないため、protocolVersionは維持した。
 - Operator WebSocketへ1秒challenge/nonce応答・5秒の往復leaseを追加し、silent LAN断、上り・下りのhalf-open、ブラウザ停止を検出する。確認済みleaseがなければ提示準備・開始・再開を拒否し、進行中の最後の有効lease喪失ではSTOP・DEFLATE・`OPERATOR_CONNECTION_LOST`とする。複数接続の1つが生存中は継続する。
 - Googleフォーム監査は、内部コードと伝え方だけの対応および「3つの提示」「3提示」等の旧表現も拒否するよう強化した。
+- 提示後評価フォームを同意取得経路と誤認させないため、固定タイトル候補を`身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜提示後アンケート`へ変更し、機械監査を完全一致判定へ強化した。研究説明と同意の双方は別の承認済み経路で提示開始前に提供・記録する。これは外部フォーム契約と運用安全性の整合であり、アプリ内の参加者向け刺激を変更しないためprotocolVersionは維持した。
 - これらは本番開始条件、非参加者確認、監視安全性、データ管理、技術的来歴の実装強化であり、正式参加者が見る文言、条件、表示、提示順、タイミング、固定値、画面上フグ動作は変更していないため、protocolVersionは維持した。
 
 物理フグから画面上フグへの変更は参加者が見る研究刺激の変更である。実参加者へ使用する前に、研究責任者の承認を得て、所属機関で必要とされる倫理審査・研究計画の変更手続きを完了する。

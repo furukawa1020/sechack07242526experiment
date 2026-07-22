@@ -5,7 +5,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { PublicFormAuditReport } from "../../../scripts/audit-public-form.js";
+import {
+  EXPECTED_FORM_TITLE,
+  type PublicFormAuditReport,
+} from "../../../scripts/audit-public-form.js";
 import { runCreateRelease } from "../../../scripts/create-release.js";
 import {
   assessReleaseFormVerification,
@@ -23,8 +26,6 @@ import {
 
 const PROTOCOL_VERSION = SCREEN_PROTOCOL_VERSION;
 const AUDIT_NOW = new Date("2026-07-21T12:00:00.000Z");
-const EXPECTED_TITLE =
-  "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜研究説明・参加同意・アンケート";
 const EXPECTED_FINAL_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q/viewform?usp=send_form";
 const REQUIRED_FINDINGS = [
@@ -166,7 +167,7 @@ function report(overrides: Partial<PublicFormAuditReport> = {}): PublicFormAudit
   return {
     requestedUrl: STUDY_FORM_URL,
     finalUrl: EXPECTED_FINAL_URL,
-    title: EXPECTED_TITLE,
+    title: EXPECTED_FORM_TITLE,
     contentSha256: "a".repeat(64),
     findings: [
       ...REQUIRED_FINDINGS.map((id) => ({ id, status: "pass" as const, detail: "pass" })),
@@ -208,7 +209,7 @@ function approvedFormHtml(): { readonly html: string; readonly sha256: string } 
   ];
   const payload = JSON.stringify([content, [null, items]]);
   return {
-    html: `<title>${EXPECTED_TITLE}</title><script>var FB_PUBLIC_LOAD_DATA_ = ${payload};</script>`,
+    html: `<title>${EXPECTED_FORM_TITLE}</title><script>var FB_PUBLIC_LOAD_DATA_ = ${payload};</script>`,
     sha256: createHash("sha256").update(payload, "utf8").digest("hex"),
   };
 }

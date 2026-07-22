@@ -363,8 +363,8 @@ function assertProductionReleaseSourceEvidence(
 }
 
 /** Read-only helper used before independent review to obtain the exact values
- * that must be copied into releaseVerification. It requires a clean Git HEAD
- * and the same fixed production config invariants as release creation. */
+ * that must be copied into releaseVerification and screenPilot. It requires a
+ * clean Git HEAD and the same fixed config invariants as release creation. */
 export async function inspectProductionSourceEvidence(
   rootDirectory = process.cwd(),
 ): Promise<ProductionSourceEvidenceSummary> {

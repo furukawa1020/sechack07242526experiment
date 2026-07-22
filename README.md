@@ -44,13 +44,13 @@ npm run rehearsal
 npm run screen-pilot
 ```
 
-この専用経路は毎回クライアントとサーバを再ビルドした後、Git worktreeのルート、追跡・未追跡変更のないHEAD、Gitで追跡された固定パス`config/experiment.screen-pilot.json`、そのファイルとHEADの完全なバイト一致を起動前に検証します。検証済みの`sourceCommit`、`sourceTreeSha256`、`configFileHash`を標準出力へ表示し、すべての`PILOT-xxx` JSONLイベントにも同じ3値を記録します。
+この専用経路は毎回クライアントとサーバを再ビルドした後、Git worktreeのルート、追跡・未追跡変更のないHEAD、Gitで追跡された固定パス`config/experiment.screen-pilot.json`、そのファイルとHEADの完全なバイト一致を起動前に検証します。検証済みの`sourceCommit`、固定production設定だけを除外した`sourceTreeSha256`、pilot設定バイトの`configFileHash`を標準出力へ表示し、すべての`PILOT-xxx` JSONLイベントにも同じ3値を記録します。
 
-正式固定値・4順序・提示時間と`ScreenPufferDevice`を保ちながら、loopback、空フォーム、`PILOT-001`形式、`data/screen-pilot-sessions/`の隔離ログ、非参加者表示を強制します。異なる`PILOT-xxx`で3〜5件を完走し、表示された3値・完走状態・ログSHA-256を承認済み外部管理票へ記録します。承認された操作経路は`npm run screen-pilot`だけです。`node dist-server/screen-pilot.js`を直接実行したり、古い・改変された`dist-server/`を流用したりしないでください。研究参加者、正式`SH26-xxx`、Googleフォーム回答には使用できず、正式リリースにもこの起動経路を同梱しません。
+正式固定値・4順序・提示時間と`ScreenPufferDevice`を保ちながら、loopback、空フォーム、`PILOT-001`形式、`data/screen-pilot-sessions/`の隔離ログ、非参加者表示を強制します。異なる`PILOT-xxx`で3〜5件を完走し、表示された3値・完走状態・ログSHA-256を承認済み外部管理票へ記録します。実施時のsource tree SHA-256とpilot設定バイトSHA-256は`goEvidence.screenPilot`へ転記し、production候補と機械照合されます。承認された操作経路は`npm run screen-pilot`だけです。`node dist-server/screen-pilot.js`を直接実行したり、古い・改変された`dist-server/`を流用したりしないでください。研究参加者、正式`SH26-xxx`、Googleフォーム回答には使用できず、正式リリースにもこの起動経路を同梱しません。
 
 実参加者を扱う正式な実機なし`screen`モードは、ソースツリーや単独の`dist-server/`から直接起動しません。承認済み設定から生成した封印済みproductionリリースだけを使用します。開発用Mockは`npm run dev`、明示的な模擬リハーサルは`npm run rehearsal`、非参加者の画面版技術確認だけは`npm run screen-pilot`を使用します。ビルド済み`dist-server/index.js`は封印起動関数だけを公開し、汎用`startServer`を公開しません。`npm run start`を含むproduction CLIは、manifestのない場所では起動を拒否します。
 
-本番preflightは、プロトコル`R8-010-2x2-screen-v1`、`device.mode=screen`、空のシリアルパス、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内のフォーム監査、研究計画・倫理判断・提示前同意・データ管理・3〜5件のscreenパイロット・独立二名照合のGO証跡、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。productionリリース生成は、固定production設定のGit追跡・HEADバイト完全一致、Git HEADの`package.json.version`、production設定だけを除外した全追跡tree SHA-256をGO証跡と照合し、manifest schema version 4でsource commit、source tree、appVersion、対象設定、GO証跡を相互拘束します。production起動はmanifest、設定ファイルのバイト列・意味内容hash、フォーム監査ゲート、GO証跡ゲートを再検証し、その同じ設定スナップショットとappVersionで表示・監査記録して起動します。検証後の設定再読込、設定差し替え、環境変数による設定・ログ先上書き、`mock`または`serial`設定を拒否します。
+本番preflightは、プロトコル`R8-010-2x2-screen-v1`、`device.mode=screen`、空のシリアルパス、`allowMockInProduction=false`、指定Google Forms URLとの完全一致、7日以内のフォーム監査、研究計画・倫理判断・提示前同意・データ管理・3〜5件のscreenパイロット・独立二名照合のGO証跡、`allowExternalRuntimeRequests=false`を満たさない場合は終了コード1で失敗します。productionリリース生成は、固定production設定のGit追跡・HEADバイト完全一致、Git HEADの`package.json.version`、production設定だけを除外した全追跡tree SHA-256、HEADの固定pilot設定バイトSHA-256をGO証跡と照合し、manifest schema version 4でsource commit、source tree、appVersion、対象設定、GO証跡を相互拘束します。production起動はmanifest、設定ファイルのバイト列・意味内容hash、フォーム監査ゲート、GO証跡ゲートを再検証し、その同じ設定スナップショットとappVersionで表示・監査記録して起動します。検証後の設定再読込、設定差し替え、環境変数による設定・ログ先上書き、`mock`または`serial`設定を拒否します。
 
 会場へ配置する本番成果物は、ソースディレクトリをそのままコピーせず、次のコマンドで生成します。
 
@@ -137,7 +137,7 @@ npm.cmd run deploy:prepare:rehearsal
 
 本番前に`/device-test`で、画面上のフグが`result`開始から6秒で膨張し、結果終了まで保持され、`reset`開始から6秒で収縮することと、STOP後に収縮することを確認してください。描画は継続接続中のサーバ時刻に同期します。`result`または`reset`中の再読み込みは刺激欠損としてセッションを安全停止し、再開しません。他フェーズの再読み込みでは進行を止め、再接続後もOperatorの明示確認まで再開しません。CとDの動作は完全に同一でなければなりません。詳細は[運用手順](docs/RUNBOOK.md)と[装置境界仕様](docs/DEVICE_PROTOCOL.md)を参照してください。
 
-新しい本番設定は`config/experiment.production.example.json`から作成します。例には提供済みフォームURL`https://forms.gle/BeShY7cY5zMjunto9`が反映されています。意図的な本番ブロッカーは`formAudit.status=NO-GO`と`goEvidence.status=NO-GO`です。[Googleフォーム公開内容監査](docs/FORM_AUDIT.md)の所見を0件にし、[本番GO証跡手順](docs/GO_EVIDENCE.md)に従って人による承認と二名照合を完了するまで、本番ゲートを通過しません。
+新しい本番設定は`config/experiment.production.example.json`から作成します。例には提供済みフォームURL`https://forms.gle/BeShY7cY5zMjunto9`が反映されています。意図的な本番ブロッカーは`formAudit.status=NO-GO`と`goEvidence.status=NO-GO`です。事後評価フォームの回答項目は、厳密な研究用ID欄1件と承認候補構造の11評価グリッドだけに限定し、追加の選択式・チェックボックス・属性項目等も機械的に拒否します。提示前同意は別の承認済み経路で提示前に記録します。[Googleフォーム公開内容監査](docs/FORM_AUDIT.md)の所見を0件にし、[本番GO証跡手順](docs/GO_EVIDENCE.md)に従って人による承認と二名照合を完了するまで、本番ゲートを通過しません。
 
 `serial`による物理フグはこのプロトコルの対象外です。物理フグへ戻す場合は、研究刺激の変更として研究責任者の承認と所属機関で必要な倫理審査・変更手続きを完了し、別の`protocolVersion`で実施してください。
 

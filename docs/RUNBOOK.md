@@ -21,16 +21,17 @@
 
 - [ ] 研究責任者が、固定模擬データ・本人を測定しないこと・生体データ非取得・画面上のフグを用いる`R8-010-2x2-screen-v1`を承認した
 - [ ] 物理フグ版から画面版への変更について、所属機関で必要な研究計画変更・倫理手続きを完了した
-- [ ] 提示開始前に同意を確認・記録する方法を承認済み手順へ固定した
+- [ ] 提示開始前に、事後評価フォームとは別の承認済み経路で同意を確認・記録する方法を固定した
 - [ ] [Googleフォーム公開内容監査](FORM_AUDIT.md)の所見が0件で、二名照合と研究責任者承認を記録した
-- [ ] フォームに内部コードA/B/C/D、旧3提示説明、提示直後回答の説明、無題入力、必須の年齢自由記述、個人情報収集がない
+- [ ] フォームに内部コードA/B/C/D、旧3提示説明、提示直後回答の説明、無題入力、年齢・属性・同意等の追加回答項目、個人情報収集がない
 - [ ] フォームの研究用ID欄は厳密なラベル「研究用ID」の必須短文入力1件で、`^SH26-[0-9]{3}$`の完全一致validationがある
+- [ ] フォームの回答項目は研究用ID欄1件と任意回答の7件法評価グリッド11件だけで、追加の選択式・チェックボックス・属性項目等がない
 - [ ] フォームの研究用IDと、ローカルログの研究用IDで回答と提示順を連結する手順を承認した。フォームへ提示順、順序コード、内部コードを入力させない
 - [ ] `protocolVersion`、`UI_COPY.md`、フォーム説明、研究計画が一言一句整合している
 - [ ] `npm run lint`、`npm run typecheck`、`npm test`、`npm run test:e2e`、`npm run build`が成功した
-- [ ] `npm run release:source-evidence`のappVersion・対象設定SHA-256・source tree SHA-256を二名が独立に照合し、productionリリースを固定設定がHEADと一致するクリーンなGit commitから生成した
+- [ ] `npm run release:source-evidence`のappVersion・対象設定SHA-256・pilot設定バイトSHA-256・source tree SHA-256を二名が独立に照合し、productionリリースを固定設定がHEADと一致するクリーンなGit commitから生成した
 - [ ] 1366×768と1920×1080で全フェーズとC/Dの同一表示を確認し、6秒膨張・保持・6秒収縮、継続接続中のサーバ時刻同期、`result`/`reset`中の再読み込み時の安全停止・再開不能、他フェーズのOperator確認待ちを確認した
-- [ ] 研究チームの非参加者が専用`npm run screen-pilot`経路で、異なる`PILOT-xxx`を用いた技術パイロット3〜5件を完走し、候補commit・設定SHA-256・ログSHA-256を外部管理票へ記録した
+- [ ] 研究チームの非参加者が専用`npm run screen-pilot`経路で、異なる`PILOT-xxx`を用いた技術パイロット3〜5件を完走し、候補commit・source tree SHA-256・pilot設定バイトSHA-256・ログSHA-256を外部管理票へ記録した
 - [ ] `goEvidence`が研究計画、倫理判断、提示前同意、データ管理、3〜5件のscreenパイロット、独立二名照合を同じ対象設定SHA-256へ結び付け、全項目GOである
 - [ ] iPhoneとAndroidの未ログイン経路でGoogleフォームを完走した
 - [ ] 実ログ保存先をGit・クラウド同期・一般バックアップの対象外にした
@@ -43,8 +44,8 @@
 1. Git worktreeのルートで`git status --short --untracked-files=all`が空であることを確認し、`npm run screen-pilot`を起動する。このコマンドは毎回再ビルドし、worktreeルート、cleanなHEAD、固定パス`config/experiment.screen-pilot.json`のGit追跡とHEADバイト完全一致を起動前に再検証する。`node dist-server/screen-pilot.js`の直接実行や、既存・コピー済み`dist-server/`の流用は禁止する。`127.0.0.1:4174`で使用する。
 2. Operatorの「非参加者用の事前確認」「画面版・PILOT/テスト」、参加者側の「非参加者用の事前確認」、空フォーム、`PILOT-001`形式、`ScreenPufferDevice`を確認する。
 3. 異なる`PILOT-xxx`で3〜5件を完走し、正式時間、4順序、6秒膨張・保持・6秒収縮、STOP/DEFLATEを確認する。氏名、正式`SH26-xxx`、Googleフォーム、研究参加者を使用しない。
-4. 起動時に表示された`sourceCommit`、`sourceTreeSha256`、`configFileHash`と、各対象JSONLイベントの同名3フィールドが完全一致することを確認する。外部の承認済み管理票へこの3値、完走ID、終了状態、対象JSONLのSHA-256、確認日を記録し、その管理票のSHA-256を`goEvidence.screenPilot`へ使用する。JSONLはGitやproductionリリースへ含めない。
-5. 固定値、文言、時間、順序、ScreenPufferDevice動作またはprotocolVersionを変更した場合は旧記録を破棄し、3〜5件を再実施する。
+4. 起動時に表示された`sourceCommit`、`sourceTreeSha256`、`configFileHash`と、各対象JSONLイベントの同名3フィールドが完全一致することを確認する。外部の承認済み管理票へこの3値、完走ID、終了状態、対象JSONLのSHA-256、確認日を記録する。管理票SHA-256を`screenPilot.contentSha256`、実施時`sourceTreeSha256`を同名欄、実施時`configFileHash`を`pilotConfigFileHash`へ転記する。JSONLはGitやproductionリリースへ含めない。
+5. `release:source-evidence`のsource tree SHA-256とpilot設定バイトSHA-256が上記2値に一致することを確認する。固定production設定だけはtree計算から除外されるが、固定値、文言、時間、順序、ScreenPufferDevice動作、protocolVersion、pilot設定、コード、文書またはlockfileを変更した場合は旧記録を破棄し、3〜5件を再実施する。
 
 この経路は非参加者技術確認専用で、production、同意取得、正式データ収集の代替ではない。実参加者による追加パイロットが研究計画で必要な場合は、初回production GO後に承認済み手順で実施する。
 

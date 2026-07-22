@@ -13,6 +13,7 @@ import {
   inspectProductionSourceEvidence,
   parseCreateReleaseArguments,
 } from "../../../scripts/create-release.js";
+import { EXPECTED_FORM_TITLE } from "../../../scripts/audit-public-form.js";
 import {
   createReleaseManifest,
   isCredentialFreeSourceRepository,
@@ -51,8 +52,6 @@ const execFileAsync = promisify(execFile);
 const SYNTHETIC_SOURCE_COMMIT = "1".repeat(40);
 const SYNTHETIC_SOURCE_REPOSITORY = "https://github.com/example/sechack-release-fixture.git";
 const STUDY_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
-const EXPECTED_FORM_TITLE =
-  "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜研究説明・参加同意・アンケート";
 const EXPECTED_FORM_FINAL_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q/viewform?usp=send_form";
 const TODAY_IN_JAPAN = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);

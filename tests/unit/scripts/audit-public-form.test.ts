@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodePublicFormPayload,
+  EXPECTED_FORM_TITLE,
   inspectPublicFormPayload,
   parsePublicFormAuditArguments,
   runPublicFormAudit,
@@ -9,7 +10,7 @@ import {
 
 const FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
 const CANONICAL_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q/viewform?usp=send_form";
-const FORM_TITLE = "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜研究説明・参加同意・アンケート";
+const FORM_TITLE = EXPECTED_FORM_TITLE;
 const SCALE = [
   "1全くそう思わない",
   "2",
@@ -264,6 +265,18 @@ describe("public Google Form audit", () => {
       .toBe("pass");
     expect(report.findings.find((item) => item.id === "exact-response-item-contract")?.status)
       .toBe("pass");
+  });
+
+  it("requires the exact neutral post-presentation survey title", () => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。").replace(
+        FORM_TITLE,
+        "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜研究説明・参加同意・アンケート",
+      ),
+    );
+    expect(report.findings.find((item) => item.id === "study-title")?.status).toBe("fail");
   });
 
   it.each([

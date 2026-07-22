@@ -5,7 +5,8 @@ import { SCREEN_PRODUCTION_RESEARCH_ID_PATTERN } from "../src/shared/production-
 
 const DEFAULT_FORM_URL = "https://forms.gle/BeShY7cY5zMjunto9";
 const EXPECTED_FORM_ID = "1FAIpQLSea5PhAbtkSS_Pg-xL-O7scpRddMn5ReoKzgAt7lSE7GTlA9Q";
-const EXPECTED_STUDY_TITLE = "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価";
+export const EXPECTED_FORM_TITLE =
+  "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜提示後アンケート";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const EVALUATION_QUESTION_COUNT = 11;
@@ -499,10 +500,10 @@ export function inspectPublicFormPayload(
       ),
       finding(
         "study-title",
-        title.startsWith(EXPECTED_STUDY_TITLE) ? "pass" : "fail",
-        title.startsWith(EXPECTED_STUDY_TITLE)
-          ? "研究タイトルを確認しました。"
-          : "研究タイトルが想定値と一致しません。",
+        title === EXPECTED_FORM_TITLE ? "pass" : "fail",
+        title === EXPECTED_FORM_TITLE
+          ? "提示後アンケート専用の固定タイトルを確認しました。"
+          : `フォームタイトルが固定値「${EXPECTED_FORM_TITLE}」と完全一致しません。`,
       ),
       finding(
         "internal-condition-mapping",
