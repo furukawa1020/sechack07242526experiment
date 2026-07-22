@@ -34,6 +34,7 @@ const SCREEN_PROTOCOL_COPY = [
 
 interface FormFixtureOptions {
   readonly evaluationCount?: number;
+  readonly extraResponseType?: number;
   readonly forbiddenInternalCodeChoices?: boolean;
   readonly forbiddenSequenceInput?: boolean;
   readonly malformedEvaluation?: boolean;
@@ -138,6 +139,15 @@ function formHtml(content: string, options: FormFixtureOptions = {}): string {
     ...(options.personalDataNegationChoice === true
       ? [[42_110, "氏名やメールアドレスは収集しません", null, 2, [[42_111, [["確認しました"]], 1]]]]
       : []),
+    ...(options.extraResponseType === undefined
+      ? []
+      : [[
+          42_200,
+          "追加の回答項目",
+          null,
+          options.extraResponseType,
+          [[42_201, [["選択肢1"], ["選択肢2"]], 0]],
+        ]]),
     ...Array.from(
       { length: evaluationCount },
       (_, index) => evaluationQuestion(index, options.malformedEvaluation === true),
@@ -251,6 +261,8 @@ describe("public Google Form audit", () => {
     expect(report.findings.find((item) => item.id === "research-id-format-validation")?.status)
       .toBe("pass");
     expect(report.findings.find((item) => item.id === "forbidden-sequence-input")?.status)
+      .toBe("pass");
+    expect(report.findings.find((item) => item.id === "exact-response-item-contract")?.status)
       .toBe("pass");
   });
 
@@ -386,6 +398,54 @@ describe("public Google Form audit", () => {
     expect(consentChoice.findings.find(
       (item) => item.id === "forbidden-personal-data-input",
     )?.status).toBe("pass");
+    expect(consentChoice.findings.find(
+      (item) => item.id === "exact-response-item-contract",
+    )?.status).toBe("fail");
+  });
+
+  it.each([
+    ["multiple choice", 2],
+    ["dropdown", 3],
+    ["checkbox", 4],
+    ["linear scale", 5],
+    ["date", 9],
+    ["time", 10],
+    ["duration", 11],
+    ["unknown Google response type", 12],
+    ["file upload", 13],
+    ["unknown future response type", 99],
+  ] as const)(
+    "rejects an extra %s response item (type %i) even when it contains no PII keyword",
+    (_label, extraResponseType) => {
+      const report = inspectPublicFormPayload(
+        FORM_URL,
+        CANONICAL_FORM_URL,
+        formHtml("4つの提示をすべて体験した後、全11問へ回答してください。", {
+          extraResponseType,
+        }),
+      );
+      const contract = report.findings.find(
+        (item) => item.id === "exact-response-item-contract",
+      );
+      expect(contract?.status).toBe("fail");
+      expect(contract?.detail).toContain("許可外または構造不適合=1件");
+      expect(report.findings.find(
+        (item) => item.id === "forbidden-personal-data-input",
+      )?.status).toBe("pass");
+    },
+  );
+
+  it("rejects a consent checkbox in the post-presentation evaluation form", () => {
+    const report = inspectPublicFormPayload(
+      FORM_URL,
+      CANONICAL_FORM_URL,
+      formHtml("4つの提示をすべて体験した後、全11問へ回答してください。", {
+        extraResponseType: 4,
+      }).replace("追加の回答項目", "研究参加に同意します"),
+    );
+    expect(report.findings.find(
+      (item) => item.id === "exact-response-item-contract",
+    )?.status).toBe("fail");
   });
 
   it("fails when the fixed-data and screen-puffer protocol explanation is incomplete", () => {

@@ -105,6 +105,8 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
       screenPilot: {
         ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
         completedSessions: 3,
+        sourceTreeSha256: fixtureDigest("source-tree"),
+        pilotConfigFileHash: fixtureDigest("pilot-config"),
       },
       releaseVerification: {
         status: "GO",

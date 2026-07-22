@@ -38,6 +38,7 @@ const REQUIRED_FINDINGS = [
   "answer-timing",
   "eleven-questions",
   "evaluation-structure",
+  "exact-response-item-contract",
   "research-id-field",
   "research-id-required",
   "research-id-format-validation",
@@ -123,6 +124,8 @@ function config(contentSha256 = "a".repeat(64)): ExperimentConfig {
       screenPilot: {
         ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
         completedSessions: 3,
+        sourceTreeSha256: fixtureDigest("source-tree"),
+        pilotConfigFileHash: fixtureDigest("pilot-config"),
       },
       releaseVerification: {
         status: "GO",

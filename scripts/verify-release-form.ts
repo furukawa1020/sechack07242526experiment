@@ -33,6 +33,7 @@ const REQUIRED_MACHINE_FINDING_IDS = Object.freeze([
   "answer-timing",
   "eleven-questions",
   "evaluation-structure",
+  "exact-response-item-contract",
   "research-id-field",
   "research-id-required",
   "research-id-format-validation",

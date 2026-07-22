@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -7,12 +6,15 @@ import {
   loadExperimentConfig,
   type LoadedExperimentConfig,
 } from "../shared/config-loader.js";
+import {
+  hashProductionSourceTreeListing,
+  SCREEN_PILOT_CONFIG_PATH,
+} from "./production-source-tree.js";
 
-export const SCREEN_PILOT_CONFIG_PATH = "config/experiment.screen-pilot.json";
+export { SCREEN_PILOT_CONFIG_PATH } from "./production-source-tree.js";
 
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
-const SCREEN_PILOT_SOURCE_TREE_HASH_DOMAIN = "sechack-screen-pilot-source-tree-v1\0";
 
 interface GitCommandResult {
   readonly exitCode: number;
@@ -113,28 +115,7 @@ async function hashTrackedTree(rootDirectory: string, sourceCommit: string): Pro
   if (tree.exitCode !== 0) {
     throw new Error("The screen-pilot Git source tree could not be enumerated.");
   }
-  const hash = createHash("sha256").update(SCREEN_PILOT_SOURCE_TREE_HASH_DOMAIN, "utf8");
-  let cursor = 0;
-  let entries = 0;
-  while (cursor < tree.stdout.byteLength) {
-    const terminator = tree.stdout.indexOf(0, cursor);
-    if (terminator < 0) {
-      throw new Error("Git returned a malformed screen-pilot source tree.");
-    }
-    const record = tree.stdout.subarray(cursor, terminator);
-    const separator = record.indexOf(0x09);
-    if (separator < 1 || separator === record.byteLength - 1) {
-      throw new Error("Git returned a malformed screen-pilot source tree entry.");
-    }
-    const frame = Buffer.allocUnsafe(4);
-    frame.writeUInt32BE(record.byteLength);
-    hash.update(frame).update(record);
-    entries += 1;
-    cursor = terminator + 1;
-  }
-  const countFrame = Buffer.allocUnsafe(4);
-  countFrame.writeUInt32BE(entries);
-  return hash.update(countFrame).digest("hex");
+  return hashProductionSourceTreeListing(tree.stdout);
 }
 
 /**

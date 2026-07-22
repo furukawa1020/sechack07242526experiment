@@ -83,7 +83,9 @@
       "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "approvedOn": null,
       "applicableUntil": null,
-      "completedSessions": null
+      "completedSessions": null,
+      "sourceTreeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "pilotConfigFileHash": "0000000000000000000000000000000000000000000000000000000000000000"
     },
     "releaseVerification": {
       "status": "NO-GO",

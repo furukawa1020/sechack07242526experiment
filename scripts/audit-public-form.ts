@@ -9,6 +9,7 @@ const EXPECTED_STUDY_TITLE = "身体状態の外化デバイスがユーザの�
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const EVALUATION_QUESTION_COUNT = 11;
+const EXPECTED_RESPONSE_ITEM_COUNT = EVALUATION_QUESTION_COUNT + 1;
 const RESEARCH_ID_LABEL = "研究用ID";
 const SHORT_ANSWER_ITEM_TYPE = 0;
 const PARAGRAPH_ANSWER_ITEM_TYPE = 1;
@@ -317,7 +318,8 @@ function entryScale(entry: readonly unknown[]): readonly (string | null)[] | nul
 }
 
 function evaluationQuestionStructureIsValid(item: readonly unknown[]): boolean {
-  if (item[3] !== 7 || stringValue(item[1]) === null) return false;
+  const title = stringValue(item[1]);
+  if (item[3] !== 7 || title === null || normalizedVisibleText(title).length === 0) return false;
   const entries = arrayValue(item[4]);
   if (entries === null || entries.length !== EVALUATION_ROW_LABELS.length) return false;
   return entries.every((rawEntry, index) => {
@@ -407,8 +409,11 @@ export function inspectPublicFormPayload(
   );
   const screenProtocolCopyComplete = screenProtocolCopyMatches.every((count) => count > 0);
   const evaluationQuestions = formItems?.filter((item) => item[3] === 7) ?? [];
+  const normalizedEvaluationTitles = evaluationQuestions.map((item) =>
+    normalizedVisibleText(stringValue(item[1]) ?? ""));
   const evaluationStructureValid = evaluationQuestions.length === EVALUATION_QUESTION_COUNT
-    && evaluationQuestions.every(evaluationQuestionStructureIsValid);
+    && evaluationQuestions.every(evaluationQuestionStructureIsValid)
+    && new Set(normalizedEvaluationTitles).size === EVALUATION_QUESTION_COUNT;
   const responseItems = formItems?.filter(isResponseItem) ?? [];
   const researchIdItems = responseItems.filter((item) => {
     const label = stringValue(item[1]);
@@ -427,6 +432,28 @@ export function inspectPublicFormPayload(
   const researchIdFormatValid = researchIdItem !== undefined
     && researchIdStructureIdentifiable
     && researchIdFormatValidationIsValid(researchIdItem);
+  const allowedResponseItems = new Set<readonly unknown[]>();
+  if (
+    researchIdItem !== undefined
+    && researchIdFieldValid
+    && researchIdRequired
+    && researchIdFormatValid
+  ) {
+    allowedResponseItems.add(researchIdItem);
+  }
+  if (evaluationStructureValid) {
+    for (const item of evaluationQuestions) allowedResponseItems.add(item);
+  }
+  const unexpectedResponseItems = responseItems.filter(
+    (item) => !allowedResponseItems.has(item),
+  );
+  const unexpectedResponseTypes = [...new Set(
+    unexpectedResponseItems.map((item) => itemType(item) ?? -1),
+  )].sort((left, right) => left - right);
+  const exactResponseItemContractValid = formItems !== null
+    && responseItems.length === EXPECTED_RESPONSE_ITEM_COUNT
+    && allowedResponseItems.size === EXPECTED_RESPONSE_ITEM_COUNT
+    && unexpectedResponseItems.length === 0;
   const forbiddenSequenceInputItems = formItems?.filter(itemContainsForbiddenSequenceInput) ?? [];
   const forbiddenSequenceInputValid = formItems !== null
     && forbiddenSequenceInputItems.length === 0;
@@ -525,6 +552,15 @@ export function inspectPublicFormPayload(
         evaluationStructureValid
           ? "11評価質問は第1〜第4提示、7件法、任意回答で統一されています。"
           : "11評価質問の提示行、7件法、任意回答設定が承認候補構造と一致しません。",
+      ),
+      finding(
+        "exact-response-item-contract",
+        exactResponseItemContractValid ? "pass" : "fail",
+        exactResponseItemContractValid
+          ? "回答項目は、厳密な研究用ID欄1件と承認候補構造の評価グリッド11件だけです。"
+          : formItems === null
+            ? "公開payloadを解析できないため、回答項目の厳密な許可リストを確認できません。"
+            : `回答項目は${String(responseItems.length)}件です。許可されるのは厳密な研究用ID欄1件と承認候補構造の評価グリッド11件だけです。許可外または構造不適合=${String(unexpectedResponseItems.length)}件、type=${unexpectedResponseTypes.join("/") || "なし"}。`,
       ),
       finding(
         "research-id-field",

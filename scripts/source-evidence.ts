@@ -10,6 +10,7 @@ export async function runSourceEvidence(
     const evidence = await inspectProductionSourceEvidence();
     writeLine(`appVersion=${evidence.appVersion}`);
     writeLine(`criticalConfigSha256=${evidence.criticalConfigSha256}`);
+    writeLine(`pilotConfigFileHash=${evidence.pilotConfigFileHash}`);
     writeLine(`sourceCommit=${evidence.sourceCommit}`);
     writeLine(`sourceTreeSha256=${evidence.sourceTreeSha256}`);
     return 0;

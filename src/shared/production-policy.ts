@@ -278,6 +278,12 @@ export function assessProductionGoEvidence(
   if (evidence.screenPilot.completedSessions === null) {
     issues.push("screenPilot:completed-sessions-missing");
   }
+  if (isPlaceholderDigest(evidence.screenPilot.sourceTreeSha256)) {
+    issues.push("screenPilot:source-tree-sha256-unapproved");
+  }
+  if (isPlaceholderDigest(evidence.screenPilot.pilotConfigFileHash)) {
+    issues.push("screenPilot:pilot-config-file-hash-unapproved");
+  }
 
   const releaseVerification = evidence.releaseVerification;
   if (releaseVerification.status !== "GO") {
@@ -291,6 +297,9 @@ export function assessProductionGoEvidence(
   }
   if (isPlaceholderDigest(releaseVerification.sourceTreeSha256)) {
     issues.push("releaseVerification:source-tree-sha256-unapproved");
+  }
+  if (evidence.screenPilot.sourceTreeSha256 !== releaseVerification.sourceTreeSha256) {
+    issues.push("screenPilot:source-tree-sha256-mismatch");
   }
   if (
     criticalConfigSha256 === undefined

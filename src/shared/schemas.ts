@@ -171,6 +171,8 @@ export const ApprovalEvidenceSchema = z.object({
 
 export const ScreenPilotEvidenceSchema = ApprovalEvidenceSchema.extend({
   completedSessions: z.number().int().min(3).max(5).nullable(),
+  sourceTreeSha256: sha256Schema,
+  pilotConfigFileHash: sha256Schema,
 }).strict();
 
 export const ReleaseReviewSchema = z.object({

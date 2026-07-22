@@ -188,6 +188,8 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
       screenPilot: {
         ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
         completedSessions: 3,
+        sourceTreeSha256: fixtureDigest("source-tree"),
+        pilotConfigFileHash: fixtureDigest("pilot-config"),
       },
       releaseVerification: {
         status: "GO",
@@ -325,6 +327,11 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
   );
   await writeRelative(
     root,
+    "config/experiment.screen-pilot.json",
+    `${JSON.stringify({ fixture: "screen-pilot", protocolVersion: SCREEN_PROTOCOL_VERSION })}\n`,
+  );
+  await writeRelative(
+    root,
     "config/site-mock-rehearsal.json",
     JSON.stringify(mockRehearsalConfigSource(overrides)),
   );
@@ -410,6 +417,9 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
   await runGit(root, ["commit", "--quiet", "-m", "Create release fixture"]);
   const evidenceCommit = await runGit(root, ["rev-parse", "HEAD"]);
   const sourceTreeSha256 = await hashTrackedSourceTreeAtCommit(root, evidenceCommit);
+  const pilotConfigFileHash = createHash("sha256").update(
+    await readFile(join(root, "config", "experiment.screen-pilot.json")),
+  ).digest("hex");
   const productionConfigPath = join(root, "config", "experiment.production.json");
   const productionConfig = JSON.parse(
     await readFile(productionConfigPath, "utf8"),
@@ -419,6 +429,11 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
     const releaseVerification = (goEvidence as Record<string, unknown>)["releaseVerification"];
     if (releaseVerification !== null && typeof releaseVerification === "object") {
       (releaseVerification as Record<string, unknown>)["sourceTreeSha256"] = sourceTreeSha256;
+    }
+    const screenPilot = (goEvidence as Record<string, unknown>)["screenPilot"];
+    if (screenPilot !== null && typeof screenPilot === "object") {
+      (screenPilot as Record<string, unknown>)["sourceTreeSha256"] = sourceTreeSha256;
+      (screenPilot as Record<string, unknown>)["pilotConfigFileHash"] = pilotConfigFileHash;
     }
     await writeFile(productionConfigPath, JSON.stringify(productionConfig), "utf8");
     await runGit(root, ["add", "--", "config/experiment.production.json"]);
@@ -777,6 +792,7 @@ describe("release creation", () => {
     expect(summary).toEqual({
       appVersion: "9.8.7",
       criticalConfigSha256: hashProductionCriticalConfig(config),
+      pilotConfigFileHash: config.goEvidence?.screenPilot.pilotConfigFileHash,
       sourceCommit: await runGit(root, ["rev-parse", "HEAD"]),
       sourceTreeSha256: config.goEvidence?.releaseVerification.sourceTreeSha256,
     });
@@ -912,6 +928,10 @@ describe("release creation", () => {
       (config["goEvidence"] as Record<string, unknown>)["releaseVerification"]
     ) as Record<string, unknown>;
     releaseVerification["sourceTreeSha256"] = sourceTreeSha256;
+    const screenPilot = (
+      (config["goEvidence"] as Record<string, unknown>)["screenPilot"]
+    ) as Record<string, unknown>;
+    screenPilot["sourceTreeSha256"] = sourceTreeSha256;
     await writeFile(configPath, JSON.stringify(config), "utf8");
     await runGit(root, ["add", "--", "config/experiment.production.json"]);
     await runGit(root, ["commit", "--quiet", "-m", "Refresh source tree only"]);

@@ -39,9 +39,14 @@ import {
   SCREEN_PROTOCOL_VERSION,
   type ExperimentConfig,
 } from "../src/shared/schemas.js";
+import {
+  hashProductionSourceTreeListing,
+  PRODUCTION_CONFIG_PATH,
+  SCREEN_PILOT_CONFIG_PATH,
+} from "../src/server/production-source-tree.js";
 import { acquireBuildLock } from "./build-lock.mjs";
 
-const DEFAULT_CONFIG_PATH = "config/experiment.production.json";
+const DEFAULT_CONFIG_PATH = PRODUCTION_CONFIG_PATH;
 const DEFAULT_MOCK_REHEARSAL_CONFIG_PATH = "config/experiment.mock-rehearsal.json";
 const MAX_GIT_OUTPUT_BYTES = 1024 * 1024;
 
@@ -51,9 +56,6 @@ interface SourceProvenance {
   readonly sourceCommit: string;
   readonly sourceRepository?: string;
 }
-
-const SOURCE_TREE_HASH_DOMAIN = "sechack-production-source-tree-v1\0";
-const PRODUCTION_CONFIG_PATH_BYTES = Buffer.from(DEFAULT_CONFIG_PATH, "utf8");
 
 interface GitCommandResult {
   readonly exitCode: number;
@@ -265,31 +267,7 @@ export async function hashTrackedSourceTreeAtCommit(
     throw new Error("The tracked Git source tree could not be enumerated.");
   }
 
-  const hash = createHash("sha256").update(SOURCE_TREE_HASH_DOMAIN, "utf8");
-  let cursor = 0;
-  let includedEntries = 0;
-  while (cursor < tree.stdout.byteLength) {
-    const terminator = tree.stdout.indexOf(0, cursor);
-    if (terminator < 0) {
-      throw new Error("Git returned a malformed tracked source tree.");
-    }
-    const record = tree.stdout.subarray(cursor, terminator);
-    const pathSeparator = record.indexOf(0x09);
-    if (pathSeparator < 1 || pathSeparator === record.byteLength - 1) {
-      throw new Error("Git returned a malformed tracked source tree entry.");
-    }
-    const path = record.subarray(pathSeparator + 1);
-    if (!path.equals(PRODUCTION_CONFIG_PATH_BYTES)) {
-      const frame = Buffer.allocUnsafe(4);
-      frame.writeUInt32BE(record.byteLength);
-      hash.update(frame).update(record);
-      includedEntries += 1;
-    }
-    cursor = terminator + 1;
-  }
-  const countFrame = Buffer.allocUnsafe(4);
-  countFrame.writeUInt32BE(includedEntries);
-  return hash.update(countFrame).digest("hex");
+  return hashProductionSourceTreeListing(tree.stdout);
 }
 
 interface TrackedPackage {
@@ -300,8 +278,26 @@ interface TrackedPackage {
 export interface ProductionSourceEvidenceSummary {
   readonly appVersion: string;
   readonly criticalConfigSha256: string;
+  readonly pilotConfigFileHash: string;
   readonly sourceCommit: string;
   readonly sourceTreeSha256: string;
+}
+
+async function hashTrackedScreenPilotConfig(
+  rootDirectory: string,
+  sourceCommit: string,
+): Promise<string> {
+  const committed = await runGitBytes(rootDirectory, [
+    "cat-file",
+    "blob",
+    `${sourceCommit}:${SCREEN_PILOT_CONFIG_PATH}`,
+  ]);
+  if (committed.exitCode !== 0) {
+    throw new Error(
+      `Screen-pilot config must be tracked at ${SCREEN_PILOT_CONFIG_PATH} in the recorded source commit.`,
+    );
+  }
+  return createHash("sha256").update(committed.stdout).digest("hex");
 }
 
 async function readTrackedPackage(
@@ -336,8 +332,10 @@ function assertProductionReleaseSourceEvidence(
   config: ExperimentConfig,
   appVersion: string,
   sourceTreeSha256: string,
+  pilotConfigFileHash: string,
 ): void {
   const releaseVerification = config.goEvidence?.releaseVerification;
+  const screenPilot = config.goEvidence?.screenPilot;
   const failures: string[] = [];
   if (releaseVerification === undefined) {
     failures.push("goEvidence.releaseVerification");
@@ -347,6 +345,16 @@ function assertProductionReleaseSourceEvidence(
     }
     if (releaseVerification.sourceTreeSha256 !== sourceTreeSha256) {
       failures.push("goEvidence.releaseVerification.sourceTreeSha256");
+    }
+  }
+  if (screenPilot === undefined) {
+    failures.push("goEvidence.screenPilot");
+  } else {
+    if (screenPilot.sourceTreeSha256 !== sourceTreeSha256) {
+      failures.push("goEvidence.screenPilot.sourceTreeSha256");
+    }
+    if (screenPilot.pilotConfigFileHash !== pilotConfigFileHash) {
+      failures.push("goEvidence.screenPilot.pilotConfigFileHash");
     }
   }
   if (failures.length > 0) {
@@ -362,9 +370,10 @@ export async function inspectProductionSourceEvidence(
 ): Promise<ProductionSourceEvidenceSummary> {
   const root = resolve(rootDirectory);
   const provenance = await collectSourceProvenance(root);
-  const [configSnapshot, sourceTreeSha256, trackedPackage] = await Promise.all([
+  const [configSnapshot, sourceTreeSha256, pilotConfigFileHash, trackedPackage] = await Promise.all([
     loadExperimentConfig(DEFAULT_CONFIG_PATH, { rootDirectory: root, production: false }),
     hashTrackedSourceTreeAtCommit(root, provenance.sourceCommit),
+    hashTrackedScreenPilotConfig(root, provenance.sourceCommit),
     readTrackedPackage(root, provenance.sourceCommit),
   ]);
   await assertTrackedProductionConfig(
@@ -376,6 +385,7 @@ export async function inspectProductionSourceEvidence(
   return Object.freeze({
     appVersion: trackedPackage.version,
     criticalConfigSha256: hashProductionCriticalConfig(configSnapshot.config),
+    pilotConfigFileHash,
     sourceCommit: provenance.sourceCommit,
     sourceTreeSha256,
   });
@@ -826,11 +836,16 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   if (releaseKind === "mock-rehearsal") {
     assertMockRehearsalReleaseConfig(report, rootDirectory);
   } else {
+    const pilotConfigFileHash = await hashTrackedScreenPilotConfig(
+      rootDirectory,
+      sourceProvenance.sourceCommit,
+    );
     assertProductionReleaseMetadata(report);
     assertProductionReleaseSourceEvidence(
       configSnapshot.config,
       appVersion,
       sourceTreeSha256,
+      pilotConfigFileHash,
     );
     const publicFormReport = await fetchPublicFormAudit(
       configSnapshot.config.formUrl,
