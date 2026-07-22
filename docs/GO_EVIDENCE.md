@@ -37,7 +37,7 @@
 
 `applicableUntil`は、元文書の保存期限ではなく、その承認を今回の実施へ適用できる最終日である。未来の承認日、期限切れ、protocolVersion不一致、ゼロSHA、未記入日はすべて拒否される。
 
-`screenPilot.completedSessions`は3〜5とする。この事前GO証跡は研究チームの非参加者による技術パイロットだけを数え、実参加者を使用しない。`npm.cmd run screen-pilot`は`ScreenPufferDevice`、正式固定値・順序・時間、loopback、空フォーム、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。Mockリハーサル、公開レビュー、自動E2Eはこの件数へ含めない。実参加者による追加パイロットが研究計画上必要な場合は、初回production GOの後に承認済み手順で別途実施し、この事前技術パイロットで代替しない。
+`screenPilot.completedSessions`は3〜5とする。この事前GO証跡は研究チームの非参加者による技術パイロットだけを数え、実参加者を使用しない。`npm.cmd run screen-pilot`は`ScreenPufferDevice`、正式固定値・順序・時間、loopback、外部回答送信なし、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。Mockリハーサル、公開レビュー、自動E2Eはこの件数へ含めない。実参加者による追加パイロットが研究計画上必要な場合は、初回production GOの後に承認済み手順で別途実施し、この事前技術パイロットで代替しない。
 
 `screenPilot`には管理票の参照情報に加え、実施時に記録した`sourceTreeSha256`と`pilotConfigFileHash`を必須で記録する。`sourceTreeSha256`はscreen-pilot起動時の同名値、`pilotConfigFileHash`は起動時の`configFileHash`である。ゼロ値や反復疑似SHAは拒否され、`screenPilot.sourceTreeSha256`が`releaseVerification.sourceTreeSha256`と一致しない場合もGOにならない。productionリリース生成は、候補commitの固定パス`config/experiment.screen-pilot.json`を直接読み、そのバイトSHA-256が`pilotConfigFileHash`と一致することを再検証する。
 
@@ -46,7 +46,7 @@
 ### 非参加者screen-pilotの実施経路
 
 1. 必須5テストが成功した候補をcommitし、Git worktreeのルートで`git status --short --untracked-files=all`が空であることを確認して`npm.cmd run screen-pilot`を実行する。このコマンドは毎回再ビルドし、worktreeルート、cleanなHEAD、固定pilot設定のGit追跡とHEADバイト完全一致を再検証する。`node dist-server/screen-pilot.js`の直接実行や、既存・コピー済み`dist-server/`の流用は承認経路に含めない。
-2. Operatorに「非参加者用の事前確認」「画面版・PILOT/テスト」、参加者側表示に「非参加者用の事前確認」が常設され、フォームリンクとQRがないことを確認する。
+2. Operatorに「非参加者用の事前確認」「画面版・PILOT/テスト」、参加者側表示に「非参加者用の事前確認」「外部回答送信なし」が常設され、外部URL、リンク、QRがないことを確認する。
 3. 氏名等を使わず、異なる`PILOT-xxx`を用いて3〜5件を完走する。研究参加者、正式`SH26-xxx`、外部回答を使用しない。
 4. 起動時に表示された`sourceCommit`、`sourceTreeSha256`、`configFileHash`を保存し、各対象JSONLイベントの同名3フィールドが完全一致することを確認する。外部の承認済み管理票へ、この3値、完走した非個人識別ID、終了状態、対象JSONLのSHA-256、確認日を記録する。JSONLや個人情報をGit、設定、manifestへ転記しない。
 5. その管理票の版とSHA-256に加え、記録済み`sourceTreeSha256`を`screenPilot.sourceTreeSha256`へ、記録済み`configFileHash`を`screenPilot.pilotConfigFileHash`へ転記する。protocolVersion、固定値、文言、提示時間、順序、ScreenPufferDevice動作、pilot設定またはproduction設定以外の追跡ファイルを変更した場合は旧記録を流用せず、3〜5件を再実施する。
