@@ -17,6 +17,7 @@ import {
   type VerifiedProductionStartOptions,
 } from "../../../src/server/index.js";
 import {
+  hashExperimentConfig,
   hashProductionCriticalConfig,
   hashProductionGoEvidence,
   loadExperimentConfig,
@@ -25,6 +26,7 @@ import {
 import {
   SCREEN_PROTOCOL_VERSION,
   STUDY_FORM_URL,
+  type ExperimentConfig,
 } from "../../../src/shared/schemas.js";
 import { ExperimentLogger } from "../../../src/server/logging/experiment-log.js";
 import { hashTrackedSourceTreeAtCommit } from "../../../scripts/create-release.js";
@@ -413,6 +415,65 @@ describe("production release CLI seal", () => {
       expect(started).toBe(false);
     },
   );
+
+  it.each([
+    [
+      "bindHost",
+      (config: ExperimentConfig) => ({ ...config, bindHost: "localhost" } as ExperimentConfig),
+      "production-bind-host-not-127-0-0-1",
+    ],
+    [
+      "port",
+      (config: ExperimentConfig) => ({ ...config, port: 4_174 } as ExperimentConfig),
+      "production-port-not-4173",
+    ],
+    [
+      "network.allowLan",
+      (config: ExperimentConfig) => ({
+        ...config,
+        network: { ...config.network, allowLan: true },
+      } as ExperimentConfig),
+      "production-lan-access-enabled",
+    ],
+    [
+      "network.allowExternalRuntimeRequests",
+      (config: ExperimentConfig) => ({
+        ...config,
+        network: { ...config.network, allowExternalRuntimeRequests: true },
+      } as ExperimentConfig),
+      "production-external-runtime-requests-enabled",
+    ],
+  ] as const)("rejects a verified startup config with modified production %s", async (
+    _label,
+    mutate,
+    issueCode,
+  ) => {
+    const base = await loadExperimentConfig("config/experiment.e2e.json");
+    const config = mutate(base.config);
+    const loaded: LoadedExperimentConfig = Object.freeze({
+      ...base,
+      config,
+      configHash: hashExperimentConfig(config),
+    });
+    const verified = successfulVerification(loaded);
+    let started = false;
+
+    await expect(startProductionReleaseCli({
+      entryPath: resolve("synthetic-production-release", "dist-server", "index.js"),
+      environment: {},
+      async verifyRelease() {
+        return verified;
+      },
+      async loadConfig() {
+        return loaded;
+      },
+      async start() {
+        started = true;
+        return fakeRunningServer();
+      },
+    })).rejects.toThrow(issueCode);
+    expect(started).toBe(false);
+  });
 });
 
 describe("startServer production safeguards", () => {

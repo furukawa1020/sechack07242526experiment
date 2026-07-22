@@ -260,7 +260,7 @@ export const ExperimentConfigSchema = z.object({
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["network", "allowExternalRuntimeRequests"],
-      message: "External runtime requests are prohibited by the experiment protocol.",
+      message: "External runtime requests are prohibited by the experiment protocol (production-external-runtime-requests-enabled).",
     });
   }
   if (

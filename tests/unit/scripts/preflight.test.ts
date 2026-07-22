@@ -363,7 +363,15 @@ describe("preflight production gates", () => {
       "production-external-runtime-requests-enabled",
     ],
   ] as const)("rejects a modified production %s boundary", (_label, overrides, issueCode) => {
-    const config = parseExperimentConfig(configSource(overrides));
+    const config = issueCode === "production-external-runtime-requests-enabled"
+      ? ({
+          ...parseExperimentConfig(configSource()),
+          network: {
+            allowLan: false,
+            allowExternalRuntimeRequests: true,
+          },
+        } as ExperimentConfig)
+      : parseExperimentConfig(configSource(overrides));
     expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
       (check) => check.name === "network.productionBoundary",
     )).toMatchObject({

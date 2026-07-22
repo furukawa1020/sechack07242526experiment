@@ -74,6 +74,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     },
   };
   if (deviceMode !== "screen") return source;
+  if (overrides.allowExternalRuntimeRequests === true) return source;
   const criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
   const approval = (documentId: string, contentSha256: string) => ({
     status: "GO",
