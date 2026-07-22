@@ -95,7 +95,7 @@ npm.cmd run screen-pilot
 
 - 正式固定値、4順序、提示時間、ScreenPufferDevice動作
 - 1366×768と1920×1080での可読性、中央配置、表示欠けなし
-- 参加者側とOperatorに `研究参加用ではありません・外部回答送信なし` が常設される
+- Operatorに `非参加者用の事前確認` と `画面版・PILOT/テスト`、参加者側に `非参加者用の事前確認` と `外部回答送信なし` が常設される
 - 外部回答導線が表示されない
 - 切断、中止、STOP、DEFLATEが安全側へ遷移する
 - 実施時のsource commit、source tree SHA-256、pilot設定バイトSHA-256、各ログSHA-256を承認済み外部管理票へ記録する
