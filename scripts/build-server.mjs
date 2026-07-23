@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 import { acquireBuildLock } from "./build-lock.mjs";
-import { assertProductionArtifacts } from "./scan-production-bundles.mjs";
+import {
+  assertProductionArtifacts,
+  collectExternalPackageImports,
+} from "./scan-production-bundles.mjs";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..");
@@ -18,24 +21,38 @@ const SCREEN_PILOT_BUILD_ENVIRONMENT = Object.freeze({
   sourceCommit: "SECHACK_SCREEN_PILOT_SOURCE_COMMIT",
   sourceTreeSha256: "SECHACK_SCREEN_PILOT_SOURCE_TREE_SHA256",
   configFileHash: "SECHACK_SCREEN_PILOT_CONFIG_FILE_HASH",
+  buildChallengeSha256: "SECHACK_SCREEN_PILOT_BUILD_CHALLENGE_SHA256",
 });
 const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const FORBIDDEN_SCREEN_PILOT_PATTERNS = Object.freeze([
+  ["Mock device adapter", /MockPufferDevice/iu],
+  ["physical Serial adapter", /SerialPufferDevice/iu],
+  ["development API router", /createApiRouter/iu],
+  ["test device endpoint", /\/test\/mock-device/iu],
+  ["development static-serving seam", /serveBuiltAssets|createViteServer/iu],
+]);
 
-function screenPilotSourceEvidenceFromEnvironment(environment = process.env) {
+function screenPilotBuildInputsFromEnvironment(environment = process.env) {
   const sourceCommit = environment[SCREEN_PILOT_BUILD_ENVIRONMENT.sourceCommit];
   const sourceTreeSha256 = environment[SCREEN_PILOT_BUILD_ENVIRONMENT.sourceTreeSha256];
   const configFileHash = environment[SCREEN_PILOT_BUILD_ENVIRONMENT.configFileHash];
-  const values = [sourceCommit, sourceTreeSha256, configFileHash];
+  const buildChallengeSha256 =
+    environment[SCREEN_PILOT_BUILD_ENVIRONMENT.buildChallengeSha256];
+  const values = [sourceCommit, sourceTreeSha256, configFileHash, buildChallengeSha256];
   if (values.every((value) => value === undefined)) return null;
   if (
     !SOURCE_COMMIT_PATTERN.test(sourceCommit ?? "")
     || !SHA256_PATTERN.test(sourceTreeSha256 ?? "")
     || !SHA256_PATTERN.test(configFileHash ?? "")
+    || !SHA256_PATTERN.test(buildChallengeSha256 ?? "")
   ) {
     throw new Error("Screen-pilot build provenance environment is incomplete or invalid.");
   }
-  return Object.freeze({ sourceCommit, sourceTreeSha256, configFileHash });
+  return Object.freeze({
+    sourceEvidence: Object.freeze({ sourceCommit, sourceTreeSha256, configFileHash }),
+    buildChallengeSha256,
+  });
 }
 
 async function listPilotClientArtifacts(currentDirectory = CLIENT_OUTPUT_DIRECTORY) {
@@ -59,8 +76,8 @@ async function listPilotClientArtifacts(currentDirectory = CLIENT_OUTPUT_DIRECTO
   return files;
 }
 
-async function createEmbeddedScreenPilotEvidence(sourceEvidence) {
-  if (sourceEvidence === null) return "UNVERIFIED";
+async function createEmbeddedScreenPilotEvidence(buildInputs) {
+  if (buildInputs === null) return "UNVERIFIED";
   const paths = [...await listPilotClientArtifacts()]
     .sort((left, right) => left.localeCompare(right, "en"));
   const clientAssets = [];
@@ -76,7 +93,32 @@ async function createEmbeddedScreenPilotEvidence(sourceEvidence) {
   if (clientAssets.filter((entry) => entry.path === "dist/index.html").length !== 1) {
     throw new Error("Screen-pilot build requires exactly one dist/index.html.");
   }
-  return JSON.stringify({ schemaVersion: 1, sourceEvidence, clientAssets });
+  const packageJson = JSON.parse(await readFile(resolve(WORKSPACE_DIRECTORY, "package.json"), "utf8"));
+  if (typeof packageJson.version !== "string" || packageJson.version.length === 0) {
+    throw new Error("Screen-pilot build requires a package version.");
+  }
+  return JSON.stringify({
+    schemaVersion: 1,
+    sourceEvidence: buildInputs.sourceEvidence,
+    buildChallengeSha256: buildInputs.buildChallengeSha256,
+    appVersion: packageJson.version,
+    clientAssets,
+  });
+}
+
+async function assertScreenPilotArtifact() {
+  const source = await readFile(resolve(SERVER_OUTPUT_DIRECTORY, "screen-pilot.js"), "utf8");
+  const externalImports = collectExternalPackageImports(source);
+  const findings = [];
+  if (externalImports.length > 0) {
+    findings.push(`external package imports: ${externalImports.join(", ")}`);
+  }
+  for (const [label, pattern] of FORBIDDEN_SCREEN_PILOT_PATTERNS) {
+    if (pattern.test(source)) findings.push(label);
+  }
+  if (findings.length > 0) {
+    throw new Error(`Screen-pilot artifact gate failed: ${findings.join("; ")}.`);
+  }
 }
 
 export function assertSafeServerOutputDirectory(outputDirectory) {
@@ -125,9 +167,9 @@ async function buildServer() {
   const buildLock = await acquireBuildLock(WORKSPACE_DIRECTORY);
   try {
     await cleanServerOutputDirectory(SERVER_OUTPUT_DIRECTORY);
-    const screenPilotSourceEvidence = screenPilotSourceEvidenceFromEnvironment();
+    const screenPilotBuildInputs = screenPilotBuildInputsFromEnvironment();
     const embeddedScreenPilotEvidence = await createEmbeddedScreenPilotEvidence(
-      screenPilotSourceEvidence,
+      screenPilotBuildInputs,
     );
 
     await build({
@@ -190,6 +232,7 @@ async function buildServer() {
         __SECHACK_SCREEN_PILOT_BUILD_EVIDENCE__: JSON.stringify(embeddedScreenPilotEvidence),
       },
     });
+    await assertScreenPilotArtifact();
 
     await assertProductionArtifacts({ rootDirectory: WORKSPACE_DIRECTORY });
   } finally {

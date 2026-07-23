@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   consumeScreenPilotLaunchCapability,
+  parseScreenPilotEmbeddedBuildEvidence,
   type ScreenPilotLaunchCapability,
 } from "./screen-pilot-provenance.js";
 import {
@@ -12,7 +13,10 @@ import {
 
 const SCREEN_PILOT_CLI_FLAG = "--screen-pilot";
 const CAPABILITY_MESSAGE_TYPE = "screen-pilot.capability";
+const SHUTDOWN_MESSAGE_TYPE = "screen-pilot.shutdown";
 const CAPABILITY_WAIT_MS = 5_000;
+
+declare const __SECHACK_SCREEN_PILOT_BUILD_EVIDENCE__: string;
 
 function receiveLaunchCapability(): Promise<ScreenPilotLaunchCapability> {
   if (typeof process.send !== "function") {
@@ -43,11 +47,17 @@ export async function startAuthorizedScreenPilot(
   entryPath = fileURLToPath(import.meta.url),
 ): Promise<RunningScreenPilotRuntime> {
   const capability = await receiveLaunchCapability();
-  const verified = await consumeScreenPilotLaunchCapability(capability, entryPath);
-  if (process.connected && typeof process.disconnect === "function") process.disconnect();
+  const embeddedBuildEvidence = parseScreenPilotEmbeddedBuildEvidence(
+    __SECHACK_SCREEN_PILOT_BUILD_EVIDENCE__,
+  );
+  const verified = await consumeScreenPilotLaunchCapability(
+    capability,
+    entryPath,
+    embeddedBuildEvidence,
+  );
   return startScreenPilotRuntime(
     verified,
-    process.env.npm_package_version ?? "1.1.0",
+    embeddedBuildEvidence.appVersion,
   );
 }
 
@@ -58,6 +68,40 @@ function runScreenPilotCli(): void {
     return;
   }
   let running: RunningScreenPilotRuntime | undefined;
+  let pendingExitCode: 0 | 1 | null = null;
+  let shutdownStarted = false;
+  const shutdown = (exitCode: 0 | 1): void => {
+    pendingExitCode = pendingExitCode === 1 ? 1 : exitCode;
+    if (shutdownStarted || running === undefined) return;
+    shutdownStarted = true;
+    const forceExit = setTimeout(() => process.exit(1), running.shutdownDeadlineMs);
+    void running.close().then(
+      () => {
+        clearTimeout(forceExit);
+        process.exit(pendingExitCode ?? exitCode);
+      },
+      () => {
+        clearTimeout(forceExit);
+        process.exit(1);
+      },
+    );
+  };
+  const onParentMessage = (message: unknown): void => {
+    if (
+      message !== null
+      && typeof message === "object"
+      && (message as Readonly<Record<string, unknown>>)["type"] === SHUTDOWN_MESSAGE_TYPE
+    ) {
+      shutdown(0);
+    }
+  };
+  process.on("message", onParentMessage);
+  process.once("disconnect", () => shutdown(1));
+  process.on("SIGINT", () => shutdown(0));
+  process.on("SIGTERM", () => shutdown(0));
+  process.on("SIGBREAK", () => shutdown(0));
+  process.once("uncaughtException", () => shutdown(1));
+  process.once("unhandledRejection", () => shutdown(1));
   void startAuthorizedScreenPilot()
     .then((server) => {
       running = server;
@@ -69,30 +113,12 @@ function runScreenPilotCli(): void {
       console.info(`Screen-pilot source commit: ${server.sourceEvidence.sourceCommit}`);
       console.info(`Screen-pilot source tree SHA-256: ${server.sourceEvidence.sourceTreeSha256}`);
       console.info(`Screen-pilot config file SHA-256: ${server.sourceEvidence.configFileHash}`);
-      let shutdownStarted = false;
-      const shutdown = (exitCode: 0 | 1): void => {
-        if (shutdownStarted) return;
-        shutdownStarted = true;
-        const forceExit = setTimeout(() => process.exit(1), running?.shutdownDeadlineMs ?? 190_000);
-        void running?.close().then(
-          () => {
-            clearTimeout(forceExit);
-            process.exit(exitCode);
-          },
-          () => {
-            clearTimeout(forceExit);
-            process.exit(1);
-          },
-        );
-      };
-      process.on("SIGINT", () => shutdown(0));
-      process.on("SIGTERM", () => shutdown(0));
-      process.on("SIGBREAK", () => shutdown(0));
-      process.once("uncaughtException", () => shutdown(1));
-      process.once("unhandledRejection", () => shutdown(1));
+      if (pendingExitCode !== null) shutdown(pendingExitCode);
     })
     .catch((error: unknown) => {
       console.error(error instanceof Error ? error.message : "Screen-pilot startup failed.");
+      process.off("message", onParentMessage);
+      if (process.connected && typeof process.disconnect === "function") process.disconnect();
       process.exitCode = 1;
     });
 }

@@ -19,6 +19,7 @@ export { SCREEN_PILOT_CONFIG_PATH } from "./production-source-tree.js";
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const APP_VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/u;
 const PILOT_BUNDLE_PATH = "dist-server/screen-pilot.js";
 const PILOT_CAPABILITY_MAX_AGE_MS = 60_000;
 const MAX_PILOT_ASSET_COUNT = 256;
@@ -52,6 +53,7 @@ export interface ScreenPilotArtifactEvidence {
 export interface ScreenPilotLaunchCapability {
   readonly schemaVersion: 1;
   readonly nonce: string;
+  readonly buildSecret: string;
   readonly launcherPid: number;
   readonly createdAtMs: number;
   readonly sourceEvidence: ScreenPilotSourceEvidence;
@@ -62,6 +64,8 @@ export interface ScreenPilotLaunchCapability {
 export interface ScreenPilotEmbeddedBuildEvidence {
   readonly schemaVersion: 1;
   readonly sourceEvidence: ScreenPilotSourceEvidence;
+  readonly buildChallengeSha256: string;
+  readonly appVersion: string;
   readonly clientAssets: readonly ScreenPilotArtifactEvidence[];
 }
 
@@ -472,9 +476,20 @@ export function parseScreenPilotEmbeddedBuildEvidence(
   const candidate = parsed as Partial<ScreenPilotEmbeddedBuildEvidence>;
   assertSourceEvidenceShape(candidate.sourceEvidence);
   assertClientEvidenceShape(candidate.clientAssets);
+  const { buildChallengeSha256, appVersion } = candidate;
+  if (
+    typeof buildChallengeSha256 !== "string"
+    || !SHA256_PATTERN.test(buildChallengeSha256)
+    || typeof appVersion !== "string"
+    || !APP_VERSION_PATTERN.test(appVersion)
+  ) {
+    throw new Error("Screen-pilot embedded build identity has an invalid structure.");
+  }
   return Object.freeze({
     schemaVersion: 1,
     sourceEvidence: Object.freeze({ ...candidate.sourceEvidence }),
+    buildChallengeSha256,
+    appVersion,
     clientAssets: Object.freeze(candidate.clientAssets.map((entry) => Object.freeze({ ...entry }))),
   });
 }
@@ -482,7 +497,11 @@ export function parseScreenPilotEmbeddedBuildEvidence(
 export async function createScreenPilotLaunchCapability(
   rootDirectory: string,
   expectedSourceEvidence: ScreenPilotSourceEvidence,
+  buildSecret: string,
 ): Promise<ScreenPilotLaunchCapability> {
+  if (!SHA256_PATTERN.test(buildSecret)) {
+    throw new Error("Screen-pilot build secret must be 256 random bits encoded as lowercase hex.");
+  }
   const verified = await verifyScreenPilotSource(rootDirectory);
   if (!evidenceMatches(verified.evidence, expectedSourceEvidence)) {
     throw new Error("Screen-pilot source changed while the fresh build was running.");
@@ -491,6 +510,7 @@ export async function createScreenPilotLaunchCapability(
   return Object.freeze({
     schemaVersion: 1,
     nonce: randomBytes(32).toString("hex"),
+    buildSecret,
     launcherPid: process.pid,
     createdAtMs: Date.now(),
     sourceEvidence: verified.evidence,
@@ -506,6 +526,8 @@ function assertCapabilityShape(value: unknown): asserts value is ScreenPilotLaun
     capability.schemaVersion !== 1
     || typeof capability.nonce !== "string"
     || !SHA256_PATTERN.test(capability.nonce)
+    || typeof capability.buildSecret !== "string"
+    || !SHA256_PATTERN.test(capability.buildSecret)
     || !Number.isSafeInteger(capability.launcherPid)
     || !Number.isSafeInteger(capability.createdAtMs)
     || capability.sourceEvidence === undefined
@@ -530,6 +552,12 @@ export async function consumeScreenPilotLaunchCapability(
   assertCapabilityShape(value);
   assertSourceEvidenceShape(embeddedBuildEvidence.sourceEvidence);
   assertClientEvidenceShape(embeddedBuildEvidence.clientAssets);
+  if (
+    sha256Bytes(Buffer.from(value.buildSecret, "hex"))
+    !== embeddedBuildEvidence.buildChallengeSha256
+  ) {
+    throw new Error("Screen-pilot build secret does not match this fresh bundle.");
+  }
   if (!evidenceMatches(value.sourceEvidence, embeddedBuildEvidence.sourceEvidence)) {
     throw new Error("Screen-pilot capability does not match its embedded clean source build.");
   }
