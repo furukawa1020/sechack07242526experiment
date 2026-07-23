@@ -61,11 +61,29 @@ async function buildServer() {
       absWorkingDir: WORKSPACE_DIRECTORY,
       entryPoints: {
         index: "src/server/production-entry.ts",
+        preflight: "scripts/production-preflight.ts",
+        healthcheck: "scripts/production-healthcheck.ts",
+        "verify-release": "scripts/production-verify-release.ts",
+      },
+      outdir: SERVER_OUTPUT_DIRECTORY,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node22",
+      packages: "external",
+      sourcemap: true,
+      legalComments: "none",
+    });
+
+    // Development-only and nonparticipant rehearsal seams are compiled under
+    // distinct names. Formal release packaging never copies these files.
+    await build({
+      absWorkingDir: WORKSPACE_DIRECTORY,
+      entryPoints: {
         rehearsal: "src/server/rehearsal.ts",
         "screen-pilot": "src/server/screen-pilot.ts",
-        preflight: "scripts/preflight.ts",
-        healthcheck: "scripts/healthcheck.ts",
-        "verify-release": "scripts/verify-release.ts",
+        "rehearsal-healthcheck": "scripts/healthcheck.ts",
+        "rehearsal-verify-release": "scripts/verify-release.ts",
       },
       outdir: SERVER_OUTPUT_DIRECTORY,
       bundle: true,
