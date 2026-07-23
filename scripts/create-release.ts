@@ -12,7 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { collectPreflightReport, type PreflightReport } from "./preflight.js";
 import {
@@ -44,6 +44,10 @@ import { acquireBuildLock } from "./build-lock.mjs";
 const DEFAULT_CONFIG_PATH = PRODUCTION_CONFIG_PATH;
 const DEFAULT_MOCK_REHEARSAL_CONFIG_PATH = "config/experiment.mock-rehearsal.json";
 const MAX_GIT_OUTPUT_BYTES = 1024 * 1024;
+const PRODUCTION_ARTIFACT_SCAN_SCRIPT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "scan-production-bundles.mjs",
+);
 
 export type ReleaseKind = "production" | "mock-rehearsal";
 
@@ -76,7 +80,7 @@ export interface CreateReleaseOptions {
   readonly releaseKind?: ReleaseKind;
   /** Tests may reuse synthetic build fixtures; the CLI always rebuilds before sealing. */
   readonly buildArtifacts?: boolean;
-  /** Tests may disable dependency installation; the CLI always installs production dependencies. */
+  /** Mock-rehearsal tests may disable dependency installation. Production bundles are self-contained. */
   readonly installDependencies?: boolean;
   readonly writeLine?: (line: string) => void;
 }
@@ -546,11 +550,21 @@ function runtimePackageJson(
           start:
             "node dist-server/verify-release.js && node dist-server/rehearsal.js --mock-rehearsal",
         };
-  const output = {
-    ...source,
-    private: true,
-    scripts,
-  };
+  const output = releaseKind === "production"
+    ? {
+        name: source["name"],
+        version: source["version"],
+        private: true,
+        type: "module",
+        scripts,
+        dependencies: {},
+        ...(source["engines"] === undefined ? {} : { engines: source["engines"] }),
+      }
+    : {
+        ...source,
+        private: true,
+        scripts,
+      };
   return `${JSON.stringify(output, null, 2)}\n`;
 }
 
@@ -778,6 +792,43 @@ async function buildReleaseArtifacts(
   });
 }
 
+async function runProductionArtifactScan(
+  rootDirectory: string,
+  checkRuntimePackage: boolean,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  await new Promise<void>((resolveScan, rejectScan) => {
+    const child = spawn(
+      process.execPath,
+      [
+        PRODUCTION_ARTIFACT_SCAN_SCRIPT,
+        "--root",
+        rootDirectory,
+        ...(checkRuntimePackage ? ["--runtime-package"] : []),
+      ],
+      {
+        cwd: rootDirectory,
+        env: environment,
+        shell: false,
+        stdio: "inherit",
+        windowsHide: true,
+      },
+    );
+    child.once("error", rejectScan);
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolveScan();
+        return;
+      }
+      rejectScan(
+        new Error(
+          `Production artifact scan failed (${signal === null ? `exit ${String(code)}` : `signal ${signal}`}).`,
+        ),
+      );
+    });
+  });
+}
+
 export async function createRelease(options: CreateReleaseOptions = {}): Promise<string> {
   const writeLine = options.writeLine ?? console.info;
   const rootDirectory = resolve(options.rootDirectory ?? process.cwd());
@@ -786,9 +837,6 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   const releaseKind = options.releaseKind ?? "production";
   if (releaseKind === "production" && options.buildArtifacts === false) {
     throw new Error("Production releases may not reuse existing build artifacts.");
-  }
-  if (releaseKind === "production" && options.installDependencies === false) {
-    throw new Error("Production releases may not omit lockfile-pinned dependency installation.");
   }
   const sourceProvenance = await collectSourceProvenance(rootDirectory);
   const [sourceTreeSha256, trackedPackage] = await Promise.all([
@@ -866,6 +914,11 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     ) {
       throw new Error("Git source provenance changed while release artifacts were built.");
     }
+  }
+
+  if (releaseKind === "production") {
+    writeLine("Scanning formal build artifacts before production packaging...");
+    await runProductionArtifactScan(rootDirectory, false, buildLock.childEnvironment());
   }
 
   const releaseName =
@@ -983,10 +1036,12 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       runtimePackageJson(trackedPackage.source, releaseKind),
       "utf8",
     );
-    await copyRegularFileStable(
-      resolve(rootDirectory, "package-lock.json"),
-      resolve(stagingDirectory, "package-lock.json"),
-    );
+    if (releaseKind === "mock-rehearsal") {
+      await copyRegularFileStable(
+        resolve(rootDirectory, "package-lock.json"),
+        resolve(stagingDirectory, "package-lock.json"),
+      );
+    }
     await writeFile(
       resolve(stagingDirectory, ".npmrc"),
       "audit=false\nfund=false\nupdate-notifier=false\n",
@@ -1006,9 +1061,18 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       await writeFile(resolve(stagingDirectory, name), `${lines.join("\r\n")}\r\n`, "utf8");
     }
 
-    if (options.installDependencies ?? true) {
+    if (releaseKind === "mock-rehearsal" && (options.installDependencies ?? true)) {
       writeLine("Installing lockfile-pinned production dependencies into the release...");
       await installProductionDependencies(stagingDirectory);
+    }
+
+    if (releaseKind === "production") {
+      writeLine("Scanning sealed production artifacts after packaging...");
+      await runProductionArtifactScan(
+        stagingDirectory,
+        true,
+        buildLock.childEnvironment(),
+      );
     }
 
     const finalProvenance = await collectSourceProvenance(rootDirectory);

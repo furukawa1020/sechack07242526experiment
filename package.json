@@ -22,6 +22,7 @@
     "build:client": "node scripts/build-vite.mjs client",
     "build:public-demo": "node scripts/build-vite.mjs public-demo",
     "build:server": "node scripts/build-server.mjs",
+    "scan:production-bundles": "node scripts/scan-production-bundles.mjs",
     "build": "npm run build:client && npm run build:server",
     "start": "node dist-server/index.js",
     "lint": "eslint .",

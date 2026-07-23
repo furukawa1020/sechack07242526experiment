@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, readdir } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open, readFile, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
@@ -18,6 +19,26 @@ const RELEASE_MANIFEST_NAME = "DEPLOYMENT_MANIFEST.json";
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const APP_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
+const FORMAL_CLIENT_DIRECTORY = "dist";
+const FORMAL_CLIENT_INDEX_PATH = "dist/index.html";
+const MAX_FORMAL_MANIFEST_BYTES = 4 * 1_024 * 1_024;
+const MAX_FORMAL_CLIENT_ASSET_COUNT = 256;
+const MAX_FORMAL_CLIENT_ASSET_BYTES = 8 * 1_024 * 1_024;
+const MAX_FORMAL_CLIENT_TOTAL_BYTES = 32 * 1_024 * 1_024;
+
+export interface FormalProductionClientAsset {
+  readonly manifestPath: string;
+  readonly requestPath: string;
+  readonly contentType: "text/html; charset=utf-8" | "text/javascript; charset=utf-8" | "text/css; charset=utf-8";
+  readonly sha256: string;
+  readonly body: Buffer;
+}
+
+export interface FormalProductionClientAssets {
+  readonly index: FormalProductionClientAsset;
+  readonly files: readonly FormalProductionClientAsset[];
+  readonly totalBytes: number;
+}
 
 function sha256Bytes(source: Uint8Array): string {
   return createHash("sha256").update(source).digest("hex");
@@ -148,6 +169,112 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
 
 function toManifestPath(value: string): string {
   return value.split(sep).join("/");
+}
+
+function isInsideOrSame(parent: string, candidate: string): boolean {
+  const pathFromParent = relative(parent, candidate);
+  return pathFromParent === ""
+    || (
+      pathFromParent !== ".."
+      && !pathFromParent.startsWith(`..${sep}`)
+      && !isAbsolute(pathFromParent)
+    );
+}
+
+function isSameFileSnapshot(
+  left: Awaited<ReturnType<typeof lstat>>,
+  right: Awaited<ReturnType<typeof lstat>>,
+): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.nlink === right.nlink
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+async function readUniqueRegularFileBounded(
+  path: string,
+  maximumBytes: number,
+): Promise<Buffer> {
+  const before = await lstat(path);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
+    throw new Error(`Controlled asset must be a unique regular file: ${path}`);
+  }
+  if (before.size > maximumBytes) {
+    throw new Error(`Controlled asset exceeds its read limit: ${path}`);
+  }
+
+  const noFollow = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
+  const handle = await open(path, fsConstants.O_RDONLY | noFollow);
+  try {
+    const opened = await handle.stat();
+    if (
+      !opened.isFile()
+      || opened.nlink !== 1
+      || !isSameFileSnapshot(before, opened)
+      || opened.size > maximumBytes
+    ) {
+      throw new Error(`Controlled asset changed before it could be read: ${path}`);
+    }
+
+    const body = Buffer.alloc(opened.size);
+    let offset = 0;
+    while (offset < body.byteLength) {
+      const result = await handle.read(body, offset, body.byteLength - offset, offset);
+      if (result.bytesRead === 0) {
+        throw new Error(`Controlled asset ended before its declared size: ${path}`);
+      }
+      offset += result.bytesRead;
+    }
+    const trailingByte = Buffer.alloc(1);
+    const trailingRead = await handle.read(trailingByte, 0, 1, offset);
+    if (trailingRead.bytesRead !== 0) {
+      throw new Error(`Controlled asset grew while it was being read: ${path}`);
+    }
+    const afterRead = await handle.stat();
+    if (!isSameFileSnapshot(opened, afterRead)) {
+      throw new Error(`Controlled asset changed while it was being read: ${path}`);
+    }
+    return body;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function assertOrdinaryContainedAssetPath(
+  rootDirectory: string,
+  realRootDirectory: string,
+  manifestPath: string,
+): Promise<string> {
+  if (!isSafeManifestPath(manifestPath) || !manifestPath.startsWith(`${FORMAL_CLIENT_DIRECTORY}/`)) {
+    throw new Error(`Invalid formal client asset path: ${manifestPath}`);
+  }
+  const segments = manifestPath.split("/");
+  let currentPath = rootDirectory;
+  for (const segment of segments.slice(0, -1)) {
+    currentPath = resolve(currentPath, segment);
+    const directoryStat = await lstat(currentPath);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+      throw new Error(`Formal client asset parent must be an ordinary directory: ${manifestPath}`);
+    }
+  }
+
+  const absolutePath = resolve(rootDirectory, ...segments);
+  const realAssetPath = await realpath(absolutePath);
+  if (!isInsideOrSame(realRootDirectory, realAssetPath)) {
+    throw new Error(`Formal client asset escaped the release directory: ${manifestPath}`);
+  }
+  return absolutePath;
+}
+
+function clientAssetContentType(
+  manifestPath: string,
+): FormalProductionClientAsset["contentType"] | null {
+  if (manifestPath.endsWith(".html")) return "text/html; charset=utf-8";
+  if (manifestPath.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (manifestPath.endsWith(".css")) return "text/css; charset=utf-8";
+  return null;
 }
 
 async function listRegularFiles(
@@ -354,5 +481,115 @@ export async function verifyFormalReleaseDirectoryDetailed(
       sourceTreeSha256: parsed.sourceTreeSha256,
       sourceEvidenceBindingSha256: parsed.sourceEvidenceBindingSha256,
     }),
+  });
+}
+
+/**
+ * Re-opens the already verified manifest and formal client assets immediately
+ * before startup. Every response body is retained in memory so later filesystem
+ * replacement cannot change the participant or operator UI being served.
+ */
+export async function loadFormalProductionClientAssets(
+  releaseDirectory: string,
+  expectedManifestSha256: string,
+): Promise<FormalProductionClientAssets> {
+  if (!SHA256_PATTERN.test(expectedManifestSha256)) {
+    throw new Error("A verified deployment manifest SHA-256 is required to load client assets.");
+  }
+  const rootDirectory = resolve(releaseDirectory);
+  const rootStat = await lstat(rootDirectory);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error("The formal release root must be an ordinary directory.");
+  }
+  const realRootDirectory = await realpath(rootDirectory);
+
+  const manifestPath = resolve(rootDirectory, RELEASE_MANIFEST_NAME);
+  const manifestSource = await readUniqueRegularFileBounded(
+    manifestPath,
+    MAX_FORMAL_MANIFEST_BYTES,
+  );
+  if (sha256Bytes(manifestSource) !== expectedManifestSha256) {
+    throw new Error("The deployment manifest changed after formal release verification.");
+  }
+
+  let parsedValue: unknown;
+  try {
+    parsedValue = JSON.parse(manifestSource.toString("utf8")) as unknown;
+  } catch (error) {
+    throw new Error("The verified deployment manifest is no longer valid JSON.", { cause: error });
+  }
+  if (!isReleaseManifest(parsedValue)) {
+    throw new Error("The verified deployment manifest no longer has a valid structure.");
+  }
+
+  const manifestEntries = parsedValue.files.filter(
+    (file) => file.path.startsWith(`${FORMAL_CLIENT_DIRECTORY}/`),
+  );
+  if (
+    manifestEntries.length === 0
+    || manifestEntries.length > MAX_FORMAL_CLIENT_ASSET_COUNT
+  ) {
+    throw new Error("The formal client asset count is outside the startup safety limit.");
+  }
+  const uniquePaths = new Set(manifestEntries.map((file) => file.path));
+  if (uniquePaths.size !== manifestEntries.length) {
+    throw new Error("The deployment manifest contains duplicate formal client asset paths.");
+  }
+  if (manifestEntries.filter((file) => file.path === FORMAL_CLIENT_INDEX_PATH).length !== 1) {
+    throw new Error("The deployment manifest must contain exactly one dist/index.html.");
+  }
+
+  let declaredTotalBytes = 0;
+  for (const entry of manifestEntries) {
+    if (clientAssetContentType(entry.path) === null) {
+      throw new Error(`Unsupported formal client asset type: ${entry.path}`);
+    }
+    if (entry.bytes <= 0 || entry.bytes > MAX_FORMAL_CLIENT_ASSET_BYTES) {
+      throw new Error(`Formal client asset size is outside the startup safety limit: ${entry.path}`);
+    }
+    declaredTotalBytes += entry.bytes;
+    if (declaredTotalBytes > MAX_FORMAL_CLIENT_TOTAL_BYTES) {
+      throw new Error("Formal client assets exceed the total startup memory limit.");
+    }
+  }
+
+  const files: FormalProductionClientAsset[] = [];
+  for (const entry of manifestEntries) {
+    const absolutePath = await assertOrdinaryContainedAssetPath(
+      rootDirectory,
+      realRootDirectory,
+      entry.path,
+    );
+    const body = await readUniqueRegularFileBounded(
+      absolutePath,
+      MAX_FORMAL_CLIENT_ASSET_BYTES,
+    );
+    if (body.byteLength !== entry.bytes) {
+      throw new Error(`Formal client asset size changed after release verification: ${entry.path}`);
+    }
+    if (sha256Bytes(body) !== entry.sha256) {
+      throw new Error(`Formal client asset SHA-256 changed after release verification: ${entry.path}`);
+    }
+    const contentType = clientAssetContentType(entry.path);
+    if (contentType === null) {
+      throw new Error(`Unsupported formal client asset type: ${entry.path}`);
+    }
+    files.push(Object.freeze({
+      manifestPath: entry.path,
+      requestPath: `/${entry.path.slice(`${FORMAL_CLIENT_DIRECTORY}/`.length)}`,
+      contentType,
+      sha256: entry.sha256,
+      body,
+    }));
+  }
+  files.sort((left, right) => left.requestPath.localeCompare(right.requestPath, "en"));
+  const index = files.find((file) => file.manifestPath === FORMAL_CLIENT_INDEX_PATH);
+  if (index === undefined) {
+    throw new Error("The verified formal client index could not be loaded.");
+  }
+  return Object.freeze({
+    index,
+    files: Object.freeze(files),
+    totalBytes: declaredTotalBytes,
   });
 }

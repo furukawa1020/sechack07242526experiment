@@ -11,7 +11,7 @@ import { dirname, isAbsolute, parse, relative, resolve } from "node:path";
 
 import { z } from "zod";
 
-import { CONDITIONS, OrderCodeSchema } from "../../shared/index.js";
+import { CONDITIONS, ORDER_CODES } from "../../shared/conditions.js";
 import {
   EXPERIMENT_PHASES,
   PUFFER_DEVICE_STATES,
@@ -33,6 +33,8 @@ const safeToken = (name: string, maxLength: number): z.ZodString => z.string()
   .min(1)
   .max(maxLength)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u, `${name} contains forbidden characters.`);
+
+const OrderCodeSchema = z.enum(ORDER_CODES);
 
 const wallClockSchema = z.string().refine((value) => {
   const parsed = Date.parse(value);

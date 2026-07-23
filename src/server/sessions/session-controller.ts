@@ -2,15 +2,17 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 import {
-  ALLOWED_TRANSITIONS,
   allocateOrder,
   CONDITIONS,
   type ConditionCode,
-  type ExperimentPhase,
   type OrderCode,
-} from "../../shared/index.js";
+} from "../../shared/conditions.js";
+import {
+  ALLOWED_TRANSITIONS,
+  type ExperimentPhase,
+} from "../../shared/experiment-machine.js";
 import { badRequest, conflict, notFound } from "../api/http-error.js";
-import { waitForConfirmedDeflatedStatus } from "../devices/index.js";
+import { waitForConfirmedDeflatedStatus } from "../devices/types.js";
 import type {
   DeviceAck,
   DeviceStatus,
@@ -23,7 +25,7 @@ import type {
   SessionLogWriter,
   PufferDevice,
 } from "../contracts.js";
-import { createLogEvent } from "../logging/index.js";
+import { createLogEvent } from "../logging/experiment-log.js";
 import type { ScreenPilotSourceEvidence } from "../screen-pilot-provenance.js";
 
 const TERMINAL_PHASES = new Set<ExperimentPhase>(["completed", "aborted"]);

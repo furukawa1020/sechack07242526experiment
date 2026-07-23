@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 import { acquireBuildLock } from "./build-lock.mjs";
+import { assertProductionArtifacts } from "./scan-production-bundles.mjs";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_DIRECTORY = resolve(SCRIPT_DIRECTORY, "..");
@@ -70,7 +71,6 @@ async function buildServer() {
       platform: "node",
       format: "esm",
       target: "node22",
-      packages: "external",
       sourcemap: true,
       legalComments: "none",
     });
@@ -94,6 +94,8 @@ async function buildServer() {
       sourcemap: true,
       legalComments: "none",
     });
+
+    await assertProductionArtifacts({ rootDirectory: WORKSPACE_DIRECTORY });
   } finally {
     await buildLock.release();
   }

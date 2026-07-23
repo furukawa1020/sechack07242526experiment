@@ -3,6 +3,7 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import { createServer } from "node:http";
 import { relative, resolve, sep } from "node:path";
 
+import type { FormalProductionClientAssets } from "../../scripts/production-release-verifier.js";
 import type { ExperimentConfig } from "../shared/schemas.js";
 import { ScreenPufferDevice } from "./devices/screen-puffer-device.js";
 import { ExperimentLogger } from "./logging/experiment-log.js";
@@ -23,6 +24,7 @@ export interface StartProductionRuntimeOptions {
   readonly rootDirectory: string;
   readonly loadedConfig: ProductionLoadedConfigSnapshot;
   readonly appVersion: string;
+  readonly clientAssets: FormalProductionClientAssets;
 }
 
 export interface RunningProductionRuntime {
@@ -129,7 +131,7 @@ export async function startProductionRuntime(
       config,
       configHash: options.loadedConfig.configHash,
       appVersion: options.appVersion,
-      rootDirectory,
+      clientAssets: options.clientAssets,
       ...(operatorToken === null ? {} : { operatorToken }),
     });
     const httpServer = createServer(application.app);

@@ -1,9 +1,10 @@
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from "express";
 import { ZodError } from "zod";
 
+import type {
+  FormalProductionClientAsset,
+  FormalProductionClientAssets,
+} from "../../scripts/production-release-verifier.js";
 import type { ExperimentConfig } from "../shared/schemas.js";
 import { HttpError } from "./api/http-error.js";
 import { createProductionApiRouter } from "./api/production-router.js";
@@ -16,7 +17,7 @@ export interface ProductionApplicationOptions {
   readonly config: ExperimentConfig;
   readonly configHash: string;
   readonly appVersion: string;
-  readonly rootDirectory: string;
+  readonly clientAssets: FormalProductionClientAssets;
   readonly operatorToken?: string;
 }
 
@@ -27,6 +28,49 @@ export interface ProductionApplicationRuntime {
 
 function isJsonSyntaxError(error: unknown): error is SyntaxError & { status: number } {
   return error instanceof SyntaxError && "status" in error && error.status === 400;
+}
+
+interface InMemoryClientAsset {
+  readonly requestPath: string;
+  readonly contentType: FormalProductionClientAsset["contentType"];
+  readonly body: Buffer;
+}
+
+function copyClientAssets(
+  source: FormalProductionClientAssets,
+): { readonly index: InMemoryClientAsset; readonly byRequestPath: ReadonlyMap<string, InMemoryClientAsset> } {
+  const byRequestPath = new Map<string, InMemoryClientAsset>();
+  for (const asset of source.files) {
+    if (!asset.requestPath.startsWith("/") || byRequestPath.has(asset.requestPath)) {
+      throw new Error(`Invalid or duplicate in-memory client asset route: ${asset.requestPath}`);
+    }
+    byRequestPath.set(asset.requestPath, Object.freeze({
+      requestPath: asset.requestPath,
+      contentType: asset.contentType,
+      // Keep a private copy so the application never observes later mutation of
+      // either the filesystem or the startup loader's Buffer references.
+      body: Buffer.from(asset.body),
+    }));
+  }
+  const index = byRequestPath.get(source.index.requestPath);
+  if (index === undefined || index.requestPath !== "/index.html") {
+    throw new Error("The verified in-memory client index is unavailable.");
+  }
+  return Object.freeze({ index, byRequestPath });
+}
+
+function sendClientAsset(
+  response: Parameters<RequestHandler>[1],
+  asset: InMemoryClientAsset,
+): void {
+  response.setHeader(
+    "Cache-Control",
+    asset.requestPath === "/index.html"
+      ? "no-store"
+      : "public, max-age=31536000, immutable",
+  );
+  response.setHeader("Content-Type", asset.contentType);
+  response.status(200).send(asset.body);
 }
 
 const productionErrorHandler: ErrorRequestHandler = (
@@ -70,6 +114,7 @@ const productionErrorHandler: ErrorRequestHandler = (
 export async function createProductionApplication(
   options: ProductionApplicationOptions,
 ): Promise<ProductionApplicationRuntime> {
+  const clientAssets = copyClientAssets(options.clientAssets);
   const app = express();
   app.disable("x-powered-by");
   app.use(
@@ -95,25 +140,20 @@ export async function createProductionApplication(
     response.status(404).json({ error: "APIが見つかりません。", code: "API_NOT_FOUND" });
   }) satisfies RequestHandler);
 
-  const clientDirectory = resolve(options.rootDirectory, "dist");
-  const indexPath = resolve(clientDirectory, "index.html");
-  if (!existsSync(indexPath)) {
-    throw new Error(`Built client was not found at ${indexPath}. Run npm run build first.`);
-  }
-  app.use(
-    express.static(clientDirectory, {
-      index: false,
-      setHeaders(response, filePath) {
-        response.setHeader(
-          "Cache-Control",
-          filePath.endsWith("index.html") ? "no-store" : "public, max-age=31536000, immutable",
-        );
-      },
-    }),
-  );
+  app.use(((request, response, next) => {
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      next();
+      return;
+    }
+    const asset = clientAssets.byRequestPath.get(request.path);
+    if (asset === undefined) {
+      next();
+      return;
+    }
+    sendClientAsset(response, asset);
+  }) satisfies RequestHandler);
   app.get(["/", "/operator", "/device-test", "/display/:token"], (_request, response) => {
-    response.setHeader("Cache-Control", "no-store");
-    response.sendFile(indexPath);
+    sendClientAsset(response, clientAssets.index);
   });
 
   app.use((_request, response) => {
@@ -124,7 +164,7 @@ export async function createProductionApplication(
   return {
     app,
     async close(): Promise<void> {
-      // Formal production serves only immutable built assets and owns no Vite lifecycle.
+      // Formal production serves only startup-verified memory assets and owns no Vite lifecycle.
     },
   };
 }

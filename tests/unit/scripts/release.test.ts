@@ -294,8 +294,10 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
     "rehearsal",
     "preflight",
     "healthcheck",
+    "rehearsal-healthcheck",
     "data-lifecycle",
     "verify-release",
+    "rehearsal-verify-release",
   ] as const) {
     await writeRelative(
       root,
@@ -742,24 +744,17 @@ describe("release creation", () => {
     });
   });
 
-  it.each([
-    ["build artifacts", { buildArtifacts: false }, "may not reuse existing build artifacts"],
-    [
-      "dependency installation",
-      { installDependencies: false },
-      "may not omit lockfile-pinned dependency installation",
-    ],
-  ] as const)("never lets production tests omit %s", async (_label, override, message) => {
+  it("never lets production tests reuse existing build artifacts", async () => {
     const root = await createReleaseSource();
     await expect(
       createRelease({
         rootDirectory: root,
         configPath: "config/experiment.production.json",
         outputPath: "release/unsafe-shortcut",
-        ...override,
+        buildArtifacts: false,
         writeLine: () => undefined,
       }),
-    ).rejects.toThrow(message);
+    ).rejects.toThrow("may not reuse existing build artifacts");
     expect(await pathExists(join(root, "release", "unsafe-shortcut"))).toBe(false);
   });
 
@@ -1131,6 +1126,10 @@ describe("release creation", () => {
         "VERIFY_MOCK_RELEASE.cmd",
       ].sort((left, right) => left.localeCompare(right)),
     );
+    await expect(readFile(join(output, "dist-server", "healthcheck.js"), "utf8"))
+      .resolves.toContain("rehearsal-healthcheck");
+    await expect(readFile(join(output, "dist-server", "verify-release.js"), "utf8"))
+      .resolves.toContain("rehearsal-verify-release");
 
     const releasedConfig = JSON.parse(
       await readFile(join(output, "config", "experiment.mock-rehearsal.json"), "utf8"),
@@ -1218,7 +1217,6 @@ describe("release creation", () => {
         "docs/RUNBOOK.md",
         "docs/TEST_REPORT.md",
         "docs/UI_COPY.md",
-        "package-lock.json",
         "package.json",
         "START_PRODUCTION.cmd",
         "VERIFY_RELEASE.cmd",
@@ -1267,6 +1265,10 @@ describe("release creation", () => {
       start:
         "node dist-server/verify-release.js && node dist-server/preflight.js && node dist-server/index.js",
     });
+    expect(runtimePackage.dependencies).toEqual({});
+    expect(runtimePackage).not.toHaveProperty("devDependencies");
+    expect(await pathExists(join(output, "package-lock.json"))).toBe(false);
+    expect(await pathExists(join(output, "node_modules"))).toBe(false);
 
     const manifest = JSON.parse(
       await readFile(join(output, RELEASE_MANIFEST_NAME), "utf8"),
