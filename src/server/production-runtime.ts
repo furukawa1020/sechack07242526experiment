@@ -54,7 +54,7 @@ async function closeApplicationWithDeadline(
 
 /**
  * Starts a formal runtime from an already verified, immutable config snapshot.
- * Verification and GO-evidence loading remain the responsibility of the sealed
+ * Technical release verification remains the responsibility of the sealed
  * production entry; this boundary cannot select Mock or Serial adapters.
  */
 export async function startProductionRuntime(

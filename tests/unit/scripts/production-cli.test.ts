@@ -20,9 +20,7 @@ import {
   runProductionHealthcheck,
 } from "../../../scripts/production-healthcheck.js";
 import {
-  hashFormalProductionCriticalConfig,
   loadFormalProductionConfig,
-  parseFormalProductionConfig,
 } from "../../../src/shared/formal-production-config.js";
 
 const FIXED_NOW = new Date("2026-07-23T03:00:00.000Z");
@@ -34,72 +32,37 @@ function digest(label: string): string {
   return createHash("sha256").update(label, "utf8").digest("hex");
 }
 
-function approval(documentId: string, contentLabel: string): Readonly<Record<string, unknown>> {
-  return {
-    status: "GO",
-    protocolVersion: PROTOCOL_VERSION,
-    documentId,
-    documentVersion: "1.0",
-    contentSha256: digest(contentLabel),
-    approvedOn: FIXED_DAY,
-    applicableUntil: FIXED_DAY,
-  };
-}
-
-function goEvidence(criticalConfigSha256: string): Readonly<Record<string, unknown>> {
-  const sourceTreeSha256 = digest("source-tree");
-  return {
-    status: "GO",
-    protocolVersion: PROTOCOL_VERSION,
-    criticalConfigSha256,
-    researchPlan: approval("PLAN-001", "research-plan"),
-    ethicsDetermination: approval("ETHICS-001", "ethics"),
-    preStimulusConsent: approval("CONSENT-001", "consent"),
-    dataManagementPlan: approval("DATA-PLAN-001", "data-plan"),
-    screenPilot: {
-      ...approval("SCREEN-PILOT-001", "screen-pilot"),
-      completedSessions: 3,
-      sourceTreeSha256,
-      pilotConfigFileHash: digest("pilot-config"),
-    },
-    releaseVerification: {
-      status: "GO",
-      protocolVersion: PROTOCOL_VERSION,
-      appVersion: "1.1.0",
-      criticalConfigSha256,
-      sourceTreeSha256,
-      reviews: [
-        {
-          reviewId: "RELEASE-REVIEW-001",
-          reviewerCode: "REV-ALPHA1",
-          reviewVersion: "1.0",
-          status: "GO",
-          protocolVersion: PROTOCOL_VERSION,
-          criticalConfigSha256,
-          reviewedOn: FIXED_DAY,
-          applicableUntil: FIXED_DAY,
-          attestationSha256: digest("attestation-one"),
-        },
-        {
-          reviewId: "RELEASE-REVIEW-002",
-          reviewerCode: "REV-BRAVO2",
-          reviewVersion: "1.0",
-          status: "GO",
-          protocolVersion: PROTOCOL_VERSION,
-          criticalConfigSha256,
-          reviewedOn: FIXED_DAY,
-          applicableUntil: FIXED_DAY,
-          attestationSha256: digest("attestation-two"),
-        },
-      ],
-    },
-  };
-}
-
 function formalConfigSource(loggingDirectory = "./data/sessions"): Readonly<Record<string, unknown>> {
-  const base = {
+  return {
     schemaVersion: 1,
     protocolVersion: PROTOCOL_VERSION,
+    environment: "production",
+    participantMode: "enabled",
+    compliance: {
+      mode: "external",
+      evidenceStorage: "outside-system",
+      verifiedByApplication: false,
+      requireApprovalDocument: false,
+      requireApprovalHash: false,
+      requireSecondVerifier: false,
+      requireReviewerIdentity: false,
+      requireScreenPilotForRelease: false,
+      requireManualGoTicket: false,
+    },
+    runtime: {
+      requireOperatorSessionConfirmation: true,
+      persistOperatorConfirmation: false,
+      requireConsentConfirmation: true,
+      requireEmergencyStopCheck: true,
+    },
+    privacy: {
+      storeOperatorIdentity: false,
+      storeApprovalEvidence: false,
+      storeApprovalHash: false,
+      storeIpAddress: false,
+      analyticsEnabled: false,
+      telemetryEnabled: false,
+    },
     studyTitle: "本番専用CLI合成設定",
     bindHost: "127.0.0.1",
     port: 4_173,
@@ -130,15 +93,6 @@ function formalConfigSource(loggingDirectory = "./data/sessions"): Readonly<Reco
       allowLan: false,
       allowExternalRuntimeRequests: false,
     },
-  };
-  const provisional = parseFormalProductionConfig({
-    ...base,
-    goEvidence: goEvidence(digest("provisional-critical-config")),
-  });
-  const criticalConfigSha256 = hashFormalProductionCriticalConfig(provisional);
-  return {
-    ...base,
-    goEvidence: goEvidence(criticalConfigSha256),
   };
 }
 

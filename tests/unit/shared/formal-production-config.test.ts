@@ -16,6 +16,7 @@ import {
   hashExperimentConfig,
   hashProductionCriticalConfig,
 } from "../../../src/shared/config-loader.js";
+import { parseExperimentConfig } from "../../../src/shared/schemas.js";
 
 function formalSource(): Record<string, unknown> {
   return {
@@ -117,6 +118,17 @@ describe("formal external-compliance config", () => {
       .toBe(hashProductionCriticalConfig(parsed));
   });
 
+  it("preserves generic config shape, key order and hashes at the release boundary", () => {
+    const source = formalSource();
+    const formal = parseFormalProductionConfig(source);
+    const generic = parseExperimentConfig(source);
+
+    expect(formal).toEqual(generic);
+    expect(hashFormalProductionConfig(formal)).toBe(hashExperimentConfig(generic));
+    expect(hashFormalProductionCriticalConfig(formal))
+      .toBe(hashProductionCriticalConfig(generic));
+  });
+
   it("discards known legacy PENDING approval state in external mode", () => {
     const parsed = parseFormalProductionConfig({
       ...formalSource(),
@@ -136,6 +148,13 @@ describe("formal external-compliance config", () => {
     expect(parsed).not.toHaveProperty("approvalHash");
     expect(parsed).not.toHaveProperty("secondVerifier");
     expect(parsed).not.toHaveProperty("screenPilot");
+  });
+
+  it("strictly rejects legacy questionnaire-audit fields instead of migrating them", () => {
+    expect(() => parseFormalProductionConfig({
+      ...formalSource(),
+      formAudit: {},
+    })).toThrow(/formAudit|unrecognized key/iu);
   });
 
   it.each([

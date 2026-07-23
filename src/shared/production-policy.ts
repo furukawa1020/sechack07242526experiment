@@ -1,7 +1,22 @@
+import type { ExperimentConfig } from "./schemas.js";
 import {
+  SCREEN_PRODUCTION_BIND_HOST,
+  SCREEN_PRODUCTION_FIXED_STATE,
+  SCREEN_PRODUCTION_ORDERS,
+  SCREEN_PRODUCTION_PORT,
+  SCREEN_PRODUCTION_RESEARCH_ID_PATTERN,
+  SCREEN_PRODUCTION_TIMING_MS,
   SCREEN_PROTOCOL_VERSION,
-  type ExperimentConfig,
-} from "./schemas.js";
+} from "./screen-production-protocol.js";
+
+export {
+  SCREEN_PRODUCTION_BIND_HOST,
+  SCREEN_PRODUCTION_FIXED_STATE,
+  SCREEN_PRODUCTION_ORDERS,
+  SCREEN_PRODUCTION_PORT,
+  SCREEN_PRODUCTION_RESEARCH_ID_PATTERN,
+  SCREEN_PRODUCTION_TIMING_MS,
+} from "./screen-production-protocol.js";
 
 export type ProductionDevicePolicyIssueCode =
   | "mock-device-not-allowed"
@@ -51,32 +66,6 @@ export type ProductionCompliancePolicyIssueCode =
   | "production-ip-storage-enabled"
   | "production-analytics-enabled"
   | "production-telemetry-enabled";
-
-export const SCREEN_PRODUCTION_FIXED_STATE = Object.freeze({
-  score: 72,
-  label: "高ストレス",
-  pufferLevel: 0.6,
-} as const);
-
-export const SCREEN_PRODUCTION_TIMING_MS = Object.freeze({
-  handling: 8_000,
-  processing: 3_000,
-  result: 15_000,
-  reset: 7_000,
-  inflateRamp: 6_000,
-  deflateRamp: 6_000,
-} as const);
-
-export const SCREEN_PRODUCTION_ORDERS = Object.freeze([
-  "ABDC",
-  "BCAD",
-  "CDBA",
-  "DACB",
-] as const);
-
-export const SCREEN_PRODUCTION_RESEARCH_ID_PATTERN = "^SH26-[0-9]{3}$";
-export const SCREEN_PRODUCTION_BIND_HOST = "127.0.0.1";
-export const SCREEN_PRODUCTION_PORT = 4_173;
 
 export interface ProductionPolicyAssessment {
   readonly technicalReadiness: "GO" | "NO-GO";
@@ -130,6 +119,8 @@ export function assessProductionPolicy(
   _now = new Date(),
   _context: ProductionPolicyContext = {},
 ): ProductionPolicyAssessment {
+  void _now;
+  void _context;
   const deviceIssues: ProductionDevicePolicyIssueCode[] = [];
   const protocolIssues: ProductionProtocolPolicyIssueCode[] = [];
   const formIssues: ProductionFormPolicyIssueCode[] = [];

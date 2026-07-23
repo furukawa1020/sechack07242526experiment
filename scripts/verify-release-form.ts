@@ -70,8 +70,8 @@ function usage(): readonly string[] {
   return Object.freeze([
     "Usage: npm run verify:form-release -- [--config <config path>]",
     "",
-    "Fetches the configured public Google Form with a read-only GET and verifies it for release.",
-    "This command is a build/release gate; it is never part of experiment runtime traffic.",
+    "Optionally audits a separately supplied legacy Google Form config with one read-only GET.",
+    "This detached utility is not a formal screen-v3 release/start gate or runtime dependency.",
   ]);
 }
 
@@ -138,9 +138,10 @@ export function assessReleaseFormVerification(
   for (const issue of productionPolicy.protocolIssues) {
     issues.push(`production-protocol-${issue}`);
   }
-  for (const issue of productionPolicy.complianceIssues) {
-    issues.push(`production-compliance-${issue}`);
-  }
+  // This detached legacy-form audit intentionally reuses only the invariant
+  // screen stimulus policy. External-compliance readiness, formal runtime
+  // privacy and the screen-v3 no-form boundary are evaluated by the actual
+  // production preflight/release path, never by this optional utility.
   for (const issue of assessFormAudit(config, now).issues) {
     issues.push(`form-audit-${issue}`);
   }
@@ -203,14 +204,13 @@ export async function verifyReleaseForm(
   const productionPolicy = assessProductionPolicy(loaded.config, now, {
     criticalConfigSha256: hashProductionCriticalConfig(loaded.config),
   });
-  const nonFormPolicyIssues = [
+  const screenStimulusIssues = [
     ...productionPolicy.deviceIssues,
     ...productionPolicy.protocolIssues,
-    ...productionPolicy.complianceIssues,
   ];
-  if (nonFormPolicyIssues.length > 0) {
+  if (screenStimulusIssues.length > 0) {
     throw new Error(
-      `Standalone form audit config failed non-form production policy (${nonFormPolicyIssues.join(", ")}).`,
+      `Standalone form audit config failed screen stimulus policy (${screenStimulusIssues.join(", ")}).`,
     );
   }
   if (loaded.config.formUrl !== STUDY_FORM_URL) {

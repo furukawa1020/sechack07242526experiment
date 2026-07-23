@@ -451,7 +451,7 @@ describe("deployment manifest verification", () => {
     expect(output).toContainEqual(expect.stringContaining("結果: PASS"));
   });
 
-  it("rejects a different valid source commit when it no longer matches the evidence binding", async () => {
+  it("rejects a different valid source commit when it no longer matches the technical binding", async () => {
     const { root, manifest } = await createManifestFixture();
     await writeFile(
       join(root, RELEASE_MANIFEST_NAME),
@@ -459,7 +459,7 @@ describe("deployment manifest verification", () => {
       "utf8",
     );
     await expect(verifyReleaseDirectory(root)).resolves.toContain(
-      "Source, application, config, and GO evidence binding SHA-256 mismatch.",
+      "Source, application, and technical config binding SHA-256 mismatch.",
     );
   });
 
@@ -468,8 +468,7 @@ describe("deployment manifest verification", () => {
     ["sourceCommit", "2".repeat(40)],
     ["sourceTreeSha256", "3".repeat(64)],
     ["criticalConfigSha256", "4".repeat(64)],
-    ["goEvidenceSha256", "5".repeat(64)],
-  ] as const)("binds %s into the integrated source evidence digest", async (field, value) => {
+  ] as const)("binds %s into the integrated technical digest", async (field, value) => {
     const { root, manifest } = await createManifestFixture();
     await writeFile(
       join(root, RELEASE_MANIFEST_NAME),
@@ -477,8 +476,20 @@ describe("deployment manifest verification", () => {
       "utf8",
     );
     await expect(verifyReleaseDirectory(root)).resolves.toContain(
-      "Source, application, config, and GO evidence binding SHA-256 mismatch.",
+      "Source, application, and technical config binding SHA-256 mismatch.",
     );
+  });
+
+  it("rejects a non-null approval-evidence hash in an external-compliance manifest", async () => {
+    const { root, manifest } = await createManifestFixture();
+    await writeFile(
+      join(root, RELEASE_MANIFEST_NAME),
+      `${JSON.stringify({ ...manifest, goEvidenceSha256: "5".repeat(64) }, null, 2)}\n`,
+      "utf8",
+    );
+    await expect(verifyReleaseDirectory(root)).resolves.toEqual([
+      "Deployment manifest has an invalid structure.",
+    ]);
   });
 
   it.each(["missing", "invalid"] as const)("rejects a %s source commit", async (variant) => {
@@ -594,11 +605,11 @@ describe("deployment manifest verification", () => {
     );
   });
 
-  it("rejects a rehashed packaged config when its approved semantics changed", async () => {
+  it("rejects a rehashed packaged config when its formal semantics changed", async () => {
     const { root, manifest } = await createManifestFixture();
     const changedSource = JSON.stringify({
       ...configSource(),
-      studyTitle: "unapproved semantic change",
+      studyTitle: "unbound semantic change",
     });
     const changedHash = createHash("sha256").update(changedSource).digest("hex");
     await writeFile(join(root, "config", "experiment.json"), changedSource, "utf8");
@@ -774,91 +785,43 @@ describe("release creation", () => {
     ).rejects.toThrow("must exactly match the config tracked by the recorded source commit");
   });
 
-  it("invalidates old release evidence after any other tracked source change", async () => {
+  it("does not gate release on legacy PENDING state or screen-pilot metadata", async () => {
     const root = await createReleaseSource();
-    await writeRelative(root, "src/after-review.ts", "export const changedAfterReview = true;\n");
-    await runGit(root, ["add", "--", "src/after-review.ts"]);
-    await runGit(root, ["commit", "--quiet", "-m", "Change code after approval"]);
-
-    await expect(
-      createRelease({
-        rootDirectory: root,
-        configPath: "config/experiment.production.json",
-        outputPath: "release/stale-evidence",
-        writeLine: () => undefined,
-      }),
-    ).rejects.toThrow("goEvidence.releaseVerification.sourceTreeSha256");
-  });
-
-  it("rejects a pilot config whose tracked bytes differ from the approved pilot hash", async () => {
-    const root = await createReleaseSource();
-    const pilotConfigPath = join(root, "config", "experiment.screen-pilot.json");
-    await writeFile(
-      pilotConfigPath,
-      `${JSON.stringify({ fixture: "changed-screen-pilot", protocolVersion: SCREEN_PROTOCOL_VERSION })}\n`,
-      "utf8",
-    );
-    await runGit(root, ["add", "--", "config/experiment.screen-pilot.json"]);
-    await runGit(root, ["commit", "--quiet", "-m", "Change pilot config after approval"]);
-
-    const sourceCommit = await runGit(root, ["rev-parse", "HEAD"]);
-    const sourceTreeSha256 = await hashTrackedSourceTreeAtCommit(root, sourceCommit);
-    const productionConfigPath = join(root, "config", "experiment.production.json");
-    const productionConfig = JSON.parse(
-      await readFile(productionConfigPath, "utf8"),
-    ) as Record<string, unknown>;
-    const goEvidence = productionConfig["goEvidence"] as Record<string, unknown>;
-    const releaseVerification = goEvidence["releaseVerification"] as Record<string, unknown>;
-    const screenPilot = goEvidence["screenPilot"] as Record<string, unknown>;
-    releaseVerification["sourceTreeSha256"] = sourceTreeSha256;
-    screenPilot["sourceTreeSha256"] = sourceTreeSha256;
-    await writeFile(productionConfigPath, JSON.stringify(productionConfig), "utf8");
-    await runGit(root, ["add", "--", "config/experiment.production.json"]);
-    await runGit(root, ["commit", "--quiet", "-m", "Refresh tree evidence only"]);
-
-    await expect(
-      createRelease({
-        rootDirectory: root,
-        configPath: "config/experiment.production.json",
-        outputPath: "release/stale-pilot-config",
-        writeLine: () => undefined,
-      }),
-    ).rejects.toThrow("goEvidence.screenPilot.pilotConfigFileHash");
-  });
-
-  it("compares approved appVersion with the package.json at HEAD", async () => {
-    const root = await createReleaseSource();
-    const packagePath = join(root, "package.json");
-    const packageSource = JSON.parse(await readFile(packagePath, "utf8")) as Record<string, unknown>;
-    packageSource["version"] = "9.8.8";
-    await writeFile(packagePath, JSON.stringify(packageSource), "utf8");
-    await runGit(root, ["add", "--", "package.json"]);
-    await runGit(root, ["commit", "--quiet", "-m", "Change application version"]);
-
-    const sourceCommit = await runGit(root, ["rev-parse", "HEAD"]);
-    const sourceTreeSha256 = await hashTrackedSourceTreeAtCommit(root, sourceCommit);
     const configPath = join(root, "config", "experiment.production.json");
     const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
-    const releaseVerification = (
-      (config["goEvidence"] as Record<string, unknown>)["releaseVerification"]
-    ) as Record<string, unknown>;
-    releaseVerification["sourceTreeSha256"] = sourceTreeSha256;
-    const screenPilot = (
-      (config["goEvidence"] as Record<string, unknown>)["screenPilot"]
-    ) as Record<string, unknown>;
-    screenPilot["sourceTreeSha256"] = sourceTreeSha256;
+    config["approvalStatus"] = "PENDING";
+    config["screenPilot"] = { completedSessions: 0 };
+    config["goEvidence"] = {
+      status: "NO-GO",
+      protocolVersion: "legacy",
+      approvalHash: "0".repeat(64),
+    };
     await writeFile(configPath, JSON.stringify(config), "utf8");
-    await runGit(root, ["add", "--", "config/experiment.production.json"]);
-    await runGit(root, ["commit", "--quiet", "-m", "Refresh source tree only"]);
+    await writeFile(
+      join(root, "config", "experiment.screen-pilot.json"),
+      JSON.stringify({ fixture: "optional-quality-check-only" }),
+      "utf8",
+    );
+    await runGit(root, ["add", "--", "config"]);
+    await runGit(root, ["commit", "--quiet", "-m", "Keep legacy state for migration test"]);
 
-    await expect(
-      createRelease({
-        rootDirectory: root,
-        configPath: "config/experiment.production.json",
-        outputPath: "release/stale-version",
-        writeLine: () => undefined,
-      }),
-    ).rejects.toThrow("goEvidence.releaseVerification.appVersion");
+    const output = await createRelease({
+      rootDirectory: root,
+      configPath: "config/experiment.production.json",
+      outputPath: "release/external-compliance",
+      writeLine: () => undefined,
+      installDependencies: false,
+    });
+    const packaged = JSON.parse(
+      await readFile(join(output, "config", "experiment.json"), "utf8"),
+    ) as Record<string, unknown>;
+    const manifest = JSON.parse(
+      await readFile(join(output, RELEASE_MANIFEST_NAME), "utf8"),
+    ) as ReleaseManifest;
+    expect(packaged).not.toHaveProperty("approvalStatus");
+    expect(packaged).not.toHaveProperty("screenPilot");
+    expect(packaged).not.toHaveProperty("goEvidence");
+    expect(manifest.goEvidenceSha256).toBeNull();
   });
 
   it("excludes only the exact production config path from the tracked source digest", async () => {
@@ -902,8 +865,10 @@ describe("release creation", () => {
   });
 
   it.each([
-    ["Mock device", { mode: "mock", serialPath: "" } satisfies ConfigOverrides, "device.mode"],
-    ["Serial device", { mode: "serial", serialPath: "COM3" } satisfies ConfigOverrides, "device.mode"],
+    ["Mock device", { mode: "mock", serialPath: "" } satisfies ConfigOverrides,
+      "Mock device mode is unconditionally disabled"],
+    ["Serial device", { mode: "serial", serialPath: "COM3" } satisfies ConfigOverrides,
+      "serial-device-not-allowed"],
     [
       "arbitrary protocol",
       { protocolVersion: "arbitrary-screen-v3" } satisfies ConfigOverrides,
@@ -912,9 +877,10 @@ describe("release creation", () => {
     [
       "production Mock permission",
       { allowMockInProduction: true } satisfies ConfigOverrides,
-      "device.allowMockInProduction",
+      "allow-mock-in-production-enabled",
     ],
-    ["configured form", { formUrl: STUDY_FORM_URL } satisfies ConfigOverrides, "formUrl"],
+    ["configured form", { formUrl: STUDY_FORM_URL } satisfies ConfigOverrides,
+      "production-form-url-not-empty"],
     [
       "legacy form audit",
       {
@@ -927,7 +893,7 @@ describe("release creation", () => {
           twoPersonVerified: false,
         },
       } satisfies ConfigOverrides,
-      "formAudit",
+      "production-form-audit-present",
     ],
     [
       "non-canonical production host",
@@ -971,7 +937,7 @@ describe("release creation", () => {
         outputPath: "release/not-production",
         writeLine: () => undefined,
       }),
-    ).rejects.toThrow("fixed tracked config path");
+    ).rejects.toThrow("Mock device mode is unconditionally disabled");
     expect(await pathExists(join(root, "release", "not-production"))).toBe(false);
   });
 
@@ -1113,7 +1079,7 @@ describe("release creation", () => {
     );
   });
 
-  it("creates only the approved offline payload and a self-consistent manifest", async () => {
+  it("creates only the external-compliance offline payload and a self-consistent manifest", async () => {
     const root = await createReleaseSource();
     vi.stubGlobal("fetch", async () => {
       throw new Error("production release attempted a network request");
@@ -1151,7 +1117,6 @@ describe("release creation", () => {
         "docs/DEVICE_PROTOCOL.md",
         "docs/DEPLOYMENT.md",
         "docs/EXPERIMENT_SPEC.md",
-        "docs/GO_EVIDENCE.md",
         "docs/PROTOCOL_CHANGELOG.md",
         "docs/RELEASE_CHECKLIST.md",
         "docs/RUNBOOK.md",
@@ -1179,6 +1144,7 @@ describe("release creation", () => {
       /FORM_RELEASE_GATE/iu,
       /MOCK_REHEARSAL/iu,
       /PUBLIC_DEMO/iu,
+      /GO_EVIDENCE/iu,
     ] as const;
     for (const releasedPath of actualFiles) {
       if (releasedPath === RELEASE_MANIFEST_NAME) continue;
@@ -1192,9 +1158,8 @@ describe("release creation", () => {
       await readFile(join(output, "config", "experiment.json"), "utf8"),
     ) as Record<string, unknown>;
     expect(releasedConfig).toEqual(JSON.parse(sourceConfigBytes.toString("utf8")) as unknown);
-    await expect(readFile(join(output, "config", "experiment.json"))).resolves.toEqual(
-      sourceConfigBytes,
-    );
+    expect(releasedConfig).not.toHaveProperty("goEvidence");
+    expect(releasedConfig).not.toHaveProperty("approvalStatus");
     const runtimePackage = JSON.parse(
       await readFile(join(output, "package.json"), "utf8"),
     ) as Record<string, unknown>;
@@ -1216,15 +1181,16 @@ describe("release creation", () => {
     expect(manifest.appVersion).toBe("9.8.7");
     expect(manifest.protocolVersion).toBe(SCREEN_PROTOCOL_VERSION);
     expect(manifest.configFileHash).toBe(
-      createHash("sha256").update(sourceConfigBytes).digest("hex"),
+      createHash("sha256")
+        .update(await readFile(join(output, "config", "experiment.json")))
+        .digest("hex"),
     );
     expect(manifest.configHash).toBe(hashExperimentConfig(parseExperimentConfig(releasedConfig)));
+    expect(manifest.goEvidenceSha256).toBeNull();
     expect(manifest.sourceCommit).toBe(sourceCommit);
     expect(manifest.sourceCommit).toMatch(/^[a-f0-9]{40}$/u);
     expect(manifest.sourceTreeSha256).toBe(
-      ((releasedConfig["goEvidence"] as Record<string, unknown>)[
-        "releaseVerification"
-      ] as Record<string, unknown>)["sourceTreeSha256"],
+      await hashTrackedSourceTreeAtCommit(root, sourceCommit),
     );
     expect(manifest.sourceRepository).toBe(SYNTHETIC_SOURCE_REPOSITORY);
     expect(manifest.files.some((file) => file.path.startsWith("data/"))).toBe(false);

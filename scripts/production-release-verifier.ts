@@ -393,9 +393,9 @@ export async function verifyFormalReleaseDirectoryDetailed(
       errors.push("Manifest config file hash is not bound to its file entry.");
     }
     try {
-      // Verification is itself a production gate. Reuse the closed formal
-      // loader so a structurally valid but NO-GO, expired, placeholder or
-      // otherwise unapproved evidence bundle cannot pass VERIFY_RELEASE.cmd.
+      // Verification is a technical production gate. Reuse the closed formal
+      // loader so only the screen protocol, local runtime, privacy, and
+      // external-compliance declarations can pass VERIFY_RELEASE.cmd.
       const loadedConfig = await loadFormalProductionConfig(
         FORMAL_PRODUCTION_CONFIG_PATH,
         { rootDirectory },

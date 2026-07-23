@@ -127,6 +127,7 @@ export function hashProductionCriticalConfig(config: ExperimentConfig): string {
 }
 
 export function hashProductionGoEvidence(_config: ExperimentConfig): null {
+  void _config;
   // Schema-v4 manifest compatibility only. External compliance never hashes
   // or packages approval evidence.
   return null;

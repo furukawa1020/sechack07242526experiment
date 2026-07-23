@@ -19,7 +19,6 @@ import {
 import {
   hashExperimentConfig,
   hashProductionCriticalConfig,
-  hashProductionGoEvidence,
   loadExperimentConfig,
   type LoadedExperimentConfig,
 } from "../../../src/shared/config-loader.js";
@@ -74,7 +73,7 @@ function successfulVerification(loaded: LoadedExperimentConfig) {
       configHash: loaded.configHash,
       configFileHash: loaded.configFileHash,
       criticalConfigSha256: hashProductionCriticalConfig(loaded.config),
-      goEvidenceSha256: hashProductionGoEvidence(loaded.config),
+      goEvidenceSha256: null,
       sourceTreeSha256: "d".repeat(64),
       sourceEvidenceBindingSha256: "c".repeat(64),
     }),
@@ -107,7 +106,6 @@ async function createRehearsalFixture(overrides: {
   readonly loggingDirectory?: string;
   readonly researchIdPattern?: string;
   readonly formAuditGo?: boolean;
-  readonly includeProductionGoEvidence?: boolean;
 } = {}): Promise<string> {
   const source = record(JSON.parse(
     await readFile(resolve("config", "experiment.e2e.json"), "utf8"),
@@ -116,11 +114,6 @@ async function createRehearsalFixture(overrides: {
   const device = record(source["device"]);
   const network = record(source["network"]);
   const logging = record(source["logging"]);
-  const productionSource = overrides.includeProductionGoEvidence === true
-    ? record(JSON.parse(
-        await readFile(resolve("config", "experiment.production.json"), "utf8"),
-      ) as unknown)
-    : undefined;
   const root = await mkdtemp(join(tmpdir(), "sechack-rehearsal-server-"));
   temporaryRoots.push(root);
   await Promise.all([
@@ -183,7 +176,6 @@ async function createRehearsalFixture(overrides: {
             twoPersonVerified: true,
           }
         : undefined,
-      goEvidence: productionSource?.["goEvidence"],
       logging: {
         ...logging,
         directory: overrides.loggingDirectory ?? "./data/mock-sessions",
@@ -252,6 +244,8 @@ describe("production release CLI seal", () => {
     const entryPath = join(releaseRoot, "dist-server", "index.js");
     const events: string[] = [];
     const loaded = await loadExperimentConfig("config/experiment.e2e.json");
+    const verification = successfulVerification(loaded);
+    expect(verification.manifest.goEvidenceSha256).toBeNull();
     let startOptions: VerifiedProductionStartOptions | undefined;
     const expectedServer = fakeRunningServer();
 
@@ -261,7 +255,7 @@ describe("production release CLI seal", () => {
       async verifyRelease(directory) {
         events.push("verify");
         expect(directory).toBe(releaseRoot);
-        return successfulVerification(loaded);
+        return verification;
       },
       async loadConfig(path, options) {
         events.push("load");
@@ -386,7 +380,6 @@ describe("production release CLI seal", () => {
     "configHash",
     "protocolVersion",
     "criticalConfigSha256",
-    "goEvidenceSha256",
   ] as const)(
     "rejects a loaded config whose %s differs from the verified manifest",
     async (field) => {
@@ -582,13 +575,19 @@ describe("startServer production safeguards", () => {
     })).rejects.toThrow(/Test mode prohibits GO form-audit evidence/iu);
   });
 
-  it("rejects production GO evidence in test mode even when its status is NO-GO", async () => {
-    const root = await createRehearsalFixture({ includeProductionGoEvidence: true });
-    await expect(startServer({
+  it("keeps approval evidence outside a valid nonparticipant test runtime", async () => {
+    const root = await createRehearsalFixture();
+    const server = await startServer({
       rootDirectory: root,
       configPath: "config/rehearsal.json",
       mode: "test",
-    })).rejects.toThrow(/Test mode prohibits production GO evidence/iu);
+    });
+    try {
+      const operatorConfig = await fetch(`${server.url}/api/operator/config`);
+      expect(record(await operatorConfig.json())).not.toHaveProperty("goEvidence");
+    } finally {
+      await server.close();
+    }
   });
 
   it("rejects a production log directory in test-mode configuration", async () => {
@@ -734,17 +733,22 @@ describe("startServer production safeguards", () => {
     })).rejects.toThrow(/Development mode prohibits GO form-audit evidence/iu);
   });
 
-  it("rejects production GO evidence in development mode regardless of status", async () => {
+  it("keeps approval evidence outside a valid development runtime", async () => {
     const root = await createRehearsalFixture({
-      includeProductionGoEvidence: true,
       researchIdPattern: "^DEV-[0-9]{3}$",
       loggingDirectory: "./data/dev-sessions",
     });
-    await expect(startServer({
+    const server = await startServer({
       rootDirectory: root,
       configPath: "config/rehearsal.json",
       mode: "development",
-    })).rejects.toThrow(/Development mode prohibits production GO evidence/iu);
+    });
+    try {
+      const operatorConfig = await fetch(`${server.url}/api/operator/config`);
+      expect(record(await operatorConfig.json())).not.toHaveProperty("goEvidence");
+    } finally {
+      await server.close();
+    }
   });
 
   it.each(["test", "production"])(
@@ -879,7 +883,7 @@ describe("startServer production safeguards", () => {
     })).rejects.toThrow(/DEMO-001 research ID format/iu);
   });
 
-  it("rejects form-audit and production GO evidence in rehearsal", async () => {
+  it("rejects form-audit and keeps approval evidence outside rehearsal", async () => {
     const auditRoot = await createRehearsalFixture({ formAuditGo: true });
     await expect(startServer({
       rootDirectory: auditRoot,
@@ -887,12 +891,18 @@ describe("startServer production safeguards", () => {
       mode: "rehearsal",
     })).rejects.toThrow(/Rehearsal mode prohibits GO form-audit evidence/iu);
 
-    const evidenceRoot = await createRehearsalFixture({ includeProductionGoEvidence: true });
-    await expect(startServer({
-      rootDirectory: evidenceRoot,
+    const externalComplianceRoot = await createRehearsalFixture();
+    const server = await startServer({
+      rootDirectory: externalComplianceRoot,
       configPath: "config/rehearsal.json",
       mode: "rehearsal",
-    })).rejects.toThrow(/Rehearsal mode prohibits production GO evidence/iu);
+    });
+    try {
+      const operatorConfig = await fetch(`${server.url}/api/operator/config`);
+      expect(record(await operatorConfig.json())).not.toHaveProperty("goEvidence");
+    } finally {
+      await server.close();
+    }
   });
 
   it("runs an isolated nonparticipant screen pilot with exact formal timings", async () => {
@@ -979,7 +989,7 @@ describe("startServer production safeguards", () => {
     await expect(startVerifiedScreenPilot(root)).rejects.toThrow(expected);
   });
 
-  it("rejects all production evidence and log overrides in screen-pilot mode", async () => {
+  it("rejects form-audit and log overrides while keeping approval evidence outside screen-pilot", async () => {
     const formEvidenceRoot = await createScreenPilotFixture((config) => {
       config["formAudit"] = {
         status: "NO-GO",
@@ -992,13 +1002,14 @@ describe("startServer production safeguards", () => {
     });
     await expect(startVerifiedScreenPilot(formEvidenceRoot)).rejects.toThrow(/form-audit evidence/iu);
 
-    const production = record(JSON.parse(
-      await readFile(resolve("config", "experiment.production.json"), "utf8"),
-    ) as unknown);
-    const goEvidenceRoot = await createScreenPilotFixture((config) => {
-      config["goEvidence"] = production["goEvidence"];
-    });
-    await expect(startVerifiedScreenPilot(goEvidenceRoot)).rejects.toThrow(/production GO evidence/iu);
+    const externalComplianceRoot = await createScreenPilotFixture();
+    const server = await startVerifiedScreenPilot(externalComplianceRoot);
+    try {
+      const operatorConfig = await fetch(`${server.url}/api/operator/config`);
+      expect(record(await operatorConfig.json())).not.toHaveProperty("goEvidence");
+    } finally {
+      await server.close();
+    }
 
     const overrideRoot = await createScreenPilotFixture();
     const previousDataDirectory = process.env.DATA_DIRECTORY;

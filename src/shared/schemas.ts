@@ -1,10 +1,10 @@
 import { z } from "zod";
 
 import { ORDER_CODES } from "./conditions.js";
+import { SCREEN_PROTOCOL_VERSION } from "./screen-production-protocol.js";
 
 export { STUDY_FORM_URL } from "./form-audit.js";
-
-export const SCREEN_PROTOCOL_VERSION = "R8-010-2x2-screen-v3";
+export { SCREEN_PROTOCOL_VERSION } from "./screen-production-protocol.js";
 
 const singleLineText = z.string().min(1).max(200).refine(
   (value) => !/[\r\n]/u.test(value),

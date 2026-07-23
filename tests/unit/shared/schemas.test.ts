@@ -380,10 +380,12 @@ describe("config file loading", () => {
       approvalStatus: "PENDING",
       goEvidence: { status: "NO-GO", protocolVersion: "legacy" },
     }), "utf8");
-    await expect(loadExperimentConfig("config/production.json", {
+    const migrated = await loadExperimentConfig("config/production.json", {
       rootDirectory: root,
       production: true,
-    })).resolves.toMatchObject({ config: { goEvidence: undefined } });
+    });
+    expect(migrated.config.goEvidence).toBeUndefined();
+    expect(migrated.config).not.toHaveProperty("approvalStatus");
 
     await writeFile(configPath, JSON.stringify({
       ...source,

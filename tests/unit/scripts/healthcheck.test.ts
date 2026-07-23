@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,10 +10,7 @@ import {
   parseHealthcheckArguments,
   runHealthcheck,
 } from "../../../scripts/healthcheck.js";
-import {
-  hashExperimentConfig,
-  hashProductionCriticalConfig,
-} from "../../../src/shared/config-loader.js";
+import { hashExperimentConfig } from "../../../src/shared/config-loader.js";
 import {
   parseExperimentConfig,
   SCREEN_PROTOCOL_VERSION,
@@ -29,19 +25,40 @@ interface ConfigOverrides {
   readonly protocolVersion?: string;
 }
 
-const TODAY_IN_JAPAN = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
-
-function fixtureDigest(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
 function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
   const deviceMode = overrides.deviceMode ?? "screen";
   const protocolVersion = overrides.protocolVersion
     ?? (deviceMode === "screen" ? SCREEN_PROTOCOL_VERSION : "health-test-v1");
-  const source = {
+  return {
     schemaVersion: 1,
     protocolVersion,
+    environment: deviceMode === "mock" ? "rehearsal" : "production",
+    participantMode: deviceMode === "mock" ? "disabled" : "enabled",
+    compliance: {
+      mode: "external",
+      evidenceStorage: "outside-system",
+      verifiedByApplication: false,
+      requireApprovalDocument: false,
+      requireApprovalHash: false,
+      requireSecondVerifier: false,
+      requireReviewerIdentity: false,
+      requireScreenPilotForRelease: false,
+      requireManualGoTicket: false,
+    },
+    runtime: {
+      requireOperatorSessionConfirmation: true,
+      persistOperatorConfirmation: false,
+      requireConsentConfirmation: true,
+      requireEmergencyStopCheck: true,
+    },
+    privacy: {
+      storeOperatorIdentity: false,
+      storeApprovalEvidence: false,
+      storeApprovalHash: false,
+      storeIpAddress: false,
+      analyticsEnabled: false,
+      telemetryEnabled: false,
+    },
     studyTitle: "ヘルスチェック合成設定",
     bindHost: overrides.bindHost ?? "127.0.0.1",
     port: overrides.port ?? 4173,
@@ -71,67 +88,6 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     network: {
       allowLan: overrides.allowLan ?? false,
       allowExternalRuntimeRequests: overrides.allowExternalRuntimeRequests ?? false,
-    },
-  };
-  if (deviceMode !== "screen") return source;
-  if (overrides.allowExternalRuntimeRequests === true) return source;
-  const criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
-  const approval = (documentId: string, contentSha256: string) => ({
-    status: "GO",
-    protocolVersion,
-    documentId,
-    documentVersion: "1.0",
-    contentSha256,
-    approvedOn: TODAY_IN_JAPAN,
-    applicableUntil: TODAY_IN_JAPAN,
-  });
-  return {
-    ...source,
-    goEvidence: {
-      status: "GO",
-      protocolVersion,
-      criticalConfigSha256,
-      researchPlan: approval("PLAN-001", fixtureDigest("research-plan")),
-      ethicsDetermination: approval("ETHICS-001", fixtureDigest("ethics")),
-      preStimulusConsent: approval("CONSENT-001", fixtureDigest("consent")),
-      dataManagementPlan: approval("DATA-PLAN-001", fixtureDigest("data-plan")),
-      screenPilot: {
-        ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
-        completedSessions: 3,
-        sourceTreeSha256: fixtureDigest("source-tree"),
-        pilotConfigFileHash: fixtureDigest("pilot-config"),
-      },
-      releaseVerification: {
-        status: "GO",
-        protocolVersion,
-        appVersion: "1.0.0",
-        criticalConfigSha256,
-        sourceTreeSha256: fixtureDigest("source-tree"),
-        reviews: [
-          {
-            reviewId: "RELEASE-REVIEW-001",
-            reviewerCode: "REV-0001",
-            reviewVersion: "1.0",
-            status: "GO",
-            protocolVersion,
-            criticalConfigSha256,
-            reviewedOn: TODAY_IN_JAPAN,
-            applicableUntil: TODAY_IN_JAPAN,
-            attestationSha256: fixtureDigest("release-attestation-1"),
-          },
-          {
-            reviewId: "RELEASE-REVIEW-002",
-            reviewerCode: "REV-0002",
-            reviewVersion: "1.0",
-            status: "GO",
-            protocolVersion,
-            criticalConfigSha256,
-            reviewedOn: TODAY_IN_JAPAN,
-            applicableUntil: TODAY_IN_JAPAN,
-            attestationSha256: fixtureDigest("release-attestation-2"),
-          },
-        ],
-      },
     },
   };
 }

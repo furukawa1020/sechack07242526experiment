@@ -29,23 +29,49 @@ function sha256(source: string | Uint8Array): string {
   return createHash("sha256").update(source).digest("hex");
 }
 
+function sourceTechnicalBindingSha256(input: {
+  readonly appVersion: string;
+  readonly sourceCommit: string;
+  readonly sourceTreeSha256: string;
+  readonly criticalConfigSha256: string;
+}): string {
+  return sha256([
+    "sechack-release-technical-binding-v3",
+    input.appVersion,
+    input.sourceCommit,
+    input.sourceTreeSha256,
+    input.criticalConfigSha256,
+    "MISSING",
+    "",
+  ].join("\n"));
+}
+
 function manifestSource(files: readonly {
   readonly path: string;
   readonly body: string;
   readonly bytes?: number;
   readonly digest?: string;
 }[]): string {
+  const appVersion = "1.1.0";
+  const sourceCommit = "5".repeat(40);
+  const sourceTreeSha256 = "6".repeat(64);
+  const criticalConfigSha256 = "3".repeat(64);
   return `${JSON.stringify({
     schemaVersion: 4,
-    appVersion: "1.1.0",
+    appVersion,
     protocolVersion: "R8-010-2x2-screen-v3",
     configHash: "1".repeat(64),
     configFileHash: "2".repeat(64),
-    criticalConfigSha256: "3".repeat(64),
-    goEvidenceSha256: "4".repeat(64),
-    sourceCommit: "5".repeat(40),
-    sourceTreeSha256: "6".repeat(64),
-    sourceEvidenceBindingSha256: "7".repeat(64),
+    criticalConfigSha256,
+    goEvidenceSha256: null,
+    sourceCommit,
+    sourceTreeSha256,
+    sourceEvidenceBindingSha256: sourceTechnicalBindingSha256({
+      appVersion,
+      sourceCommit,
+      sourceTreeSha256,
+      criticalConfigSha256,
+    }),
     createdAt: "2026-07-23T00:00:00.000Z",
     buildRuntime: {
       node: process.version,
