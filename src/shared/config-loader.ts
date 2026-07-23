@@ -71,8 +71,8 @@ function sha256Canonical(value: unknown): string {
 }
 
 /**
- * Binds approvals to every production config field except goEvidence itself.
- * Excluding the evidence bundle avoids an impossible self-referential digest.
+ * Hashes all runtime-relevant configuration. Legacy goEvidence is excluded
+ * because production rejects it and approval evidence is managed externally.
  */
 export function hashProductionCriticalConfig(config: ExperimentConfig): string {
   const criticalConfig = Object.fromEntries(
@@ -151,9 +151,9 @@ export async function loadExperimentConfig(
         `Production network policy rejected the config (${productionPolicy.networkIssues.join(", ")}).`,
       );
     }
-    if (!productionPolicy.goEvidence.approved) {
+    if (productionPolicy.complianceIssues.length > 0) {
       throw new Error(
-        `Production GO evidence gate rejected the config (${productionPolicy.goEvidence.issues.join(", ")}).`,
+        `Production external compliance policy rejected the config (${productionPolicy.complianceIssues.join(", ")}).`,
       );
     }
   }

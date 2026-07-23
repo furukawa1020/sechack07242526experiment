@@ -198,9 +198,28 @@ describe("fresh screen-pilot launch capability", () => {
   });
 
   it("rejects direct execution without launcher IPC", async () => {
-    const bundle = resolve("dist-server", "screen-pilot.js");
-    await expect(execFileAsync(process.execPath, [bundle, "--screen-pilot"], {
+    // Execute the source entry directly so this assertion cannot race another
+    // Vitest worker that cleans/rebuilds the shared dist-server directory.
+    // Capability-shaped environment data is intentionally insufficient:
+    // authorization is accepted only on the launcher's private IPC channel.
+    const entry = resolve("src", "server", "screen-pilot.ts");
+    await expect(execFileAsync(process.execPath, [
+      "--import",
+      "tsx",
+      entry,
+      "--screen-pilot",
+    ], {
       cwd: process.cwd(),
+      env: {
+        ...process.env,
+        NODE_OPTIONS: "",
+        NODE_PATH: "",
+        SECHACK_SCREEN_PILOT_BUILD_CHALLENGE_SHA256: "a".repeat(64),
+        SECHACK_SCREEN_PILOT_LAUNCH_CAPABILITY: JSON.stringify({
+          schemaVersion: 1,
+          nonce: "b".repeat(64),
+        }),
+      },
       windowsHide: true,
     })).rejects.toMatchObject({
       stderr: expect.stringMatching(/direct screen-pilot execution is prohibited/iu),

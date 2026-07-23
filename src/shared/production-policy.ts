@@ -32,6 +32,30 @@ export type ProductionNetworkPolicyIssueCode =
   | "production-lan-access-enabled"
   | "production-external-runtime-requests-enabled";
 
+export type ProductionCompliancePolicyIssueCode =
+  | "production-environment-not-production"
+  | "production-participant-mode-not-enabled"
+  | "production-compliance-mode-not-external"
+  | "production-evidence-storage-not-outside-system"
+  | "production-evidence-verified-by-application"
+  | "production-approval-document-required"
+  | "production-approval-hash-required"
+  | "production-second-verifier-required"
+  | "production-reviewer-identity-required"
+  | "production-screen-pilot-required"
+  | "production-manual-go-ticket-required"
+  | "production-go-evidence-present"
+  | "production-operator-confirmation-not-required"
+  | "production-operator-confirmation-persisted"
+  | "production-consent-confirmation-not-required"
+  | "production-emergency-stop-check-not-required"
+  | "production-operator-identity-storage-enabled"
+  | "production-approval-evidence-storage-enabled"
+  | "production-approval-hash-storage-enabled"
+  | "production-ip-storage-enabled"
+  | "production-analytics-enabled"
+  | "production-telemetry-enabled";
+
 export const SCREEN_PRODUCTION_FIXED_STATE = Object.freeze({
   score: 72,
   label: "高ストレス",
@@ -64,7 +88,7 @@ export interface ProductionPolicyAssessment {
   readonly protocolIssues: readonly ProductionProtocolPolicyIssueCode[];
   readonly formIssues: readonly ProductionFormPolicyIssueCode[];
   readonly networkIssues: readonly ProductionNetworkPolicyIssueCode[];
-  readonly goEvidence: ProductionGoEvidenceAssessment;
+  readonly complianceIssues: readonly ProductionCompliancePolicyIssueCode[];
 }
 
 export interface ProductionPolicyContext {
@@ -82,6 +106,8 @@ export type ProductionPolicySubject = Pick<
   ExperimentConfig,
   | "device"
   | "bindHost"
+  | "compliance"
+  | "environment"
   | "fixedState"
   | "formAudit"
   | "formUrl"
@@ -92,6 +118,9 @@ export type ProductionPolicySubject = Pick<
   | "researchIdPattern"
   | "timingMs"
   | "network"
+  | "participantMode"
+  | "privacy"
+  | "runtime"
 >;
 
 const DAY_MS = 86_400_000;
@@ -356,17 +385,19 @@ export function isWindowsComPath(value: string): boolean {
  * Evaluates every production entry point. The formal runtime has no Google
  * Form integration: questionnaire handoff is an external staff operation, so
  * both the runtime URL and the legacy in-app form-audit record must be absent.
- * Human-subject GO evidence remains a separate mandatory fail-closed gate.
+ * Approval evidence remains outside this application. Production enforces only
+ * the closed external-compliance declaration and runtime safety confirmations.
  */
 export function assessProductionPolicy(
   subject: ProductionPolicySubject,
-  now = new Date(),
-  context: ProductionPolicyContext = {},
+  _now = new Date(),
+  _context: ProductionPolicyContext = {},
 ): ProductionPolicyAssessment {
   const deviceIssues: ProductionDevicePolicyIssueCode[] = [];
   const protocolIssues: ProductionProtocolPolicyIssueCode[] = [];
   const formIssues: ProductionFormPolicyIssueCode[] = [];
   const networkIssues: ProductionNetworkPolicyIssueCode[] = [];
+  const complianceIssues: ProductionCompliancePolicyIssueCode[] = [];
 
   if (subject.device.mode === "mock") {
     deviceIssues.push("mock-device-not-allowed");
@@ -445,23 +476,84 @@ export function assessProductionPolicy(
   if (subject.network.allowExternalRuntimeRequests) {
     networkIssues.push("production-external-runtime-requests-enabled");
   }
-  const goEvidence = assessProductionGoEvidence(
-    subject.goEvidence,
-    subject.protocolVersion,
-    now,
-    context.criticalConfigSha256,
-  );
+
+  if (subject.environment !== "production") {
+    complianceIssues.push("production-environment-not-production");
+  }
+  if (subject.participantMode !== "enabled") {
+    complianceIssues.push("production-participant-mode-not-enabled");
+  }
+  if (subject.compliance.mode !== "external") {
+    complianceIssues.push("production-compliance-mode-not-external");
+  }
+  if (subject.compliance.evidenceStorage !== "outside-system") {
+    complianceIssues.push("production-evidence-storage-not-outside-system");
+  }
+  if (subject.compliance.verifiedByApplication !== false) {
+    complianceIssues.push("production-evidence-verified-by-application");
+  }
+  if (subject.compliance.requireApprovalDocument !== false) {
+    complianceIssues.push("production-approval-document-required");
+  }
+  if (subject.compliance.requireApprovalHash !== false) {
+    complianceIssues.push("production-approval-hash-required");
+  }
+  if (subject.compliance.requireSecondVerifier !== false) {
+    complianceIssues.push("production-second-verifier-required");
+  }
+  if (subject.compliance.requireReviewerIdentity !== false) {
+    complianceIssues.push("production-reviewer-identity-required");
+  }
+  if (subject.compliance.requireScreenPilotForRelease !== false) {
+    complianceIssues.push("production-screen-pilot-required");
+  }
+  if (subject.compliance.requireManualGoTicket !== false) {
+    complianceIssues.push("production-manual-go-ticket-required");
+  }
+  if (subject.goEvidence !== undefined) {
+    complianceIssues.push("production-go-evidence-present");
+  }
+  if (subject.runtime.requireOperatorSessionConfirmation !== true) {
+    complianceIssues.push("production-operator-confirmation-not-required");
+  }
+  if (subject.runtime.persistOperatorConfirmation !== false) {
+    complianceIssues.push("production-operator-confirmation-persisted");
+  }
+  if (subject.runtime.requireConsentConfirmation !== true) {
+    complianceIssues.push("production-consent-confirmation-not-required");
+  }
+  if (subject.runtime.requireEmergencyStopCheck !== true) {
+    complianceIssues.push("production-emergency-stop-check-not-required");
+  }
+  if (subject.privacy.storeOperatorIdentity !== false) {
+    complianceIssues.push("production-operator-identity-storage-enabled");
+  }
+  if (subject.privacy.storeApprovalEvidence !== false) {
+    complianceIssues.push("production-approval-evidence-storage-enabled");
+  }
+  if (subject.privacy.storeApprovalHash !== false) {
+    complianceIssues.push("production-approval-hash-storage-enabled");
+  }
+  if (subject.privacy.storeIpAddress !== false) {
+    complianceIssues.push("production-ip-storage-enabled");
+  }
+  if (subject.privacy.analyticsEnabled !== false) {
+    complianceIssues.push("production-analytics-enabled");
+  }
+  if (subject.privacy.telemetryEnabled !== false) {
+    complianceIssues.push("production-telemetry-enabled");
+  }
 
   return Object.freeze({
     approved: deviceIssues.length === 0
       && protocolIssues.length === 0
       && formIssues.length === 0
       && networkIssues.length === 0
-      && goEvidence.approved,
+      && complianceIssues.length === 0,
     deviceIssues: Object.freeze(deviceIssues),
     protocolIssues: Object.freeze(protocolIssues),
     formIssues: Object.freeze(formIssues),
     networkIssues: Object.freeze(networkIssues),
-    goEvidence,
+    complianceIssues: Object.freeze(complianceIssues),
   });
 }

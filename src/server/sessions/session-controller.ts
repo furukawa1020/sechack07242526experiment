@@ -16,6 +16,8 @@ import { waitForConfirmedDeflatedStatus } from "../devices/types.js";
 import type {
   DeviceAck,
   DeviceStatus,
+  OperatorSessionConfirmationInput,
+  OperatorSessionConfirmationStatus,
   OperatorSessionSnapshot,
   PublicCondition,
   PublicSessionSnapshot,
@@ -117,6 +119,7 @@ export class SessionController {
   private auditStorageHealthy = true;
   private operatorLeaseSupervisionEnabled = false;
   private operatorLeaseAvailable = false;
+  private operatorSessionConfirmed = false;
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly unsubscribeDevice: () => void;
 
@@ -176,6 +179,7 @@ export class SessionController {
   }
 
   public async create(input: CreateSessionInput): Promise<CreatedSession> {
+    this.requireOperatorSessionConfirmation();
     this.requireAuditStorageHealthy();
     if (this.activeSessionId !== null || this.creationPending) {
       throw conflict("進行中または確認待ちのセッションがあります。", "ACTIVE_SESSION_EXISTS");
@@ -307,6 +311,42 @@ export class SessionController {
     return this.config.device.mode;
   }
 
+  public getOperatorSessionConfirmation(): OperatorSessionConfirmationStatus {
+    const confirmed = this.operatorSessionConfirmed;
+    return Object.freeze({
+      confirmed,
+      checks: Object.freeze({
+        researchGovernanceReviewed: confirmed,
+        consentProcedureReviewed: confirmed,
+        dataManagementReviewed: confirmed,
+        venueOperationReviewed: confirmed,
+      }),
+      technicalStatus: "実施可能",
+      participantMode: "有効",
+      approvalEvidence: "本システム外で管理",
+      approvalVerification: "実施しない",
+    });
+  }
+
+  public confirmOperatorSession(
+    input: OperatorSessionConfirmationInput,
+  ): OperatorSessionConfirmationStatus {
+    this.requireOperatorLease();
+    if (
+      input.researchGovernanceReviewed !== true
+      || input.consentProcedureReviewed !== true
+      || input.dataManagementReviewed !== true
+      || input.venueOperationReviewed !== true
+    ) {
+      throw badRequest(
+        "当日の実験運用を開始するには、4項目すべての確認が必要です。",
+        "OPERATOR_SESSION_CONFIRMATION_INCOMPLETE",
+      );
+    }
+    this.operatorSessionConfirmed = true;
+    return this.getOperatorSessionConfirmation();
+  }
+
   public getPublicSnapshot(displayToken: string): PublicSessionSnapshot {
     return this.publicSnapshot(this.sessionForToken(displayToken));
   }
@@ -317,7 +357,9 @@ export class SessionController {
 
   public async prepare(sessionId: string): Promise<OperatorSessionSnapshot> {
     this.requireOperatorLease();
+    this.requireOperatorSessionConfirmation();
     const initial = this.requireActive(sessionId);
+    this.requireParticipantConsent(initial);
     this.requirePhase(initial, "setup");
     if (!initial.displayConnected) {
       throw conflict("参加者画面の接続を確認してください。", "DISPLAY_NOT_READY");
@@ -343,7 +385,9 @@ export class SessionController {
 
   public async start(sessionId: string): Promise<OperatorSessionSnapshot> {
     this.requireOperatorLease();
+    this.requireOperatorSessionConfirmation();
     const session = this.requireActive(sessionId);
+    this.requireParticipantConsent(session);
     this.requirePhase(session, "intro");
     if (session.recoveryRequired) {
       throw conflict("参加者画面の復旧確認を先に行ってください。", "RECOVERY_REQUIRED");
@@ -633,6 +677,7 @@ export class SessionController {
   public enableOperatorLeaseSupervision(): void {
     this.operatorLeaseSupervisionEnabled = true;
     this.operatorLeaseAvailable = false;
+    this.operatorSessionConfirmed = false;
   }
 
   /** Marks at least one Operator connection as having completed a round-trip lease challenge. */
@@ -643,6 +688,7 @@ export class SessionController {
   /** A run must never continue unattended after the final confirmed Operator lease is lost. */
   public markOperatorDisconnected(): void {
     this.operatorLeaseAvailable = false;
+    this.operatorSessionConfirmed = false;
     const active = this.activeSessionId === null ? undefined : this.sessions.get(this.activeSessionId);
     if (
       active === undefined
@@ -1258,6 +1304,24 @@ export class SessionController {
       throw conflict(
         "研究スタッフ画面のリアルタイム接続を確認してください。",
         "OPERATOR_CONNECTION_REQUIRED",
+      );
+    }
+  }
+
+  private requireOperatorSessionConfirmation(): void {
+    if (!this.operatorSessionConfirmed) {
+      throw conflict(
+        "外部管理事項と当日運用の4項目を確認してから開始してください。",
+        "OPERATOR_SESSION_CONFIRMATION_REQUIRED",
+      );
+    }
+  }
+
+  private requireParticipantConsent(session: RuntimeSession): void {
+    if (!session.consentConfirmed) {
+      throw conflict(
+        "提示開始前の参加同意確認が必要です。",
+        "CONSENT_NOT_CONFIRMED",
       );
     }
   }

@@ -8,7 +8,7 @@ import {
   hashFormalProductionConfig,
   hashFormalProductionCriticalConfig,
   hashFormalProductionGoEvidence,
-  parseFormalProductionConfig,
+  loadFormalProductionConfig,
 } from "../src/shared/formal-production-config.js";
 import type {
   ReleaseManifest,
@@ -399,13 +399,17 @@ export async function verifyFormalReleaseDirectoryDetailed(
       errors.push("Manifest config file hash is not bound to its file entry.");
     }
     try {
-      const configSource = await readFile(resolve(rootDirectory, FORMAL_PRODUCTION_CONFIG_PATH));
-      if (sha256Bytes(configSource) !== parsed.configFileHash) {
+      // Verification is itself a production gate. Reuse the closed formal
+      // loader so a structurally valid but NO-GO, expired, placeholder or
+      // otherwise unapproved evidence bundle cannot pass VERIFY_RELEASE.cmd.
+      const loadedConfig = await loadFormalProductionConfig(
+        FORMAL_PRODUCTION_CONFIG_PATH,
+        { rootDirectory },
+      );
+      if (loadedConfig.configFileHash !== parsed.configFileHash) {
         errors.push("Config file SHA-256 mismatch.");
       }
-      const config = parseFormalProductionConfig(
-        JSON.parse(new TextDecoder().decode(configSource)) as unknown,
-      );
+      const config = loadedConfig.config;
       if (hashFormalProductionConfig(config) !== parsed.configHash) {
         errors.push("Config semantic SHA-256 mismatch.");
       }
@@ -428,8 +432,10 @@ export async function verifyFormalReleaseDirectoryDetailed(
       ) {
         errors.push("GO evidence source tree SHA-256 mismatch.");
       }
-    } catch {
-      errors.push("Packaged config could not be parsed and bound to manifest metadata.");
+    } catch (error) {
+      errors.push(
+        `Packaged config failed formal production validation: ${error instanceof Error ? error.message : "unknown error"}`,
+      );
     }
   }
 

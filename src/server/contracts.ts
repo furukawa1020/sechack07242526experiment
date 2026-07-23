@@ -40,6 +40,33 @@ export interface OperatorSessionSnapshot extends RuntimeSession {
   readonly displayFullscreen: boolean | null;
 }
 
+/**
+ * Transient Operator acknowledgement for the current browser/server run.
+ * It deliberately carries no person, document, evidence, signature, or time.
+ */
+export interface OperatorSessionConfirmationChecks {
+  readonly researchGovernanceReviewed: boolean;
+  readonly consentProcedureReviewed: boolean;
+  readonly dataManagementReviewed: boolean;
+  readonly venueOperationReviewed: boolean;
+}
+
+export interface OperatorSessionConfirmationInput {
+  readonly researchGovernanceReviewed: true;
+  readonly consentProcedureReviewed: true;
+  readonly dataManagementReviewed: true;
+  readonly venueOperationReviewed: true;
+}
+
+export interface OperatorSessionConfirmationStatus {
+  readonly confirmed: boolean;
+  readonly checks: OperatorSessionConfirmationChecks;
+  readonly technicalStatus: "実施可能";
+  readonly participantMode: "有効";
+  readonly approvalEvidence: "本システム外で管理";
+  readonly approvalVerification: "実施しない";
+}
+
 export interface OperatorRecentEvent {
   readonly wallClockIso: string;
   readonly eventType: string;

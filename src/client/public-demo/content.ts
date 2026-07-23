@@ -38,7 +38,7 @@ export const PUBLIC_DEMO_CONDITIONS = Object.freeze([
 
 export const PUBLIC_DEMO_INTRO_STEP = 0;
 export const PUBLIC_DEMO_FIRST_PRESENTATION_STEP = 1;
-export const PUBLIC_DEMO_SUMMARY_STEP = PUBLIC_DEMO_CONDITIONS.length + 1;
+export const PUBLIC_DEMO_SUMMARY_STEP = PUBLIC_DEMO_CONDITIONS.length * 2 + 1;
 export const PUBLIC_DEMO_TOTAL_STEPS = PUBLIC_DEMO_SUMMARY_STEP + 1;
 
 export const PUBLIC_DEMO_FIXED_STATE = Object.freeze({
@@ -51,14 +51,14 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
   notice: {
     title: "公開デモ（模擬表示）",
     research: "研究参加用ではありません",
-    data: "固定模擬データ・入力／保存／送信なし",
-    device: "実機なし",
+    data: "固定模擬データ・本人非測定・生体データ取得なし",
+    device: "画面上のフグ・実機なし",
   },
   intro: {
     title: "同じ固定模擬データを、4つの方法で提示します",
     body: "変わるのは、「どこで処理するか」と「どう伝えるか」です。\n\nあなたは、少し本調子ではないまま作業を続けている場面を想定してください。\n\nどの方法が正しいかを選ぶ課題ではありません。\nそれぞれを見たときに、どう感じたかを覚えておいてください。",
     scenario:
-      "これから表示されるデータの取扱いは、比較のためのシナリオです。\n表示される値は、あなた自身を測定したものではありません。\nこの公開デモで、実際の身体データをクラウドへ送信・保存することはありません。",
+      "これから表示される値は、比較のために用意した同じ固定模擬データです。\n表示される値は、あなた自身を測定したものではありません。\nこの公開レビューでは、心拍その他の生体データを取得しません。\n\nこれから表示されるデータの取扱いは、比較のためのシナリオです。\nこの公開レビューから、固定模擬身体データを外部へ送信・保存することはありません。\n\n画面上のフグは表示だけの表現で、USB機器や実機は接続・動作していません。",
   },
   presentation: {
     position: (position: number): string => `第${position}提示 / 4`,
@@ -93,6 +93,10 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
     remember: "そのまま見て、感じたことを覚えておいてください。",
     medical: "この表示は医療上の診断ではありません。",
   },
+  response: {
+    title: (position: number): string => `第${position}提示は終了しました`,
+    body: "研究スタッフの案内をお待ちください。",
+  },
   summary: {
     title: "4つの提示を確認しました",
     body: "これは表示確認専用の公開デモです。研究への参加や回答の送信は行いません。",
@@ -114,6 +118,8 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
     next: "次へ",
     intro: "導入",
     summary: "サマリー",
+    response: (position: number): string => `第${position}提示後の待機`,
+    confirmResponse: "待機表示を確認して次へ",
   },
   rehearsal: {
     start: "自動リハーサルを開始",
@@ -124,6 +130,7 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
       processing: "処理中",
       result: "結果提示",
       reset: "リセット",
+      response: "提示後のスタッフ確認",
     },
     handling: "データの取扱い設定を確認してください。",
     processing: "固定模擬データを処理しています",
@@ -132,6 +139,7 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
       body: "そのままお待ちください。",
       puffer: "画面上のフグを収縮させています。実機は動作していません。",
     },
+    response: "研究スタッフの案内をお待ちください。",
     progress: (position: number, phase: string): string => `第${position}提示 / 4・${phase}`,
   },
   review: {
@@ -145,7 +153,18 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
       connection: "同じブラウザ内だけで同期します",
       unsupported:
         "このブラウザではタブ間同期を利用できません。各画面は手動で確認できます。",
-      scenes: ["共通導入", "第1提示", "第2提示", "第3提示", "第4提示", "サマリー"],
+      scenes: [
+        "共通導入",
+        "第1提示",
+        "第1提示後の待機",
+        "第2提示",
+        "第2提示後の待機",
+        "第3提示",
+        "第3提示後の待機",
+        "第4提示",
+        "第4提示後の待機",
+        "サマリー",
+      ],
     },
     display: {
       waiting: "進行画面との接続を待っています。同じブラウザで進行画面を開いてください。",
@@ -179,5 +198,27 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
 export function publicDemoStepLabel(step: number): string {
   if (step === PUBLIC_DEMO_INTRO_STEP) return PUBLIC_DEMO_COPY.navigation.intro;
   if (step === PUBLIC_DEMO_SUMMARY_STEP) return PUBLIC_DEMO_COPY.navigation.summary;
-  return PUBLIC_DEMO_COPY.presentation.position(step);
+  const position = publicDemoPositionForStep(step);
+  return isPublicDemoResponseStep(step)
+    ? PUBLIC_DEMO_COPY.navigation.response(position)
+    : PUBLIC_DEMO_COPY.presentation.position(position);
+}
+
+export function publicDemoPresentationStep(position: number): number {
+  return PUBLIC_DEMO_FIRST_PRESENTATION_STEP + (position - 1) * 2;
+}
+
+export function publicDemoResponseStep(position: number): number {
+  return publicDemoPresentationStep(position) + 1;
+}
+
+export function publicDemoPositionForStep(step: number): number {
+  if (step <= PUBLIC_DEMO_INTRO_STEP || step >= PUBLIC_DEMO_SUMMARY_STEP) {
+    throw new RangeError(`Public demo presentation step is out of range: ${step}`);
+  }
+  return Math.ceil(step / 2);
+}
+
+export function isPublicDemoResponseStep(step: number): boolean {
+  return step > PUBLIC_DEMO_INTRO_STEP && step < PUBLIC_DEMO_SUMMARY_STEP && step % 2 === 0;
 }

@@ -30,7 +30,7 @@
   "goEvidence": {
     "status": "NO-GO",
     "protocolVersion": "R8-010-2x2-screen-v3",
-    "criticalConfigSha256": "884cd35698c341d95c34f4e8e8cce282e6b0b3a2c1b54eae89cc2e3d36dc13e6",
+    "criticalConfigSha256": "44a65f0d44a5531acb9dc087436ed1c48bcc882a5c61e8e5d762f2ee8815760e",
     "researchPlan": {
       "status": "NO-GO",
       "protocolVersion": "R8-010-2x2-screen-v3",
@@ -83,7 +83,7 @@
       "status": "NO-GO",
       "protocolVersion": "R8-010-2x2-screen-v3",
       "appVersion": "PENDING",
-      "criticalConfigSha256": "884cd35698c341d95c34f4e8e8cce282e6b0b3a2c1b54eae89cc2e3d36dc13e6",
+      "criticalConfigSha256": "44a65f0d44a5531acb9dc087436ed1c48bcc882a5c61e8e5d762f2ee8815760e",
       "sourceTreeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "reviews": [
         {
@@ -92,7 +92,7 @@
           "reviewVersion": "PENDING",
           "status": "NO-GO",
           "protocolVersion": "R8-010-2x2-screen-v3",
-          "criticalConfigSha256": "884cd35698c341d95c34f4e8e8cce282e6b0b3a2c1b54eae89cc2e3d36dc13e6",
+          "criticalConfigSha256": "44a65f0d44a5531acb9dc087436ed1c48bcc882a5c61e8e5d762f2ee8815760e",
           "reviewedOn": null,
           "applicableUntil": null,
           "attestationSha256": "0000000000000000000000000000000000000000000000000000000000000000"
@@ -103,7 +103,7 @@
           "reviewVersion": "PENDING",
           "status": "NO-GO",
           "protocolVersion": "R8-010-2x2-screen-v3",
-          "criticalConfigSha256": "884cd35698c341d95c34f4e8e8cce282e6b0b3a2c1b54eae89cc2e3d36dc13e6",
+          "criticalConfigSha256": "44a65f0d44a5531acb9dc087436ed1c48bcc882a5c61e8e5d762f2ee8815760e",
           "reviewedOn": null,
           "applicableUntil": null,
           "attestationSha256": "0000000000000000000000000000000000000000000000000000000000000000"

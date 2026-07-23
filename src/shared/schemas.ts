@@ -84,6 +84,34 @@ export const DeviceConfigSchema = z.object({
   }
 });
 
+export const ExternalComplianceSchema = z.object({
+  mode: z.literal("external"),
+  evidenceStorage: z.literal("outside-system"),
+  verifiedByApplication: z.literal(false),
+  requireApprovalDocument: z.literal(false),
+  requireApprovalHash: z.literal(false),
+  requireSecondVerifier: z.literal(false),
+  requireReviewerIdentity: z.literal(false),
+  requireScreenPilotForRelease: z.literal(false),
+  requireManualGoTicket: z.literal(false),
+}).strict();
+
+export const RuntimeComplianceSchema = z.object({
+  requireOperatorSessionConfirmation: z.literal(true),
+  persistOperatorConfirmation: z.literal(false),
+  requireConsentConfirmation: z.literal(true),
+  requireEmergencyStopCheck: z.literal(true),
+}).strict();
+
+export const CompliancePrivacySchema = z.object({
+  storeOperatorIdentity: z.literal(false),
+  storeApprovalEvidence: z.literal(false),
+  storeApprovalHash: z.literal(false),
+  storeIpAddress: z.literal(false),
+  analyticsEnabled: z.literal(false),
+  telemetryEnabled: z.literal(false),
+}).strict();
+
 const formUrlSchema = z.string().max(2_048).superRefine((value, context) => {
   if (value === "") {
     return;
@@ -212,6 +240,11 @@ export const ProductionGoEvidenceSchema = z.object({
 export const ExperimentConfigSchema = z.object({
   schemaVersion: z.literal(1),
   protocolVersion: singleLineText,
+  environment: z.enum(["development", "test", "rehearsal", "screen-pilot", "production"]),
+  participantMode: z.enum(["disabled", "enabled"]),
+  compliance: ExternalComplianceSchema,
+  runtime: RuntimeComplianceSchema,
+  privacy: CompliancePrivacySchema,
   studyTitle: singleLineText,
   bindHost: singleLineText,
   port: z.number().int().min(1_024).max(65_535),
@@ -236,8 +269,8 @@ export const ExperimentConfigSchema = z.object({
   // Legacy/standalone form-audit metadata. Formal screen-v3 production
   // explicitly rejects its presence and does not ship or call the audit path.
   formAudit: FormAuditSchema.optional(),
-  // Optional for development and test fixtures. Every production entry point
-  // independently rejects a missing or unapproved evidence bundle.
+  // Legacy non-production metadata only. Formal production uses external
+  // compliance and rejects any in-application approval evidence.
   goEvidence: ProductionGoEvidenceSchema.optional(),
   logging: z.object({
     directory: safeRelativeDirectory,
@@ -289,6 +322,9 @@ export type FixedState = Readonly<z.infer<typeof FixedStateSchema>>;
 export type TimingConfig = Readonly<z.infer<typeof TimingSchema>>;
 export type DeviceConfig = Readonly<z.infer<typeof DeviceConfigSchema>>;
 export type DeviceMode = DeviceConfig["mode"];
+export type ExternalCompliance = Readonly<z.infer<typeof ExternalComplianceSchema>>;
+export type RuntimeCompliance = Readonly<z.infer<typeof RuntimeComplianceSchema>>;
+export type CompliancePrivacy = Readonly<z.infer<typeof CompliancePrivacySchema>>;
 export type FormAudit = Readonly<z.infer<typeof FormAuditSchema>>;
 export type ApprovalEvidence = Readonly<z.infer<typeof ApprovalEvidenceSchema>>;
 export type ScreenPilotEvidence = Readonly<z.infer<typeof ScreenPilotEvidenceSchema>>;

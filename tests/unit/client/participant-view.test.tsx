@@ -329,6 +329,10 @@ describe("participant presentation invariants", () => {
     expect(message).toHaveTextContent(
       `${formatResponseCheckpointTitle(3)}${UI_COPY.response.waiting}`,
     );
+    expect(view.container.querySelector(".participant-footer")).toBeNull();
+    expect(view.container.textContent).toBe(
+      `${formatResponseCheckpointTitle(3)}${UI_COPY.response.waiting}`,
+    );
     expect(view.container.querySelector(
       ".condition-grid, [data-testid='result-panel'], [data-testid='screen-puffer-visual']",
     )).toBeNull();

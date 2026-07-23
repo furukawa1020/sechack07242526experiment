@@ -440,7 +440,7 @@ export function ParticipantView({ snapshot }: ParticipantViewProps): React.JSX.E
     >
       {snapshot.rehearsal ? <RehearsalNotice /> : null}
       {phaseContent(snapshot)}
-      <Footer />
+      {snapshot.phase === "response" ? null : <Footer />}
     </div>
   );
 }
