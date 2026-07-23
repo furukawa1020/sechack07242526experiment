@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import { formatPresentationPosition, UI_COPY } from "../../../src/shared/copy.js";
 
+const normalizeLineEndings = (value: string): string => value.replace(/\r\n?/gu, "\n");
+
 describe("participant UI copy", () => {
   it("keeps the approved introduction and scenario disclosure verbatim", () => {
     expect(UI_COPY.intro.title).toBe("同じ固定模擬データを、4つの方法で提示します");
@@ -53,7 +55,9 @@ describe("participant UI copy", () => {
       readFile(resolve("docs", "UI_COPY.md"), "utf8"),
       readFile(resolve("SecHack_Experiment_Codex_Package", "docs", "UI_COPY.md"), "utf8"),
     ]);
-    expect(packagedDocument).toBe(document);
+    const normalizedDocument = normalizeLineEndings(document);
+    const normalizedPackagedDocument = normalizeLineEndings(packagedDocument);
+    expect(normalizedPackagedDocument).toBe(normalizedDocument);
 
     const formalCopy = [
       UI_COPY.intro.title,
@@ -84,6 +88,6 @@ describe("participant UI copy", () => {
       ...Object.values(UI_COPY.error),
       ...Object.values(UI_COPY.rehearsal),
     ];
-    for (const copy of formalCopy) expect(document).toContain(copy);
+    for (const copy of formalCopy) expect(normalizedDocument).toContain(copy);
   });
 });
