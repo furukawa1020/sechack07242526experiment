@@ -392,7 +392,7 @@ describe("preflight report safety", () => {
     expect(exitCode).toBe(0);
     expect(output.join("\n")).toContain("結果: PASS");
     expect(output.join("\n")).toContain("SHA-256");
-    expect(output.join("\n")).toContain("アプリ内アンケート監査証跡: NO-GO");
+    expect(output.join("\n")).toContain("外部アンケート統合: 本番利用不可");
     expect(output.join("\n")).not.toContain(secret);
   });
 });
