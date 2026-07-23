@@ -7,7 +7,10 @@ import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { runScreenPilotLauncher } from "../../../scripts/screen-pilot-launcher.js";
+import {
+  freshBuildInvocation,
+  runScreenPilotLauncher,
+} from "../../../scripts/screen-pilot-launcher.js";
 import {
   consumeScreenPilotLaunchCapability,
   createScreenPilotLaunchCapability,
@@ -96,6 +99,20 @@ afterEach(async () => {
 });
 
 describe("fresh screen-pilot launch capability", () => {
+  it("uses an explicit Windows command processor for the npm command shim", () => {
+    const invocation = freshBuildInvocation("win32", {
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+    });
+    expect(invocation).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", "npm.cmd run build"],
+    });
+    expect(() => freshBuildInvocation("win32", { ComSpec: "npm.cmd" }))
+      .toThrow(/absolute Windows ComSpec/iu);
+    expect(() => freshBuildInvocation("win32", { ComSpec: "C:\\tools\\not-cmd.exe" }))
+      .toThrow(/absolute Windows ComSpec/iu);
+  });
+
   it("rejects invoking the launcher outside npm run screen-pilot", async () => {
     const lifecycle = process.env.npm_lifecycle_event;
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);

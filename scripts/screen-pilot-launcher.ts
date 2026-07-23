@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { resolve } from "node:path";
+import { basename, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -23,6 +23,33 @@ const PROHIBITED_ENVIRONMENT_KEYS = Object.freeze([
   "DATA_DIRECTORY",
 ] as const);
 const SHUTDOWN_MESSAGE_TYPE = "screen-pilot.shutdown";
+
+export interface FreshBuildInvocation {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+/**
+ * Windows cannot execute an npm.cmd shim directly with shell:false on all
+ * supported Node versions. Invoke the system command processor explicitly,
+ * with a fixed command string and no user-controlled arguments.
+ */
+export function freshBuildInvocation(
+  platform = process.platform,
+  environment: NodeJS.ProcessEnv = process.env,
+): FreshBuildInvocation {
+  if (platform !== "win32") {
+    return Object.freeze({ command: "npm", args: Object.freeze(["run", "build"]) });
+  }
+  const commandProcessor = (environment.ComSpec ?? environment.COMSPEC ?? "").trim();
+  if (!isAbsolute(commandProcessor) || basename(commandProcessor).toLowerCase() !== "cmd.exe") {
+    throw new Error("Screen-pilot requires an absolute Windows ComSpec path to cmd.exe.");
+  }
+  return Object.freeze({
+    command: commandProcessor,
+    args: Object.freeze(["/d", "/s", "/c", "npm.cmd run build"]),
+  });
+}
 
 function waitForExit(child: ChildProcess, label: string): Promise<number> {
   return new Promise<number>((resolveExit, rejectExit) => {
@@ -77,9 +104,10 @@ async function runFreshBuild(
   evidence: ScreenPilotSourceEvidence,
   buildChallengeSha256: string,
 ): Promise<void> {
+  const invocation = freshBuildInvocation();
   const child = spawn(
-    process.platform === "win32" ? "npm.cmd" : "npm",
-    ["run", "build"],
+    invocation.command,
+    invocation.args,
     {
       cwd: rootDirectory,
       env: screenPilotBuildEnvironment(evidence, buildChallengeSha256),
