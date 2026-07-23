@@ -645,20 +645,6 @@ export function OperatorScreen(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    let current = true;
-    void experimentApi.getOperatorSessionConfirmation().then((status) => {
-      if (current) {
-        setOperatorConfirmation(status);
-        setOperatorConfirmationDraft(status.checks);
-        setOperatorConfirmationLoaded(true);
-      }
-    }).catch((error: unknown) => {
-      if (current) setFailure(errorMessage(error));
-    });
-    return () => { current = false; };
-  }, []);
-
-  useEffect(() => {
     const activeSessionId = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (activeSessionId === null) return;
     let current = true;
@@ -701,6 +687,23 @@ export function OperatorScreen(): React.JSX.Element {
     onMessage: onSocketMessage,
     announceOperator: true,
   });
+  useEffect(() => {
+    if (realtime.status !== "open") {
+      setOperatorConfirmationLoaded(false);
+      return;
+    }
+    let current = true;
+    void experimentApi.getOperatorSessionConfirmation().then((status) => {
+      if (current) {
+        setOperatorConfirmation(status);
+        setOperatorConfirmationDraft(status.checks);
+        setOperatorConfirmationLoaded(true);
+      }
+    }).catch((error: unknown) => {
+      if (current) setFailure(errorMessage(error));
+    });
+    return () => { current = false; };
+  }, [realtime.status]);
   const remainingSeconds = useRemainingSeconds(session?.phaseEndsAt ?? null, session?.serverNow ?? null);
 
   const confirmOperatorSession = async (): Promise<void> => {

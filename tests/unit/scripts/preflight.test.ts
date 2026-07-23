@@ -1,11 +1,8 @@
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-
-import { hashProductionCriticalConfig } from "../../../src/shared/config-loader.js";
 
 import {
   evaluatePreflightGates,
@@ -25,10 +22,6 @@ import {
 
 const AUDIT_CONTENT_SHA256 = "087a88918e51f152e237a823b51a64e23e91e6f9fc328ac9796fe9475cdc1800";
 const AUDIT_NOW = new Date("2026-07-21T12:00:00Z");
-
-function fixtureDigest(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
 
 function goFormAudit(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -63,6 +56,33 @@ function configSource(overrides: {
   const source: Record<string, unknown> = {
     schemaVersion: 1,
     protocolVersion,
+    environment: "production",
+    participantMode: "enabled",
+    compliance: {
+      mode: "external",
+      evidenceStorage: "outside-system",
+      verifiedByApplication: false,
+      requireApprovalDocument: false,
+      requireApprovalHash: false,
+      requireSecondVerifier: false,
+      requireReviewerIdentity: false,
+      requireScreenPilotForRelease: false,
+      requireManualGoTicket: false,
+    },
+    runtime: {
+      requireOperatorSessionConfirmation: true,
+      persistOperatorConfirmation: false,
+      requireConsentConfirmation: true,
+      requireEmergencyStopCheck: true,
+    },
+    privacy: {
+      storeOperatorIdentity: false,
+      storeApprovalEvidence: false,
+      storeApprovalHash: false,
+      storeIpAddress: false,
+      analyticsEnabled: false,
+      telemetryEnabled: false,
+    },
     studyTitle: "合成テスト設定",
     bindHost: overrides.bindHost ?? "127.0.0.1",
     port: overrides.port ?? 4173,
@@ -96,64 +116,6 @@ function configSource(overrides: {
   };
   if (overrides.formAudit !== undefined && overrides.omitFormAudit !== true) {
     source["formAudit"] = overrides.formAudit;
-  }
-  if (mode === "screen") {
-    const criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
-    const approval = (documentId: string, contentSha256: string) => ({
-      status: "GO",
-      protocolVersion,
-      documentId,
-      documentVersion: "1.0",
-      contentSha256,
-      approvedOn: "2026-07-20",
-      applicableUntil: "2026-07-22",
-    });
-    source["goEvidence"] = {
-      status: "GO",
-      protocolVersion,
-      criticalConfigSha256,
-      researchPlan: approval("PLAN-001", fixtureDigest("research-plan")),
-      ethicsDetermination: approval("ETHICS-001", fixtureDigest("ethics")),
-      preStimulusConsent: approval("CONSENT-001", fixtureDigest("consent")),
-      dataManagementPlan: approval("DATA-PLAN-001", fixtureDigest("data-plan")),
-      screenPilot: {
-        ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
-        completedSessions: 3,
-        sourceTreeSha256: fixtureDigest("source-tree"),
-        pilotConfigFileHash: fixtureDigest("pilot-config"),
-      },
-      releaseVerification: {
-        status: "GO",
-        protocolVersion,
-        appVersion: "1.0.0",
-        criticalConfigSha256,
-        sourceTreeSha256: fixtureDigest("source-tree"),
-        reviews: [
-          {
-            reviewId: "RELEASE-REVIEW-001",
-            reviewerCode: "REV-0001",
-            reviewVersion: "1.0",
-            status: "GO",
-            protocolVersion,
-            criticalConfigSha256,
-            reviewedOn: "2026-07-20",
-            applicableUntil: "2026-07-22",
-            attestationSha256: fixtureDigest("release-attestation-1"),
-          },
-          {
-            reviewId: "RELEASE-REVIEW-002",
-            reviewerCode: "REV-0002",
-            reviewVersion: "1.0",
-            status: "GO",
-            protocolVersion,
-            criticalConfigSha256,
-            reviewedOn: "2026-07-20",
-            applicableUntil: "2026-07-22",
-            attestationSha256: fixtureDigest("release-attestation-2"),
-          },
-        ],
-      },
-    };
   }
   return source;
 }
@@ -229,16 +191,15 @@ describe("preflight production gates", () => {
       (check) => check.name === "protocol.fixedParameters",
     )?.status).toBe("pass");
     expect(evaluatePreflightGates(config, false, AUDIT_NOW).find(
-      (check) => check.name === "goEvidence",
+      (check) => check.name === "compliance.external",
     )?.status).toBe("pass");
   });
 
-  it("keeps GO evidence fail-closed when form integration is absent", () => {
-    const complete = parseExperimentConfig(configSource({ mode: "screen" }));
-    const formOnly = { ...complete, goEvidence: undefined } as ExperimentConfig;
-    const checks = evaluatePreflightGates(formOnly, false, AUDIT_NOW);
+  it("does not require legacy approval evidence in external compliance mode", () => {
+    const config = parseExperimentConfig(configSource({ mode: "screen" }));
+    const checks = evaluatePreflightGates(config, false, AUDIT_NOW);
     expect(checks.find((check) => check.name === "formAudit")?.status).toBe("pass");
-    expect(checks.find((check) => check.name === "goEvidence")?.status).toBe("fail");
+    expect(checks.find((check) => check.name === "compliance.external")?.status).toBe("pass");
   });
 
   it("rejects an arbitrary protocolVersion even when the remaining screen metadata is formal", () => {

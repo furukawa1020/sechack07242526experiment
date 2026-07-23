@@ -434,6 +434,30 @@ describe("SessionController", () => {
     controller.dispose();
   });
 
+  it("expires the transient confirmation when the Operator browser lease ends", async () => {
+    const config = parseExperimentConfig({ ...testConfig(), participantMode: "enabled" });
+    const { controller } = makeController(0, {
+      config,
+      confirmOperatorSession: false,
+    });
+    controller.enableOperatorLeaseSupervision();
+    controller.markOperatorConnected();
+    controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION);
+    expect(controller.getOperatorSessionConfirmation().confirmed).toBe(true);
+
+    controller.markOperatorDisconnected();
+    expect(controller.getOperatorSessionConfirmation().confirmed).toBe(false);
+    await expect(controller.create({
+      researchId: "SH26-001",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    })).rejects.toMatchObject({
+      code: "OPERATOR_SESSION_CONFIRMATION_REQUIRED",
+      status: 409,
+    });
+    controller.dispose();
+  });
+
   it("keeps STOP available before the transient Operator confirmation", async () => {
     const { controller, device } = makeController(0, { confirmOperatorSession: false });
 
