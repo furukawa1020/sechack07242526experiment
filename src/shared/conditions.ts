@@ -1,4 +1,4 @@
-export const CONDITION_CODES = Object.freeze(["A", "B", "C", "D"] as const);
+export const CONDITION_CODES = Object.freeze(["A", "B", "C"] as const);
 
 export type ConditionCode = (typeof CONDITION_CODES)[number];
 export type ProcessingLocation = "cloud" | "local";
@@ -10,26 +10,27 @@ export type ConditionDefinition = Readonly<{
 }>;
 
 /**
- * The four experimental conditions are protocol constants. Do not make this
+ * The three experimental conditions are protocol constants. Do not make this
  * mapping configurable: changing it changes the experiment itself.
  */
 export const CONDITIONS = Object.freeze({
   A: Object.freeze({ processing: "cloud", presentation: "label" }),
   B: Object.freeze({ processing: "local", presentation: "label" }),
   C: Object.freeze({ processing: "local", presentation: "puffer" }),
-  D: Object.freeze({ processing: "cloud", presentation: "puffer" }),
 } as const satisfies Readonly<Record<ConditionCode, ConditionDefinition>>);
 
-export const ORDER_CODES = Object.freeze(["ABDC", "BCAD", "CDBA", "DACB"] as const);
+export const ORDER_CODES = Object.freeze([
+  "ABC", "ACB", "BAC", "BCA", "CAB", "CBA",
+] as const);
 
 export type OrderCode = (typeof ORDER_CODES)[number];
-export type SequenceIndex = 0 | 1 | 2 | 3;
+export type SequenceIndex = 0 | 1 | 2;
 
-type ConditionSequence = readonly [ConditionCode, ConditionCode, ConditionCode, ConditionCode];
-type MutablePositionCounts = Record<ConditionCode, [number, number, number, number]>;
+type ConditionSequence = readonly [ConditionCode, ConditionCode, ConditionCode];
+type MutablePositionCounts = Record<ConditionCode, [number, number, number]>;
 
 export const SEQUENCE_INDICES = Object.freeze(
-  [0, 1, 2, 3] as const satisfies readonly SequenceIndex[],
+  [0, 1, 2] as const satisfies readonly SequenceIndex[],
 );
 
 export interface OrderDesignValidation {
@@ -71,21 +72,20 @@ export function conditionsForOrder(orderCode: OrderCode): readonly ConditionCode
 export function validateOrderDesign(orders: readonly string[]): OrderDesignValidation {
   const errors: string[] = [];
   const positionCounts: MutablePositionCounts = {
-    A: [0, 0, 0, 0],
-    B: [0, 0, 0, 0],
-    C: [0, 0, 0, 0],
-    D: [0, 0, 0, 0],
+    A: [0, 0, 0],
+    B: [0, 0, 0],
+    C: [0, 0, 0],
   };
   const adjacentPairs: string[] = [];
 
-  if (orders.length !== CONDITION_CODES.length) {
-    errors.push(`Expected 4 orders, received ${orders.length}.`);
+  if (orders.length !== ORDER_CODES.length) {
+    errors.push(`Expected 6 orders, received ${orders.length}.`);
   }
 
   for (const order of orders) {
     const codes = [...order];
     if (codes.length !== CONDITION_CODES.length) {
-      errors.push(`Order ${order} must contain exactly 4 conditions.`);
+      errors.push(`Order ${order} must contain exactly 3 conditions.`);
       continue;
     }
 
@@ -94,7 +94,7 @@ export function validateOrderDesign(orders: readonly string[]): OrderDesignValid
       uniqueCodes.size !== CONDITION_CODES.length
       || CONDITION_CODES.some((code) => !uniqueCodes.has(code))
     ) {
-      errors.push(`Order ${order} must contain A, B, C and D exactly once.`);
+      errors.push(`Order ${order} must contain A, B and C exactly once.`);
       continue;
     }
 
@@ -109,13 +109,13 @@ export function validateOrderDesign(orders: readonly string[]): OrderDesignValid
     adjacentPairs.push(
       `${validatedCodes[0]}${validatedCodes[1]}`,
       `${validatedCodes[1]}${validatedCodes[2]}`,
-      `${validatedCodes[2]}${validatedCodes[3]}`,
     );
   }
 
+  const expectedPositionCount = ORDER_CODES.length / CONDITION_CODES.length;
   for (const code of CONDITION_CODES) {
-    if (positionCounts[code].some((count) => count !== 1)) {
-      errors.push(`Condition ${code} must occur exactly once in every position.`);
+    if (positionCounts[code].some((count) => count !== expectedPositionCount)) {
+      errors.push(`Condition ${code} must occur exactly twice in every position.`);
     }
   }
 
@@ -127,10 +127,10 @@ export function validateOrderDesign(orders: readonly string[]): OrderDesignValid
     pairCounts.set(pair, (pairCounts.get(pair) ?? 0) + 1);
   }
   if (
-    adjacentPairs.length !== expectedPairs.length
-    || expectedPairs.some((pair) => pairCounts.get(pair) !== 1)
+    adjacentPairs.length !== expectedPairs.length * 2
+    || expectedPairs.some((pair) => pairCounts.get(pair) !== 2)
   ) {
-    errors.push("The design must contain each of the 12 directed adjacent pairs exactly once.");
+    errors.push("The design must contain each of the 6 directed adjacent pairs exactly twice.");
   }
 
   return Object.freeze({
@@ -140,7 +140,6 @@ export function validateOrderDesign(orders: readonly string[]): OrderDesignValid
       A: Object.freeze(positionCounts.A),
       B: Object.freeze(positionCounts.B),
       C: Object.freeze(positionCounts.C),
-      D: Object.freeze(positionCounts.D),
     }),
     adjacentPairs: Object.freeze(adjacentPairs),
   });
@@ -152,7 +151,7 @@ export function assertBalancedOrderDesign(orders: readonly string[]): asserts or
     throw new Error(`Invalid experiment order design: ${validation.errors.join(" ")}`);
   }
   if (!orders.every(isOrderCode)) {
-    throw new Error("Experiment orders must be exactly ABDC, BCAD, CDBA and DACB.");
+    throw new Error("Experiment orders must be exactly ABC, ACB, BAC, BCA, CAB and CBA.");
   }
 }
 
@@ -161,10 +160,12 @@ export function countOrderUsage(
   includeAbortedInOrderBalancing: boolean,
 ): Readonly<Record<OrderCode, number>> {
   const counts: Record<OrderCode, number> = {
-    ABDC: 0,
-    BCAD: 0,
-    CDBA: 0,
-    DACB: 0,
+    ABC: 0,
+    ACB: 0,
+    BAC: 0,
+    BCA: 0,
+    CAB: 0,
+    CBA: 0,
   };
 
   for (const record of records) {

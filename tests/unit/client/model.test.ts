@@ -11,7 +11,7 @@ import {
 const baseSession = {
   id: "session-1",
   researchId: "SH26-001",
-  orderCode: "ABDC",
+  orderCode: "ABC",
   phase: "result",
   sequenceIndex: 0,
   currentCondition: "A",
@@ -36,7 +36,7 @@ describe("client boundary parsers", () => {
     expect(parseOperatorSnapshot(baseSession)).toMatchObject({
       sessionId: "session-1",
       researchId: "SH26-001",
-      orderCode: "ABDC",
+      orderCode: "ABC",
       conditionCode: "A",
       condition: { processing: "cloud", presentation: "label" },
       device: { mode: "mock", state: "holding", level: 0.6, connected: true },
@@ -132,5 +132,28 @@ describe("client boundary parsers", () => {
     ]) {
       expect(parseParticipantSnapshot(malformed)).toBeNull();
     }
+  });
+
+  it("accepts the response checkpoint and rejects the removed cloud-puffer condition", () => {
+    const checkpoint = {
+      phase: "response",
+      current: { position: 1, processing: "cloud", presentation: "label" },
+      pufferSurface: "screen",
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      phaseStartedAt: null,
+      phaseEndsAt: null,
+      serverNow: null,
+      remainingMs: null,
+      summary: [],
+    };
+    expect(parseParticipantSnapshot(checkpoint)).toMatchObject({
+      phase: "response",
+      sequenceIndex: 0,
+      condition: { processing: "cloud", presentation: "label" },
+    });
+    expect(parseParticipantSnapshot({
+      ...checkpoint,
+      current: { position: 1, processing: "cloud", presentation: "puffer" },
+    })?.condition).toBeNull();
   });
 });

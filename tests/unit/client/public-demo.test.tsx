@@ -61,12 +61,12 @@ describe("public demo", () => {
     next();
 
     expect(document.querySelectorAll("main")).toHaveLength(1);
-    expect(within(main).getByRole("heading", { level: 1 })).toHaveTextContent("第1提示 / 4");
+    expect(within(main).getByRole("heading", { level: 1 })).toHaveTextContent("第1提示 / 3");
     expect(within(main).getAllByRole("heading", { level: 2 })).toHaveLength(2);
     expect(main.querySelector("main")).toBeNull();
     expect(document.querySelector("article main")).toBeNull();
 
-    for (let index = 0; index < 4; index += 1) next();
+    for (let index = 0; index < 3; index += 1) next();
 
     expect(document.querySelectorAll("main")).toHaveLength(1);
     expect(within(main).getByRole("heading", { level: 1 })).toHaveTextContent(
@@ -75,14 +75,13 @@ describe("public demo", () => {
     expect(main.querySelector("main")).toBeNull();
   });
 
-  it("shows all four fixed presentations without exposing internal condition codes", () => {
+  it("shows all three fixed presentations without exposing internal condition codes", () => {
     render(<PublicDemoApp />);
     let cloudIconPath: string | null = null;
     let localIconPath: string | null = null;
     const expected = [
       ["クラウド", "高ストレス"],
       ["この端末内", "高ストレス"],
-      ["クラウド", "状態は画面上のフグの ふくらみで表されています"],
       ["この端末内", "状態は画面上のフグの ふくらみで表されています"],
     ] as const;
 
@@ -90,7 +89,7 @@ describe("public demo", () => {
       next();
       const stage = screen.getByLabelText("固定模擬データの表示確認");
       expect(stage.querySelector("[data-scene='result']")).not.toBeNull();
-      expect(within(stage).getByText(`第${index + 1}提示 / 4`)).toBeInTheDocument();
+      expect(within(stage).getByText(`第${index + 1}提示 / 3`)).toBeInTheDocument();
       const handlingPanel = screen.getByTestId("handling-panel");
       const processingValue = within(handlingPanel).getByText(processing);
       expect(processingValue).toBeInTheDocument();
@@ -143,7 +142,7 @@ describe("public demo", () => {
     expect(cloudIconPath).not.toBe(localIconPath);
   });
 
-  it("keeps paired right-side results identical after adding location pictograms", () => {
+  it("keeps the two label results identical and shows one local puffer result", () => {
     render(<PublicDemoApp />);
 
     next();
@@ -151,12 +150,10 @@ describe("public demo", () => {
     next();
     const localLabel = screen.getByTestId("result-panel").innerHTML;
     next();
-    const cloudPuffer = screen.getByTestId("result-panel").innerHTML;
-    next();
-    const localPuffer = screen.getByTestId("result-panel").innerHTML;
+    const localPuffer = screen.getByTestId("result-panel");
 
     expect(cloudLabel).toBe(localLabel);
-    expect(cloudPuffer).toBe(localPuffer);
+    expect(localPuffer).toHaveTextContent(PUBLIC_DEMO_COPY.result.puffer.replace("\n", " "));
   });
 
   it("uses only in-memory navigation and ends without a form or QR", () => {
@@ -166,13 +163,13 @@ describe("public demo", () => {
     vi.stubGlobal("WebSocket", webSocketConstructor);
     render(<PublicDemoApp />);
 
-    for (let index = 0; index < 5; index += 1) next();
+    for (let index = 0; index < 4; index += 1) next();
 
     expect(screen.getByTestId("public-demo-summary")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: PUBLIC_DEMO_COPY.summary.title }),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: /QR/u })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.next })).toBeDisabled();
@@ -185,11 +182,11 @@ describe("public demo", () => {
     render(<PublicDemoApp />);
     next();
     next();
-    expect(screen.getByText("第2提示 / 4（3 / 6画面）")).toBeInTheDocument();
+    expect(screen.getByText("第2提示 / 3（3 / 5画面）")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.previous }));
 
-    expect(screen.getByText("第1提示 / 4（2 / 6画面）")).toBeInTheDocument();
+    expect(screen.getByText("第1提示 / 3（2 / 5画面）")).toBeInTheDocument();
     expect(document.querySelector("[data-scene='result']")).not.toBeNull();
   });
 
@@ -208,7 +205,7 @@ describe("public demo", () => {
     expect(screen.getByText(PUBLIC_DEMO_COPY.notice.research)).toBeInTheDocument();
   });
 
-  it("automatically replays the four timed presentation phases and ends at the summary", () => {
+  it("automatically replays the three timed presentation phases and ends at the summary", () => {
     vi.useFakeTimers();
     render(<PublicDemoApp />);
 
@@ -230,7 +227,7 @@ describe("public demo", () => {
     ).toBeDisabled();
     expect(screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.next })).toBeDisabled();
 
-    for (let position = 1; position <= 4; position += 1) {
+    for (let position = 1; position <= 3; position += 1) {
       expect(stage).toHaveAttribute("data-rehearsal-position", String(position));
       expect(stage).toHaveAttribute("data-rehearsal-phase", "handling");
       advance(7_999);
@@ -255,7 +252,7 @@ describe("public demo", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps automatic paired results identical and uses the same six-second puffer motion", () => {
+  it("keeps automatic label results identical and uses the six-second puffer motion", () => {
     vi.useFakeTimers();
     render(<PublicDemoApp />);
     startRehearsal();
@@ -274,7 +271,6 @@ describe("public demo", () => {
     advance(7_000);
     advance(8_000);
     advance(3_000);
-    const cloudPufferResult = screen.getByTestId("result-panel").innerHTML;
     let puffer = screen.getByTestId("public-demo-puffer");
     expect(puffer).toHaveAttribute("data-puffer-motion", "inflating");
     expect(puffer).toHaveAttribute("data-motion-duration-ms", "6000");
@@ -289,15 +285,6 @@ describe("public demo", () => {
     expect(puffer).toHaveAttribute("data-motion-duration-ms", "6000");
     advance(6_000);
     expect(puffer).toHaveAttribute("data-puffer-motion", "resting");
-    advance(1_000);
-    advance(8_000);
-    advance(3_000);
-
-    const localPufferResult = screen.getByTestId("result-panel").innerHTML;
-    expect(localPufferResult).toBe(cloudPufferResult);
-    puffer = screen.getByTestId("public-demo-puffer");
-    expect(puffer).toHaveAttribute("data-puffer-motion", "inflating");
-    expect(puffer).toHaveAttribute("data-motion-duration-ms", "6000");
   });
 
   it("runs automatic rehearsal only in memory without network, storage, forms, or device APIs", () => {
@@ -310,7 +297,7 @@ describe("public demo", () => {
     render(<PublicDemoApp />);
 
     startRehearsal();
-    for (let position = 0; position < 4; position += 1) {
+    for (let position = 0; position < 3; position += 1) {
       advance(8_000);
       advance(3_000);
       advance(15_000);

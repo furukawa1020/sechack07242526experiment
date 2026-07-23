@@ -83,11 +83,19 @@ describe("participant presentation invariants", () => {
     expect(resultMarkup("cloud", "label")).toBe(resultMarkup("local", "label"));
   });
 
-  it("renders the puffer result with byte-for-byte identical right DOM for cloud and local", () => {
-    expect(resultMarkup("cloud", "puffer")).toBe(resultMarkup("local", "puffer"));
+  it("renders only the approved local puffer condition and fails closed for cloud puffer", () => {
+    const local = render(<ParticipantView snapshot={snapshot("local", "puffer")} />);
+    expect(within(local.container).getByTestId("result-panel")).toHaveTextContent(
+      UI_COPY.result.pufferPhysical.replace("\n", " "),
+    );
+    local.unmount();
+
+    render(<ParticipantView snapshot={snapshot("cloud", "puffer")} />);
+    expect(screen.getByRole("heading", { name: UI_COPY.error.title })).toBeInTheDocument();
+    expect(screen.queryByTestId("result-panel")).not.toBeInTheDocument();
   });
 
-  it("renders the screen puffer result with identical C/D DOM and server-synchronised linear motion", () => {
+  it("renders the approved screen puffer with server-synchronised linear motion", () => {
     const screenMotion = {
       pufferSurface: "screen" as const,
       pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
@@ -95,10 +103,9 @@ describe("participant presentation invariants", () => {
       serverNow: "2026-07-19T11:59:00.000Z",
       remainingMs: 12_000,
     };
-    const cloud = render(<ParticipantView snapshot={snapshot("cloud", "puffer", screenMotion)} />);
-    const cloudResult = within(cloud.container).getByTestId("result-panel");
-    const cloudMarkup = cloudResult.outerHTML;
-    const visual = within(cloudResult).getByTestId("screen-puffer-visual");
+    const local = render(<ParticipantView snapshot={snapshot("local", "puffer", screenMotion)} />);
+    const localResult = within(local.container).getByTestId("result-panel");
+    const visual = within(localResult).getByTestId("screen-puffer-visual");
     const body = visual.querySelector<HTMLElement>(".screen-puffer-body");
     expect(body).not.toBeNull();
     expect(body?.style.animationName).toBe("screen-puffer-inflate");
@@ -108,13 +115,9 @@ describe("participant presentation invariants", () => {
     expect(body?.style.getPropertyValue("--screen-puffer-expanded-scale")).toBe("1");
     expect(visual).toHaveAttribute("data-puffer-motion", "inflating");
     expect(visual).toHaveAttribute("data-motion-duration-ms", "6000");
-    expect(cloudResult).toHaveTextContent(UI_COPY.result.pufferScreen.replace("\n", " "));
-    expect(cloudResult).not.toHaveTextContent(UI_COPY.result.pufferPhysical.replace("\n", " "));
-    expect(cloudResult).not.toHaveTextContent("0.6");
-    cloud.unmount();
-
-    const local = render(<ParticipantView snapshot={snapshot("local", "puffer", screenMotion)} />);
-    expect(within(local.container).getByTestId("result-panel").outerHTML).toBe(cloudMarkup);
+    expect(localResult).toHaveTextContent(UI_COPY.result.pufferScreen.replace("\n", " "));
+    expect(localResult).not.toHaveTextContent(UI_COPY.result.pufferPhysical.replace("\n", " "));
+    expect(localResult).not.toHaveTextContent("0.6");
   });
 
   it("uses the same screen puffer to contract during reset", () => {
@@ -139,7 +142,7 @@ describe("participant presentation invariants", () => {
   });
 
   it("derives puffer progress from monotonic remaining time despite wall-clock correction", () => {
-    const duringRamp = snapshot("cloud", "puffer", {
+    const duringRamp = snapshot("local", "puffer", {
       pufferSurface: "screen",
       pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
       phaseStartedAt: "2026-07-19T12:00:00.000Z",
@@ -252,7 +255,7 @@ describe("participant presentation invariants", () => {
   });
 
   it("keeps the puffer result valid without exposing label-only fixed state", () => {
-    render(<ParticipantView snapshot={snapshot("cloud", "puffer", { fixedState: null })} />);
+    render(<ParticipantView snapshot={snapshot("local", "puffer", { fixedState: null })} />);
     expect(screen.getByTestId("result-panel")).toHaveTextContent(
       UI_COPY.result.pufferPhysical.replace("\n", " "),
     );

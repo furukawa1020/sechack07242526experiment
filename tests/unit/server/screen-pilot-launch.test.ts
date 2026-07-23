@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,11 +12,13 @@ import {
   consumeScreenPilotLaunchCapability,
   createScreenPilotLaunchCapability,
   verifyScreenPilotSource,
+  type ScreenPilotEmbeddedBuildEvidence,
   type ScreenPilotLaunchCapability,
 } from "../../../src/server/screen-pilot-provenance.js";
 
 const execFileAsync = promisify(execFile);
 const temporaryRoots: string[] = [];
+const BUILD_SECRET = "8".repeat(64);
 
 async function runGit(root: string, args: readonly string[]): Promise<void> {
   await execFileAsync("git", args, { cwd: root, windowsHide: true });
@@ -51,6 +54,7 @@ function metadataCapability(nonce: string): ScreenPilotLaunchCapability {
   return {
     schemaVersion: 1,
     nonce,
+    buildSecret: BUILD_SECRET,
     launcherPid: process.pid,
     createdAtMs: Date.now(),
     sourceEvidence: {
@@ -68,6 +72,20 @@ function metadataCapability(nonce: string): ScreenPilotLaunchCapability {
       bytes: 1,
       sha256: "5".repeat(64),
     }],
+  };
+}
+
+function embeddedEvidence(
+  capability: ScreenPilotLaunchCapability,
+): ScreenPilotEmbeddedBuildEvidence {
+  return {
+    schemaVersion: 1,
+    sourceEvidence: capability.sourceEvidence,
+    buildChallengeSha256: createHash("sha256")
+      .update(Buffer.from(capability.buildSecret, "hex"))
+      .digest("hex"),
+    appVersion: "1.1.0",
+    clientAssets: capability.clientAssets,
   };
 }
 
@@ -104,24 +122,67 @@ describe("fresh screen-pilot launch capability", () => {
     });
   });
 
+  it("rejects executable Node environment injection before verification", async () => {
+    const lifecycle = process.env.npm_lifecycle_event;
+    const nodeOptions = process.env.NODE_OPTIONS;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    process.env.npm_lifecycle_event = "screen-pilot";
+    process.env.NODE_OPTIONS = "--import=outside-verification.mjs";
+    try {
+      await expect(runScreenPilotLauncher(process.cwd())).resolves.toBe(1);
+      expect(consoleError).toHaveBeenCalledWith(expect.stringMatching(/NODE_OPTIONS/iu));
+    } finally {
+      if (lifecycle === undefined) delete process.env.npm_lifecycle_event;
+      else process.env.npm_lifecycle_event = lifecycle;
+      if (nodeOptions === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = nodeOptions;
+      consoleError.mockRestore();
+    }
+  });
+
   it("rejects missing, stale, and reused capabilities before source execution", async () => {
     await expect(
-      consumeScreenPilotLaunchCapability(null, resolve("dist-server", "screen-pilot.js")),
+      consumeScreenPilotLaunchCapability(
+        null,
+        resolve("dist-server", "screen-pilot.js"),
+        embeddedEvidence(metadataCapability("0".repeat(64))),
+      ),
     ).rejects.toThrow(/capability is missing/iu);
 
     const stale = metadataCapability("6".repeat(64));
     await expect(consumeScreenPilotLaunchCapability(
       { ...stale, createdAtMs: Date.now() - 60_001 },
       resolve("dist-server", "screen-pilot.js"),
+      embeddedEvidence(stale),
       process.pid,
     )).rejects.toThrow(/stale/iu);
 
     const reusable = metadataCapability("7".repeat(64));
     const wrongEntry = resolve("dist-server", "renamed-pilot.js");
-    await expect(consumeScreenPilotLaunchCapability(reusable, wrongEntry, process.pid))
+    await expect(consumeScreenPilotLaunchCapability(
+      reusable,
+      wrongEntry,
+      embeddedEvidence(reusable),
+      process.pid,
+    ))
       .rejects.toThrow(/freshly built/iu);
-    await expect(consumeScreenPilotLaunchCapability(reusable, wrongEntry, process.pid))
+    await expect(consumeScreenPilotLaunchCapability(
+      reusable,
+      wrongEntry,
+      embeddedEvidence(reusable),
+      process.pid,
+    ))
       .rejects.toThrow(/already been consumed/iu);
+  });
+
+  it("rejects a capability issued for a different fresh build challenge", async () => {
+    const capability = metadataCapability("9".repeat(64));
+    await expect(consumeScreenPilotLaunchCapability(
+      { ...capability, buildSecret: "a".repeat(64) },
+      resolve("dist-server", "screen-pilot.js"),
+      embeddedEvidence(capability),
+      process.pid,
+    )).rejects.toThrow(/build secret does not match/iu);
   });
 
   it.each(["bundle", "client"] as const)(
@@ -129,7 +190,11 @@ describe("fresh screen-pilot launch capability", () => {
     async (target) => {
       const root = await createPilotFixture();
       const source = await verifyScreenPilotSource(root);
-      const capability = await createScreenPilotLaunchCapability(root, source.evidence);
+      const capability = await createScreenPilotLaunchCapability(
+        root,
+        source.evidence,
+        BUILD_SECRET,
+      );
       const entryPath = join(root, "dist-server", "screen-pilot.js");
       const changedPath = target === "bundle"
         ? entryPath
@@ -139,6 +204,7 @@ describe("fresh screen-pilot launch capability", () => {
       await expect(consumeScreenPilotLaunchCapability(
         capability,
         entryPath,
+        embeddedEvidence(capability),
         process.pid,
       )).rejects.toThrow(target === "bundle" ? /bundle is stale or modified/iu : /dist assets are stale or modified/iu);
     },
@@ -147,15 +213,29 @@ describe("fresh screen-pilot launch capability", () => {
   it("returns memory assets from an unmodified one-shot capability", async () => {
     const root = await createPilotFixture();
     const source = await verifyScreenPilotSource(root);
-    const capability = await createScreenPilotLaunchCapability(root, source.evidence);
+    const capability = await createScreenPilotLaunchCapability(
+      root,
+      source.evidence,
+      BUILD_SECRET,
+    );
     const entryPath = join(root, "dist-server", "screen-pilot.js");
-    const verified = await consumeScreenPilotLaunchCapability(capability, entryPath, process.pid);
+    const verified = await consumeScreenPilotLaunchCapability(
+      capability,
+      entryPath,
+      embeddedEvidence(capability),
+      process.pid,
+    );
     const indexBeforeReplacement = verified.clientAssets.index.body.toString("utf8");
     await writeFile(join(root, "dist", "index.html"), "replaced", "utf8");
 
     expect(indexBeforeReplacement).toContain("pilot-index");
     expect(verified.clientAssets.index.body.toString("utf8")).toBe(indexBeforeReplacement);
-    await expect(consumeScreenPilotLaunchCapability(capability, entryPath, process.pid))
+    await expect(consumeScreenPilotLaunchCapability(
+      capability,
+      entryPath,
+      embeddedEvidence(capability),
+      process.pid,
+    ))
       .rejects.toThrow(/already been consumed/iu);
   });
 });

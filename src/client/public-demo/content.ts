@@ -32,7 +32,6 @@ export const PUBLIC_DEMO_REHEARSAL_TIMING_MS = Object.freeze({
 export const PUBLIC_DEMO_CONDITIONS = Object.freeze([
   Object.freeze({ processing: "cloud", presentation: "label" }),
   Object.freeze({ processing: "local", presentation: "label" }),
-  Object.freeze({ processing: "cloud", presentation: "puffer" }),
   Object.freeze({ processing: "local", presentation: "puffer" }),
 ] as const satisfies readonly PublicDemoCondition[]);
 
@@ -55,13 +54,13 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
     device: "実機なし",
   },
   intro: {
-    title: "同じ固定模擬データを、4つの方法で提示します",
+    title: "同じ固定模擬データを、3つの方法で提示します",
     body: "変わるのは、「どこで処理するか」と「どう伝えるか」です。\n\nあなたは、少し本調子ではないまま作業を続けている場面を想定してください。\n\nどの方法が正しいかを選ぶ課題ではありません。\nそれぞれを見たときに、どう感じたかを覚えておいてください。",
     scenario:
       "これから表示されるデータの取扱いは、比較のためのシナリオです。\n表示される値は、あなた自身を測定したものではありません。\nこの公開デモで、実際の身体データをクラウドへ送信・保存することはありません。",
   },
   presentation: {
-    position: (position: number): string => `第${position}提示 / 4`,
+    position: (position: number): string => `第${position}提示 / 3`,
     sameData: "同じ固定模擬データを使用しています",
   },
   handling: {
@@ -94,19 +93,14 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
     medical: "この表示は医療上の診断ではありません。",
   },
   summary: {
-    title: "4つの提示を確認しました",
+    title: "3つの提示を確認しました",
     body: "これは表示確認専用の公開デモです。研究への参加や回答の送信は行いません。",
     note: "表示した状態値とデータ取扱いは、すべて固定の模擬シナリオです。",
-    cards: ["第1提示", "第2提示", "第3提示", "第4提示"],
+    cards: ["第1提示", "第2提示", "第3提示"],
     conditionLabels: {
-      cloud: {
-        label: "クラウド × 状態ラベル",
-        puffer: "クラウド × 画面上のフグのふくらみ",
-      },
-      local: {
-        label: "この端末内 × 状態ラベル",
-        puffer: "この端末内 × 画面上のフグのふくらみ",
-      },
+      cloudLabel: "クラウド × 状態ラベル",
+      localLabel: "この端末内 × 状態ラベル",
+      localPuffer: "この端末内 × 画面上のフグのふくらみ",
     },
   },
   navigation: {
@@ -132,7 +126,7 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
       body: "そのままお待ちください。",
       puffer: "画面上のフグを収縮させています。実機は動作していません。",
     },
-    progress: (position: number, phase: string): string => `第${position}提示 / 4・${phase}`,
+    progress: (position: number, phase: string): string => `第${position}提示 / 3・${phase}`,
   },
   review: {
     operator: {
@@ -145,7 +139,7 @@ export const PUBLIC_DEMO_COPY = Object.freeze({
       connection: "同じブラウザ内だけで同期します",
       unsupported:
         "このブラウザではタブ間同期を利用できません。各画面は手動で確認できます。",
-      scenes: ["共通導入", "第1提示", "第2提示", "第3提示", "第4提示", "サマリー"],
+      scenes: ["共通導入", "第1提示", "第2提示", "第3提示", "サマリー"],
     },
     display: {
       waiting: "進行画面との接続を待っています。同じブラウザで進行画面を開いてください。",
