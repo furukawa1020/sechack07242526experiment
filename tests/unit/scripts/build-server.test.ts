@@ -81,8 +81,16 @@ describe("server build", () => {
       resolve(SERVER_OUTPUT_DIRECTORY, "rehearsal-healthcheck.js"),
       "utf8",
     );
+    const screenPilotSource = await readFile(
+      resolve(SERVER_OUTPUT_DIRECTORY, "screen-pilot.js"),
+      "utf8",
+    );
     expect(rehearsalSource).toContain("--mock-rehearsal");
     expect(rehearsalHealthSource).toContain("--mock-rehearsal");
+    expect(screenPilotSource).toContain("createProductionApplication");
+    expect(screenPilotSource).not.toMatch(
+      /MockPufferDevice|SerialPufferDevice|createApiRouter|\/test\/mock-device|serveBuiltAssets/iu,
+    );
   });
 
   it("accepts only the absolute repository dist-server directory", async () => {

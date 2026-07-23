@@ -1,7 +1,10 @@
+import { randomBytes, createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
+import type { FormalProductionClientAssets } from "../../scripts/production-release-verifier.js";
 import {
   loadExperimentConfig,
   type LoadedExperimentConfig,
@@ -15,6 +18,13 @@ export { SCREEN_PILOT_CONFIG_PATH } from "./production-source-tree.js";
 
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const PILOT_BUNDLE_PATH = "dist-server/screen-pilot.js";
+const PILOT_CAPABILITY_MAX_AGE_MS = 60_000;
+const MAX_PILOT_ASSET_COUNT = 256;
+const MAX_PILOT_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_PILOT_TOTAL_BYTES = 32 * 1024 * 1024;
+const consumedCapabilityNonces = new Set<string>();
 
 interface GitCommandResult {
   readonly exitCode: number;
@@ -31,6 +41,26 @@ export interface VerifiedScreenPilotSource {
   readonly rootDirectory: string;
   readonly loadedConfig: LoadedExperimentConfig;
   readonly evidence: ScreenPilotSourceEvidence;
+}
+
+export interface ScreenPilotArtifactEvidence {
+  readonly path: string;
+  readonly bytes: number;
+  readonly sha256: string;
+}
+
+export interface ScreenPilotLaunchCapability {
+  readonly schemaVersion: 1;
+  readonly nonce: string;
+  readonly launcherPid: number;
+  readonly createdAtMs: number;
+  readonly sourceEvidence: ScreenPilotSourceEvidence;
+  readonly bundle: ScreenPilotArtifactEvidence;
+  readonly clientAssets: readonly ScreenPilotArtifactEvidence[];
+}
+
+export interface VerifiedScreenPilotLaunch extends VerifiedScreenPilotSource {
+  readonly clientAssets: FormalProductionClientAssets;
 }
 
 function samePath(left: string, right: string): boolean {
@@ -194,5 +224,260 @@ export async function verifyScreenPilotSource(
       sourceTreeSha256,
       configFileHash: loadedConfig.configFileHash,
     }),
+  });
+}
+
+function sha256Bytes(source: Uint8Array): string {
+  return createHash("sha256").update(source).digest("hex");
+}
+
+function sameFileSnapshot(
+  left: Awaited<ReturnType<typeof lstat>>,
+  right: Awaited<ReturnType<typeof lstat>>,
+): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+async function readStablePilotFile(path: string): Promise<Buffer> {
+  const before = await lstat(path);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
+    throw new Error(`Screen-pilot artifact must be a unique regular file: ${path}`);
+  }
+  if (before.size <= 0 || before.size > MAX_PILOT_FILE_BYTES) {
+    throw new Error(`Screen-pilot artifact size is outside the safety limit: ${path}`);
+  }
+  const noFollow = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
+  const handle = await open(path, fsConstants.O_RDONLY | noFollow);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.nlink !== 1 || !sameFileSnapshot(before, opened)) {
+      throw new Error(`Screen-pilot artifact changed before it could be read: ${path}`);
+    }
+    const body = Buffer.alloc(opened.size);
+    let offset = 0;
+    while (offset < body.byteLength) {
+      const { bytesRead } = await handle.read(body, offset, body.byteLength - offset, offset);
+      if (bytesRead === 0) throw new Error(`Screen-pilot artifact ended early: ${path}`);
+      offset += bytesRead;
+    }
+    if ((await handle.read(Buffer.alloc(1), 0, 1, offset)).bytesRead !== 0) {
+      throw new Error(`Screen-pilot artifact grew while it was being read: ${path}`);
+    }
+    if (!sameFileSnapshot(opened, await handle.stat())) {
+      throw new Error(`Screen-pilot artifact changed while it was being read: ${path}`);
+    }
+    return body;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function listPilotClientPaths(
+  rootDirectory: string,
+  currentDirectory = resolve(rootDirectory, "dist"),
+): Promise<readonly string[]> {
+  const directoryStat = await lstat(currentDirectory);
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    throw new Error("Screen-pilot dist must contain only ordinary directories.");
+  }
+  const paths: string[] = [];
+  for (const entry of await readdir(currentDirectory, { withFileTypes: true })) {
+    const absolutePath = resolve(currentDirectory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error("Screen-pilot dist must not contain symbolic links or junctions.");
+    }
+    if (entry.isDirectory()) {
+      paths.push(...await listPilotClientPaths(rootDirectory, absolutePath));
+      continue;
+    }
+    if (!entry.isFile()) throw new Error("Screen-pilot dist contains an unsupported entry.");
+    if (!/\.(?:html|js|css)$/u.test(entry.name)) continue;
+    const path = relative(rootDirectory, absolutePath).split(sep).join("/");
+    if (!path.startsWith("dist/") || path.includes("..") || isAbsolute(path)) {
+      throw new Error("Screen-pilot client asset escaped dist/.");
+    }
+    paths.push(path);
+  }
+  return paths;
+}
+
+async function readPilotArtifacts(rootDirectory: string): Promise<{
+  readonly bundle: ScreenPilotArtifactEvidence;
+  readonly clientEvidence: readonly ScreenPilotArtifactEvidence[];
+  readonly clientAssets: FormalProductionClientAssets;
+}> {
+  const rootStat = await lstat(rootDirectory);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error("Screen-pilot root must be an ordinary directory.");
+  }
+  const bundleBody = await readStablePilotFile(resolve(rootDirectory, PILOT_BUNDLE_PATH));
+  const bundle = Object.freeze({
+    path: PILOT_BUNDLE_PATH,
+    bytes: bundleBody.byteLength,
+    sha256: sha256Bytes(bundleBody),
+  });
+  const paths = [...await listPilotClientPaths(rootDirectory)]
+    .sort((left, right) => left.localeCompare(right, "en"));
+  if (paths.length === 0 || paths.length > MAX_PILOT_ASSET_COUNT) {
+    throw new Error("Screen-pilot client asset count is outside the safety limit.");
+  }
+  if (paths.filter((path) => path === "dist/index.html").length !== 1) {
+    throw new Error("Screen-pilot requires exactly one dist/index.html.");
+  }
+
+  let totalBytes = 0;
+  const clientEvidence: ScreenPilotArtifactEvidence[] = [];
+  const files: FormalProductionClientAssets["files"][number][] = [];
+  for (const path of paths) {
+    const body = await readStablePilotFile(resolve(rootDirectory, path));
+    totalBytes += body.byteLength;
+    if (totalBytes > MAX_PILOT_TOTAL_BYTES) {
+      throw new Error("Screen-pilot client assets exceed the total memory limit.");
+    }
+    const sha256 = sha256Bytes(body);
+    clientEvidence.push(Object.freeze({ path, bytes: body.byteLength, sha256 }));
+    const requestPath = `/${path.slice("dist/".length)}`;
+    const contentType = path.endsWith(".html")
+      ? "text/html; charset=utf-8" as const
+      : path.endsWith(".js")
+        ? "text/javascript; charset=utf-8" as const
+        : "text/css; charset=utf-8" as const;
+    files.push(Object.freeze({
+      manifestPath: path,
+      requestPath,
+      contentType,
+      sha256,
+      body,
+    }));
+  }
+  const index = files.find((file) => file.manifestPath === "dist/index.html");
+  if (index === undefined) throw new Error("Screen-pilot index asset could not be loaded.");
+  return Object.freeze({
+    bundle,
+    clientEvidence: Object.freeze(clientEvidence),
+    clientAssets: Object.freeze({
+      index,
+      files: Object.freeze(files),
+      totalBytes,
+    }),
+  });
+}
+
+function evidenceMatches(
+  left: ScreenPilotSourceEvidence,
+  right: ScreenPilotSourceEvidence,
+): boolean {
+  return left.sourceCommit === right.sourceCommit
+    && left.sourceTreeSha256 === right.sourceTreeSha256
+    && left.configFileHash === right.configFileHash;
+}
+
+function artifactsMatch(
+  left: readonly ScreenPilotArtifactEvidence[],
+  right: readonly ScreenPilotArtifactEvidence[],
+): boolean {
+  return left.length === right.length && left.every((entry, index) => {
+    const candidate = right[index];
+    return candidate !== undefined
+      && entry.path === candidate.path
+      && entry.bytes === candidate.bytes
+      && entry.sha256 === candidate.sha256;
+  });
+}
+
+export async function createScreenPilotLaunchCapability(
+  rootDirectory: string,
+  expectedSourceEvidence: ScreenPilotSourceEvidence,
+): Promise<ScreenPilotLaunchCapability> {
+  const verified = await verifyScreenPilotSource(rootDirectory);
+  if (!evidenceMatches(verified.evidence, expectedSourceEvidence)) {
+    throw new Error("Screen-pilot source changed while the fresh build was running.");
+  }
+  const artifacts = await readPilotArtifacts(verified.rootDirectory);
+  return Object.freeze({
+    schemaVersion: 1,
+    nonce: randomBytes(32).toString("hex"),
+    launcherPid: process.pid,
+    createdAtMs: Date.now(),
+    sourceEvidence: verified.evidence,
+    bundle: artifacts.bundle,
+    clientAssets: artifacts.clientEvidence,
+  });
+}
+
+function assertCapabilityShape(value: unknown): asserts value is ScreenPilotLaunchCapability {
+  if (value === null || typeof value !== "object") throw new Error("Screen-pilot capability is missing.");
+  const capability = value as Partial<ScreenPilotLaunchCapability>;
+  if (
+    capability.schemaVersion !== 1
+    || typeof capability.nonce !== "string"
+    || !SHA256_PATTERN.test(capability.nonce)
+    || !Number.isSafeInteger(capability.launcherPid)
+    || !Number.isSafeInteger(capability.createdAtMs)
+    || capability.sourceEvidence === undefined
+    || !SOURCE_COMMIT_PATTERN.test(capability.sourceEvidence.sourceCommit)
+    || !SHA256_PATTERN.test(capability.sourceEvidence.sourceTreeSha256)
+    || !SHA256_PATTERN.test(capability.sourceEvidence.configFileHash)
+    || capability.bundle === undefined
+    || capability.bundle.path !== PILOT_BUNDLE_PATH
+    || !SHA256_PATTERN.test(capability.bundle.sha256)
+    || !Number.isSafeInteger(capability.bundle.bytes)
+    || !Array.isArray(capability.clientAssets)
+    || capability.clientAssets.length === 0
+    || !capability.clientAssets.every((entry) => (
+      entry.path.startsWith("dist/")
+      && /\.(?:html|js|css)$/u.test(entry.path)
+      && Number.isSafeInteger(entry.bytes)
+      && entry.bytes > 0
+      && SHA256_PATTERN.test(entry.sha256)
+    ))
+  ) {
+    throw new Error("Screen-pilot capability has an invalid structure.");
+  }
+}
+
+export async function consumeScreenPilotLaunchCapability(
+  value: unknown,
+  entryPath: string,
+  parentPid = process.ppid,
+  nowMs = Date.now(),
+): Promise<VerifiedScreenPilotLaunch> {
+  assertCapabilityShape(value);
+  if (consumedCapabilityNonces.has(value.nonce)) {
+    throw new Error("Screen-pilot capability has already been consumed.");
+  }
+  consumedCapabilityNonces.add(value.nonce);
+  if (value.launcherPid !== parentPid) {
+    throw new Error("Screen-pilot capability was not issued by the current launcher process.");
+  }
+  if (nowMs < value.createdAtMs || nowMs - value.createdAtMs > PILOT_CAPABILITY_MAX_AGE_MS) {
+    throw new Error("Screen-pilot capability is stale or has an invalid timestamp.");
+  }
+  const resolvedEntryPath = resolve(entryPath);
+  const rootDirectory = resolve(dirname(resolvedEntryPath), "..");
+  if (resolvedEntryPath !== resolve(rootDirectory, PILOT_BUNDLE_PATH)) {
+    throw new Error("Screen-pilot must execute the freshly built dist-server/screen-pilot.js.");
+  }
+  const verified = await verifyScreenPilotSource(rootDirectory);
+  if (!evidenceMatches(verified.evidence, value.sourceEvidence)) {
+    throw new Error("Screen-pilot source/config evidence changed after launch authorization.");
+  }
+  const artifacts = await readPilotArtifacts(rootDirectory);
+  if (!artifactsMatch([artifacts.bundle], [value.bundle])) {
+    throw new Error("The running screen-pilot bundle is stale or modified.");
+  }
+  if (!artifactsMatch(artifacts.clientEvidence, value.clientAssets)) {
+    throw new Error("Screen-pilot dist assets are stale or modified.");
+  }
+  return Object.freeze({
+    rootDirectory,
+    loadedConfig: verified.loadedConfig,
+    evidence: verified.evidence,
+    clientAssets: artifacts.clientAssets,
   });
 }
