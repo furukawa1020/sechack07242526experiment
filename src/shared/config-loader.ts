@@ -70,6 +70,51 @@ function sha256Canonical(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
 }
 
+const LEGACY_APPROVAL_STATE_KEYS = Object.freeze([
+  "goEvidence",
+  "approvalStatus",
+  "pendingApproval",
+  "approvalPending",
+  "approvalDocument",
+  "approvalHash",
+  "secondVerifier",
+  "twoPerson",
+  "dualVerification",
+  "reviewerCount",
+  "screenPilot",
+  "productionGo",
+  "manualGo",
+  "releaseTicket",
+  "evidenceRequired",
+] as const);
+
+/**
+ * Migration boundary for external-compliance production. Old in-application
+ * approval state is discarded before validation and is never returned in the
+ * runtime config. It therefore cannot become a release/start gate or be
+ * persisted by application code.
+ */
+export function normalizeExternalComplianceConfigInput(input: unknown): unknown {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  const source = input as Readonly<Record<string, unknown>>;
+  const compliance = source["compliance"];
+  if (
+    compliance === null
+    || typeof compliance !== "object"
+    || Array.isArray(compliance)
+    || (compliance as Readonly<Record<string, unknown>>)["mode"] !== "external"
+  ) {
+    return input;
+  }
+  const normalized: Record<string, unknown> = { ...source };
+  for (const key of LEGACY_APPROVAL_STATE_KEYS) {
+    Reflect.deleteProperty(normalized, key);
+  }
+  return normalized;
+}
+
 /**
  * Hashes all runtime-relevant configuration. Legacy goEvidence is excluded
  * because production rejects it and approval evidence is managed externally.
@@ -81,8 +126,10 @@ export function hashProductionCriticalConfig(config: ExperimentConfig): string {
   return sha256Canonical(criticalConfig);
 }
 
-export function hashProductionGoEvidence(config: ExperimentConfig): string | null {
-  return config.goEvidence === undefined ? null : sha256Canonical(config.goEvidence);
+export function hashProductionGoEvidence(_config: ExperimentConfig): null {
+  // Schema-v4 manifest compatibility only. External compliance never hashes
+  // or packages approval evidence.
+  return null;
 }
 
 export async function loadExperimentConfig(
@@ -121,7 +168,10 @@ export async function loadExperimentConfig(
     );
   }
 
-  const config = parseExperimentConfig(parsedJson);
+  const normalizedJson = options.production === true
+    ? normalizeExternalComplianceConfigInput(parsedJson)
+    : parsedJson;
+  const config = parseExperimentConfig(normalizedJson);
   if (options.production === true) {
     const productionPolicy = assessProductionPolicy(
       config,

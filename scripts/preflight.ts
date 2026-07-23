@@ -56,11 +56,6 @@ export interface PreflightReport {
   readonly pufferLevel: number;
   readonly formUrl: string;
   readonly formAuditStatus: "GO" | "NO-GO" | "MISSING";
-  readonly formAuditProtocolVersion: string;
-  readonly formAuditFormUrl: string;
-  readonly formAuditAuditedOn: string | null;
-  readonly formAuditContentSha256: string;
-  readonly formAuditTwoPersonVerified: boolean;
   readonly environment: ExperimentConfig["environment"];
   readonly participantMode: ExperimentConfig["participantMode"];
   readonly complianceMode: ExperimentConfig["compliance"]["mode"];
@@ -396,7 +391,7 @@ export async function collectPreflightReport(
   const allowMock = options.allowMock ?? false;
   const loaded = await loadExperimentConfig(
     options.configPath ?? DEFAULT_CONFIG_PATH,
-    { rootDirectory, production: false },
+    { rootDirectory, production: !allowMock },
   );
   const config = loaded.config;
   const computedCriticalConfigSha256 = hashProductionCriticalConfig(config);
@@ -528,11 +523,6 @@ export async function collectPreflightReport(
     pufferLevel: config.fixedState.pufferLevel,
     formUrl: config.formUrl,
     formAuditStatus: config.formAudit?.status ?? "MISSING",
-    formAuditProtocolVersion: config.formAudit?.protocolVersion ?? "",
-    formAuditFormUrl: config.formAudit?.formUrl ?? "",
-    formAuditAuditedOn: config.formAudit?.auditedOn ?? null,
-    formAuditContentSha256: config.formAudit?.contentSha256 ?? "",
-    formAuditTwoPersonVerified: config.formAudit?.twoPersonVerified ?? false,
     environment: config.environment,
     participantMode: config.participantMode,
     complianceMode: config.compliance.mode,
@@ -587,7 +577,7 @@ export function renderPreflightReport(
   writeLine(`  allowMockInProduction: ${String(report.allowMockInProduction)}`);
   writeLine(`  固定状態: score=${report.fixedScore}, label=${report.fixedLabel}, pufferLevel=${report.pufferLevel}`);
   writeLine(`  外部アンケートURL: ${report.formUrl === "" ? "(未設定)" : report.formUrl}`);
-  writeLine(`  アプリ内アンケート監査証跡: ${report.formAuditStatus}`);
+  writeLine(`  外部アンケート統合: ${report.formAuditStatus === "MISSING" ? "なし" : "本番利用不可"}`);
   writeLine(`  技術状態: ${report.technicalReadiness === "GO" ? "実施可能" : "要確認"}`);
   writeLine(`  参加者モード: ${report.participantMode === "enabled" ? "有効" : "無効"}`);
   writeLine(`  コンプライアンスモード: ${report.complianceMode}`);

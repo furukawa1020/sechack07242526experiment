@@ -8,7 +8,6 @@ import {
 import {
   FORMAL_PRODUCTION_CONFIG_PATH,
   hashFormalProductionCriticalConfig,
-  hashFormalProductionGoEvidence,
   loadFormalProductionConfig,
 } from "../shared/formal-production-config.js";
 import {
@@ -63,9 +62,6 @@ export async function startProductionReleaseCli(): Promise<RunningProductionRunt
       === verification.manifest.criticalConfigSha256
       ? null
       : "criticalConfigSha256",
-    hashFormalProductionGoEvidence(loadedConfig.config) === verification.manifest.goEvidenceSha256
-      ? null
-      : "goEvidenceSha256",
   ].filter((name): name is string => name !== null);
   if (bindingMismatches.length > 0) {
     throw new Error(

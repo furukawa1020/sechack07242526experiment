@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { experimentApi, errorMessage, getOperatorToken } from "../shared/api.js";
+import {
+  experimentApi,
+  errorMessage,
+  getOperatorToken,
+  type OperatorSessionConfirmationChecks,
+  type OperatorSessionConfirmationStatus,
+} from "../shared/api.js";
 import {
   EMPTY_DEVICE_STATUS,
   parseDeviceStatus,
@@ -17,6 +23,20 @@ import { useRealtime, useRemainingSeconds, type RealtimeStatus } from "../shared
 const ORDER_OPTIONS: readonly OrderCode[] = ["ABDC", "BCAD", "CDBA", "DACB"];
 const DEFAULT_RESEARCH_ID_PATTERN = "^SH26-[0-9]{3}$";
 const SESSION_STORAGE_KEY = "sechack.active-session-id";
+const EMPTY_OPERATOR_CONFIRMATION: OperatorSessionConfirmationStatus = {
+  confirmed: false,
+  checks: {
+    todayProcedureConfirmed: false,
+    participantConsentConfirmed: false,
+    stopOperationConfirmed: false,
+    physicalDeviceSafetyConfirmed: false,
+  },
+  technicalReadiness: "NO-GO",
+  participantMode: "disabled",
+  complianceMode: "external",
+  approvalEvidence: "managed-outside-system",
+  approvalVerifiedByApplication: false,
+};
 
 const PHASE_LABELS: Readonly<Record<ExperimentPhase, string>> = {
   idle: "待機中",
@@ -145,29 +165,114 @@ function StatusItem({ label, value, emphasis = false }: StatusItemProps): React.
   );
 }
 
+function OperatorSessionGate({
+  status,
+  draft,
+  loaded,
+  busy,
+  onDraft,
+  onConfirm,
+}: {
+  readonly status: OperatorSessionConfirmationStatus;
+  readonly draft: OperatorSessionConfirmationChecks;
+  readonly loaded: boolean;
+  readonly busy: boolean;
+  readonly onDraft: (checks: OperatorSessionConfirmationChecks) => void;
+  readonly onConfirm: () => void;
+}): React.JSX.Element {
+  const allChecked = Object.values(draft).every((checked) => checked);
+  const checkbox = (
+    key: keyof OperatorSessionConfirmationChecks,
+    label: string,
+  ): React.JSX.Element => (
+    <label className="check-row operator-session-check">
+      <input
+        type="checkbox"
+        checked={draft[key]}
+        disabled={status.confirmed}
+        onChange={(event) => onDraft({ ...draft, [key]: event.target.checked })}
+      />
+      <span>{label}</span>
+    </label>
+  );
+
+  return (
+    <section className="operator-card operator-session-gate" aria-labelledby="operator-session-gate-title">
+      <div className="card-heading">
+        <div><h2 id="operator-session-gate-title">外部管理事項と当日運用の確認</h2></div>
+      </div>
+      <dl className="external-compliance-status" aria-label="実施状態">
+        <StatusItem
+          label="技術状態"
+          value={status.technicalReadiness === "GO" ? "実施可能" : "確認中"}
+          emphasis
+        />
+        <StatusItem
+          label="参加者モード"
+          value={status.participantMode === "enabled" ? "有効" : "無効"}
+          emphasis
+        />
+        <StatusItem label="承認証跡" value="本システム外で管理" />
+        <StatusItem label="本システムによる承認検証" value="実施しない" />
+      </dl>
+      <p className="operator-session-description">
+        本システムは倫理承認資料を保管・検証しません。<br />
+        承認資料と実施条件の確認は、研究責任者および当日の運用責任者が本システム外で行います。
+      </p>
+      {status.confirmed ? (
+        <p className="operator-session-confirmed" role="status">
+          当日の安全な操作手順を、このセッション内で確認しました。これは倫理承認の証跡ではありません。
+        </p>
+      ) : (
+        <>
+          <div className="operator-session-checks">
+            {checkbox(
+              "todayProcedureConfirmed",
+              "本日の実施が、研究責任者から指示された手順に従っている",
+            )}
+            {checkbox(
+              "participantConsentConfirmed",
+              "参加者が研究説明・同意フォームを完了したことを確認した",
+            )}
+            {checkbox("stopOperationConfirmed", "実験中止操作を確認した")}
+            {checkbox(
+              "physicalDeviceSafetyConfirmed",
+              "実機を使用する場合、STOPおよび収縮動作を確認した",
+            )}
+          </div>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={busy || !loaded || !allChecked}
+            onClick={onConfirm}
+          >
+            当日の実験運用を開始する
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
+
 function SetupForm({
   researchId,
-  consentConfirmed,
   automaticOrder,
   manualOrder,
   researchIdPattern,
   isRehearsal,
   busy,
   onResearchId,
-  onConsent,
   onAutomaticOrder,
   onManualOrder,
   onSubmit,
 }: {
   readonly researchId: string;
-  readonly consentConfirmed: boolean;
   readonly automaticOrder: boolean;
   readonly manualOrder: OrderCode;
   readonly researchIdPattern: string;
   readonly isRehearsal: boolean;
   readonly busy: boolean;
   readonly onResearchId: (value: string) => void;
-  readonly onConsent: (value: boolean) => void;
   readonly onAutomaticOrder: (value: boolean) => void;
   readonly onManualOrder: (value: OrderCode) => void;
   readonly onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -195,22 +300,6 @@ function SetupForm({
       <p id="research-id-hint" className={researchId.length > 0 && !validId ? "field-hint is-error" : "field-hint"}>
         設定形式: {researchIdPattern}（氏名やメールアドレスは入力しないでください）
       </p>
-
-      <label className="check-row">
-        <input
-          type="checkbox"
-          checked={consentConfirmed}
-          onChange={(event) => onConsent(event.target.checked)}
-        />
-        <span>
-          <strong>{isRehearsal
-            ? "リハーサル開始条件を確認済み"
-            : "提示開始前に、承認済み手順で研究説明・参加同意を確認済み"}</strong>
-          <small>{isRehearsal
-            ? "実参加者・実回答には使用しません"
-            : "口頭確認だけでは開始しません。責任者が承認した提示前の手順を完了してください。"}</small>
-        </span>
-      </label>
 
       <fieldset className="order-fieldset">
         <legend>提示順の割付</legend>
@@ -243,7 +332,7 @@ function SetupForm({
         {!automaticOrder ? <p className="operator-warning">手動選択は提示順の偏りにつながるため、理由を運用記録へ残してください。</p> : null}
       </fieldset>
 
-      <button className="primary-button" type="submit" disabled={busy || !validId || !consentConfirmed}>
+      <button className="primary-button" type="submit" disabled={busy || !validId}>
         {isRehearsal ? "リハーサルを準備" : "セッションを準備"}
       </button>
     </form>
@@ -310,6 +399,7 @@ function ActionPanel({
   emergencyPending,
   staffHandoffConfirmed,
   fullscreenConfirmed,
+  operatorSessionConfirmed,
   isRehearsal,
   onStaffHandoffConfirmed,
   onFullscreenConfirmed,
@@ -322,6 +412,7 @@ function ActionPanel({
   readonly emergencyPending: boolean;
   readonly staffHandoffConfirmed: boolean;
   readonly fullscreenConfirmed: boolean;
+  readonly operatorSessionConfirmed: boolean;
   readonly isRehearsal: boolean;
   readonly onStaffHandoffConfirmed: (checked: boolean) => void;
   readonly onFullscreenConfirmed: (checked: boolean) => void;
@@ -379,13 +470,23 @@ function ActionPanel({
               />
               参加者画面をF11またはキオスクモードで全画面表示し、目視確認済み
             </label>
-            <button type="button" className="primary-button" onClick={() => onAction("prepare")} disabled={busy || !readyForIntro}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => onAction("prepare")}
+              disabled={busy || !readyForIntro || !operatorSessionConfirmed}
+            >
               共通導入を表示
             </button>
           </div>
         ) : null}
         {session.phase === "intro" ? (
-          <button type="button" className="primary-button" onClick={() => onAction("start")} disabled={busy}>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => onAction("start")}
+            disabled={busy || !operatorSessionConfirmed}
+          >
             提示を開始
           </button>
         ) : null}
@@ -511,7 +612,6 @@ function DeviceAndEvents({
 
 export function OperatorScreen(): React.JSX.Element {
   const [researchId, setResearchId] = useState("");
-  const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [automaticOrder, setAutomaticOrder] = useState(true);
   const [manualOrder, setManualOrder] = useState<OrderCode>("ABDC");
   const [session, setSession] = useState<OperatorSnapshot | null>(null);
@@ -524,6 +624,12 @@ export function OperatorScreen(): React.JSX.Element {
   const [failure, setFailure] = useState<string | null>(null);
   const [researchIdPattern, setResearchIdPattern] = useState(DEFAULT_RESEARCH_ID_PATTERN);
   const [rehearsal, setRehearsal] = useState(false);
+  const [operatorConfirmation, setOperatorConfirmation] = useState<OperatorSessionConfirmationStatus>(
+    EMPTY_OPERATOR_CONFIRMATION,
+  );
+  const [operatorConfirmationLoaded, setOperatorConfirmationLoaded] = useState(false);
+  const [operatorConfirmationDraft, setOperatorConfirmationDraft] =
+    useState<OperatorSessionConfirmationChecks>(EMPTY_OPERATOR_CONFIRMATION.checks);
 
   useEffect(() => {
     let current = true;
@@ -531,6 +637,20 @@ export function OperatorScreen(): React.JSX.Element {
       if (current) {
         setResearchIdPattern(config.researchIdPattern);
         setRehearsal(config.rehearsal);
+      }
+    }).catch((error: unknown) => {
+      if (current) setFailure(errorMessage(error));
+    });
+    return () => { current = false; };
+  }, []);
+
+  useEffect(() => {
+    let current = true;
+    void experimentApi.getOperatorSessionConfirmation().then((status) => {
+      if (current) {
+        setOperatorConfirmation(status);
+        setOperatorConfirmationDraft(status.checks);
+        setOperatorConfirmationLoaded(true);
       }
     }).catch((error: unknown) => {
       if (current) setFailure(errorMessage(error));
@@ -583,8 +703,41 @@ export function OperatorScreen(): React.JSX.Element {
   });
   const remainingSeconds = useRemainingSeconds(session?.phaseEndsAt ?? null, session?.serverNow ?? null);
 
+  const confirmOperatorSession = async (): Promise<void> => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const confirmed = await experimentApi.confirmOperatorSession({
+        todayProcedureConfirmed: true,
+        participantConsentConfirmed: true,
+        stopOperationConfirmed: true,
+        physicalDeviceSafetyConfirmed: true,
+      });
+      setOperatorConfirmation(confirmed);
+      setOperatorConfirmationDraft(confirmed.checks);
+      setNotice("当日の安全な操作手順をセッション内で確認しました。");
+    } catch (error) {
+      setFailure(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const createSession = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
+    if (
+      !operatorConfirmationLoaded
+      || (
+        operatorConfirmation.participantMode === "enabled"
+        && (
+          !operatorConfirmation.confirmed
+          || !operatorConfirmation.checks.participantConsentConfirmed
+        )
+      )
+    ) {
+      setFailure("当日の運用手順と参加同意を確認してからセッションを作成してください。");
+      return;
+    }
     setFailure(null);
     setNotice(null);
     setBusy(true);
@@ -622,13 +775,18 @@ export function OperatorScreen(): React.JSX.Element {
   };
 
   const emergencyStop = useCallback(async (): Promise<void> => {
-    if (session === null) return;
     setEmergencyPending(true);
     setFailure(null);
     try {
-      const next = await experimentApi.sessionAction(session.sessionId, "emergency-stop");
-      if (next !== null) setSession(next);
-      setNotice(usesScreenStimulus(session.device)
+      if (session === null) {
+        const result = await experimentApi.deviceAction("stop");
+        setDevice(result.status);
+      } else {
+        const next = await experimentApi.sessionAction(session.sessionId, "emergency-stop");
+        if (next !== null) setSession(next);
+      }
+      const stimulusDevice = session?.device ?? device;
+      setNotice(usesScreenStimulus(stimulusDevice)
         ? "緊急停止を送信しました。参加者画面で刺激の停止を確認してください。"
         : "緊急停止を送信しました。装置の物理状態を確認してください。");
     } catch (error) {
@@ -636,7 +794,7 @@ export function OperatorScreen(): React.JSX.Element {
     } finally {
       setEmergencyPending(false);
     }
-  }, [session]);
+  }, [device, session]);
 
   useEffect(() => {
     const onEmergencyShortcut = (event: KeyboardEvent): void => {
@@ -645,7 +803,6 @@ export function OperatorScreen(): React.JSX.Element {
         && event.altKey
         && event.shiftKey
         && event.code === "KeyS"
-        && session !== null
         && !emergencyPending
       ) {
         event.preventDefault();
@@ -654,7 +811,7 @@ export function OperatorScreen(): React.JSX.Element {
     };
     window.addEventListener("keydown", onEmergencyShortcut);
     return () => window.removeEventListener("keydown", onEmergencyShortcut);
-  }, [emergencyPending, emergencyStop, session]);
+  }, [emergencyPending, emergencyStop]);
 
   const connectDevice = async (): Promise<void> => {
     setBusy(true);
@@ -677,7 +834,9 @@ export function OperatorScreen(): React.JSX.Element {
       window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
       setSession(null);
       setResearchId("");
-      setConsentConfirmed(false);
+      setOperatorConfirmation(EMPTY_OPERATOR_CONFIRMATION);
+      setOperatorConfirmationDraft(EMPTY_OPERATOR_CONFIRMATION.checks);
+      setOperatorConfirmationLoaded(false);
       setStaffHandoffConfirmed(false);
       setFullscreenConfirmed(false);
       setNotice("次の参加者を受け付けられます。");
@@ -712,6 +871,10 @@ export function OperatorScreen(): React.JSX.Element {
   const isScreen = displayedDevice.mode === "screen";
   const isRehearsal = rehearsal || session?.rehearsal === true || displayedDevice.mode === "mock";
   const events = session?.recentEvents ?? [];
+  const operatorGateSatisfied = operatorConfirmationLoaded && (
+    operatorConfirmation.participantMode === "disabled"
+    || operatorConfirmation.confirmed
+  );
   const operatorClass = useMemo(
     () => busy || emergencyPending ? "operator-app is-busy" : "operator-app",
     [busy, emergencyPending],
@@ -734,6 +897,15 @@ export function OperatorScreen(): React.JSX.Element {
           <button type="button" className="secondary-button" onClick={() => { void exportCsv(); }} disabled={busy}>
             CSVを出力
           </button>
+          <button
+            type="button"
+            className="emergency-button global-emergency-button"
+            onClick={() => { void emergencyStop(); }}
+            disabled={emergencyPending}
+            aria-keyshortcuts="Control+Alt+Shift+S"
+          >
+            {emergencyPending ? "STOP送信中…" : "緊急停止"}
+          </button>
         </div>
       </header>
 
@@ -749,22 +921,28 @@ export function OperatorScreen(): React.JSX.Element {
 
       <main className="operator-layout">
         <div className="operator-main-column">
-          {session === null ? (
+          <OperatorSessionGate
+            status={operatorConfirmation}
+            draft={operatorConfirmationDraft}
+            loaded={operatorConfirmationLoaded}
+            busy={busy}
+            onDraft={setOperatorConfirmationDraft}
+            onConfirm={() => { void confirmOperatorSession(); }}
+          />
+          {session === null && operatorGateSatisfied ? (
             <SetupForm
               researchId={researchId}
-              consentConfirmed={consentConfirmed}
               automaticOrder={automaticOrder}
               manualOrder={manualOrder}
               researchIdPattern={researchIdPattern}
               isRehearsal={isRehearsal}
               busy={busy}
               onResearchId={setResearchId}
-              onConsent={setConsentConfirmed}
               onAutomaticOrder={setAutomaticOrder}
               onManualOrder={setManualOrder}
               onSubmit={(event) => { void createSession(event); }}
             />
-          ) : (
+          ) : session === null ? null : (
             <>
               <SessionOverview session={session} remainingSeconds={remainingSeconds} realtimeStatus={realtime.status} />
               <ActionPanel
@@ -773,6 +951,7 @@ export function OperatorScreen(): React.JSX.Element {
                 emergencyPending={emergencyPending}
                 staffHandoffConfirmed={staffHandoffConfirmed}
                 fullscreenConfirmed={fullscreenConfirmed}
+                operatorSessionConfirmed={operatorGateSatisfied}
                 isRehearsal={isRehearsal}
                 onStaffHandoffConfirmed={setStaffHandoffConfirmed}
                 onFullscreenConfirmed={setFullscreenConfirmed}

@@ -14,7 +14,6 @@ import { pathToFileURL } from "node:url";
 import {
   formatFormalProductionConfigError,
   hashFormalProductionCriticalConfig,
-  hashFormalProductionGoEvidence,
   loadFormalProductionConfig,
   type FormalLoadedExperimentConfig,
 } from "../src/shared/formal-production-config.js";
@@ -38,7 +37,11 @@ export interface ProductionPreflightReport {
   readonly configHash: string;
   readonly configFileHash: string;
   readonly criticalConfigSha256: string;
-  readonly goEvidenceSha256: string;
+  readonly technicalReadiness: "GO";
+  readonly participantMode: "enabled";
+  readonly complianceMode: "external";
+  readonly approvalEvidence: "managed-outside-system";
+  readonly approvalVerifiedByApplication: false;
   readonly protocolVersion: string;
   readonly deviceMode: "screen";
   readonly logPath: string;
@@ -358,16 +361,20 @@ export async function collectProductionPreflightReport(
   const operational = await collectOperationalChecks(rootDirectory, loaded);
   const configurationCheck = passedCheck(
     "production.configuration",
-    "The closed formal production config and its current GO evidence passed validation.",
+    "The closed formal production technical, runtime-safety, privacy and external-compliance settings passed validation.",
   );
   return Object.freeze({
     configPath: loaded.path,
     configHash: loaded.configHash,
     configFileHash: loaded.configFileHash,
     criticalConfigSha256: hashFormalProductionCriticalConfig(loaded.config),
-    goEvidenceSha256: hashFormalProductionGoEvidence(loaded.config),
+    technicalReadiness: "GO",
+    participantMode: "enabled",
+    complianceMode: "external",
+    approvalEvidence: "managed-outside-system",
+    approvalVerifiedByApplication: false,
     protocolVersion: loaded.config.protocolVersion,
-    deviceMode: loaded.config.device.mode,
+    deviceMode: "screen",
     logPath: operational.logPath,
     logSessionCount: operational.logSessionCount,
     availableBytes: operational.availableBytes,
@@ -399,7 +406,11 @@ export function renderProductionPreflightReport(
   writeLine(`  config file SHA-256: ${report.configFileHash}`);
   writeLine(`  config SHA-256: ${report.configHash}`);
   writeLine(`  critical config SHA-256: ${report.criticalConfigSha256}`);
-  writeLine(`  GO evidence SHA-256: ${report.goEvidenceSha256}`);
+  writeLine(`  technicalReadiness: ${report.technicalReadiness}`);
+  writeLine(`  participantMode: ${report.participantMode}`);
+  writeLine(`  complianceMode: ${report.complianceMode}`);
+  writeLine(`  approvalEvidence: ${report.approvalEvidence}`);
+  writeLine(`  approvalVerifiedByApplication: ${String(report.approvalVerifiedByApplication)}`);
   writeLine(`  protocolVersion: ${report.protocolVersion}`);
   writeLine(`  device mode: ${report.deviceMode}`);
   writeLine(`  logging directory: ${report.logPath}`);

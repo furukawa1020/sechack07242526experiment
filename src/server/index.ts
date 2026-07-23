@@ -7,7 +7,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { verifyReleaseDirectoryDetailed } from "../../scripts/release-manifest.js";
 import {
   hashProductionCriticalConfig,
-  hashProductionGoEvidence,
   loadExperimentConfig,
   type LoadedExperimentConfig,
 } from "../shared/config-loader.js";
@@ -718,9 +717,6 @@ export async function startProductionReleaseCli(
       === verification.manifest.criticalConfigSha256
       ? null
       : "criticalConfigSha256",
-    hashProductionGoEvidence(loadedConfig.config) === verification.manifest.goEvidenceSha256
-      ? null
-      : "goEvidenceSha256",
   ].filter((name): name is string => name !== null);
   if (bindingMismatches.length > 0) {
     throw new Error(

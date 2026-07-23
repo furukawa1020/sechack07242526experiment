@@ -1,101 +1,117 @@
-# 本番リリース二名照合票
+# 本番技術リリースチェックリスト
 
 対象プロトコル: `R8-010-2x2-screen-v3`
 
-この票はアプリへ入力せず、承認済みの外部管理方法で保管する。参加者の氏名、回答、生体情報は記入しない。
+このチェックリストはソフトウェアの技術状態と当日の安全な開始条件を確認するものであり、倫理承認の証跡ではない。承認資料と実施条件の確認は本システム外で行う。本書、アプリ、設定、Git、CI、manifest、ログへ承認PDF、承認文書参照、承認文書のSHA-256、確認者情報、署名を記入・保存しない。
 
-未記入または未確認の必須項目が一つでもあれば**NO-GO**とする。
+## 1. 状態の分離
 
-## 1. 本番GOブロッカー
+- [ ] `technicalReadiness = GO`
+- [ ] `participantMode = enabled`
+- [ ] `complianceMode = external`
+- [ ] `approvalEvidence = managed-outside-system`
+- [ ] `approvalVerifiedByApplication = false`
+- [ ] Operator表示が`技術状態：実施可能`
+- [ ] Operator表示が`参加者モード：有効`
+- [ ] Operator表示が`承認証跡：本システム外で管理`
+- [ ] Operator表示が`本システムによる承認検証：実施しない`
+- [ ] 「承認済み」「二名照合済み」「承認PDF確認済み」等をアプリが表示しない
 
-次の6件が、同じprotocolVersion、appVersion、対象設定SHA-256、source tree SHA-256へ結び付いた有効な`goEvidence`であること。
+旧`goEvidence`、承認文書、承認hash、二名照合、reviewer identity、screen pilot件数、manual GO ticketは正式release/startのハードゲートにしない。
 
-- [ ] 承認済み研究計画
-- [ ] 承認済み倫理判断
-- [ ] 提示前同意の承認済み取得・記録手順
-- [ ] 承認済みデータ管理計画
-- [ ] 研究チームの非参加者によるscreenパイロット3〜5件
-- [ ] 独立二名照合
+## 2. リリース識別と技術的整合
 
-screen-v1の外部回答監査はv3の本番リリース・起動ゲートではない。
-
-## 2. リリース識別
+次は成果物の再現性と改変検出に使う技術情報であり、承認証跡ではない。
 
 - リリースディレクトリ名:
-- 生成元Git commit（40文字）:
-- 生成元repository（manifestに記録された場合）:
+- 生成元Git commit:
 - appVersion:
 - protocolVersion:
 - 生成日時:
 - Windows版・architecture:
 - Node.js版:
 - 設定ファイル名:
-- 設定ファイルSHA-256:
-- 設定内容SHA-256:
-- 対象設定SHA-256（`criticalConfigSha256`）:
-- GO証跡SHA-256:
-- HEAD追跡source tree SHA-256（production設定だけを除外）:
-- source／appVersion／設定／証跡binding SHA-256:
-- リリースmanifest SHA-256:
+- manifest検証結果:
+
+- [ ] 検証対象commitと設定からビルドした
+- [ ] manifestの管理対象ファイル、サイズ、技術的整合チェックがPASS
+- [ ] manifestに承認資料、承認文書ハッシュ、確認者情報がない
 
 ## 3. 正式構成
 
 - [ ] 会場のWindows PC 1台だけを使用する
 - [ ] bind先は`127.0.0.1`だけで、LANや一般公開originへ公開しない
-- [ ] `R8-010-2x2-screen-v3`である
+- [ ] `R8-010-2x2-screen-v3`
+- [ ] `environment=production`
+- [ ] `participantMode=enabled`
+- [ ] `compliance.mode=external`
+- [ ] `compliance.evidenceStorage=outside-system`
+- [ ] `compliance.verifiedByApplication=false`
+- [ ] `runtime.requireOperatorSessionConfirmation=true`
+- [ ] `runtime.persistOperatorConfirmation=false`
+- [ ] `runtime.requireConsentConfirmation=true`
+- [ ] `runtime.requireEmergencyStopCheck=true`
 - [ ] `device.mode=screen`
 - [ ] `serialPath=""`
 - [ ] `allowMockInProduction=false`
 - [ ] `network.allowExternalRuntimeRequests=false`
 - [ ] `formUrl=""`
-- [ ] `formAudit`が存在しない
+- [ ] `formAudit`と`goEvidence`が正式設定に存在しない
 - [ ] 物理フグ、USBシリアル、心拍その他の生体センサが接続されていない
 - [ ] 外部CDN、外部フォント、分析、広告、テレメトリがない
 
-## 4. 外部回答分離
+## 4. 当日Operator確認と同意
 
-- [ ] 参加者UIに外部フォーム・外部調査の名称がない
-- [ ] 参加者UIに外部回答導線がない
+- [ ] 起動後に「外部管理事項と当日運用の確認」が表示される
+- [ ] 本日の実施手順、提示前同意、実験中止操作、必要時のSTOP・収縮を確認する4項目がある
+- [ ] 氏名、メール、ID、署名、承認番号、承認文書、SHA-256を入力させない
+- [ ] 確認状態をサーバメモリまたは`sessionStorage`だけに保持する
+- [ ] 実験ログ、データベース、`localStorage`、manifestへ永続保存しない
+- [ ] アプリまたはブラウザの再起動後に再確認を要求する
+- [ ] Operatorセッション内確認前はprepare/startを拒否する
+- [ ] 参加者ごとの提示前同意が未確認なら第1提示を開始できない
+- [ ] 緊急停止は確認画面を含む全状態で利用可能
+
+## 5. 外部回答分離
+
+- [ ] 参加者UIに外部フォーム・外部調査の名称、URL、リンク、QRコードがない
 - [ ] 参加者UIに回答方法・回答完了確認がない
-- [ ] Operatorに外部回答情報・完了確認がない
+- [ ] Operatorに外部回答内容・送信・完了確認がない
 - [ ] アプリが外部回答を取得、表示、案内、送信、複製、完了確認しない
-- [ ] 外部調査を使用する場合は、研究スタッフがアプリ外の承認済み手順で運用する
-- [ ] 各提示後の回答チェックポイントは、外部回答の内容、送信または完了確認として扱われない
-- [ ] 回答チェックポイントAPIは`POST /api/sessions/:id/confirm-response-checkpoint`である
-- [ ] Operator完了操作は一般的なスタッフ引継ぎ確認である
-- [ ] 完了APIは`POST /api/sessions/:id/confirm-staff-handoff`である
+- [ ] 外部調査を使用する場合は研究スタッフがアプリ外で運用する
+- [ ] 各提示後のチェックポイントを外部回答の内容、送信または完了確認として扱わない
+- [ ] 回答チェックポイントAPIは`POST /api/sessions/:id/confirm-response-checkpoint`
+- [ ] 完了操作は一般的なスタッフ引継ぎ確認
+- [ ] 完了APIは`POST /api/sessions/:id/confirm-staff-handoff`
 
-## 5. 正式成果物の内容
+## 6. 正式成果物
 
-- [ ] ビルド済みクライアント・サーバ、production依存関係、承認済み設定、manifest、必要な本番文書だけを含む
+- [ ] ビルド済みクライアント・サーバ、production依存関係、external compliance設定、manifest、必要な本番文書だけを含む
+- [ ] 承認PDF、承認文書参照、承認文書ハッシュ、確認者情報、署名を含まない
 - [ ] `FORM_*`を含まない
 - [ ] `MOCK_REHEARSAL.md`、Mock用設定・起動経路を含まない
 - [ ] `PUBLIC_DEMO.md`、公開レビュー用資材を含まない
 - [ ] screen-pilot用設定・起動経路・ログを含まない
 - [ ] ソース、テスト、E2E設定、スクリーンショットを含まない
 - [ ] 実ログ、CSV、`.env`を含まない
-- [ ] 全管理対象ファイルがmanifestのサイズ・SHA-256と一致する
-- [ ] 通常ファイル・単一hardlinkだけで構成される
 
-## 6. ソフトウェア受入
+## 7. ソフトウェア受入
 
 - [ ] `npm run lint`成功
 - [ ] `npm run typecheck`成功
-- [ ] `npm test`成功。最終件数を`docs/TEST_REPORT.md`へ記録
-- [ ] `npm run test:e2e`成功。全ケースskipなし
+- [ ] `npm test`成功
+- [ ] `npm run test:e2e`成功
 - [ ] `npm run build`成功
-- [ ] 条件対応・順序割付100%
-- [ ] ステートマシン90%以上
-- [ ] ScreenPufferDevice、MockPufferDevice、SerialPufferDevice境界90%以上
-- [ ] ログ許可フィールド100%
+- [ ] external compliance設定は承認文書・承認hash・二人目の確認者なしで起動できる
+- [ ] screen pilot件数0でも、それだけを理由にpreflight・release・startが失敗しない
+- [ ] Operatorセッション内確認なしでは第1提示を開始できない
+- [ ] 同意確認なしでは第1提示を開始できない
+- [ ] Operator確認は再起動後に失われる
+- [ ] 緊急停止が全状態で機能する
 - [ ] 外部originへのruntime requestが0件
-- [ ] 参加者payloadへ研究用ID、提示順、A〜D、pufferLevelを出さない
-- [ ] 重複研究用ID、不正遷移、切断、緊急停止をフェイルクローズで拒否する
-- [ ] production CLIは封印済みmanifest経由だけで起動できる
-- [ ] 直接production起動、設定差し替え、環境変数上書きを拒否する
-- [ ] build lock、単一server lock、stale lock回復を確認した
+- [ ] ログに氏名、メール、IP、確認者情報、承認文書ハッシュがない
 
-## 7. 研究条件
+## 8. 研究条件とUI
 
 - [ ] A = cloud + label
 - [ ] B = local + label
@@ -104,90 +120,40 @@ screen-v1の外部回答監査はv3の本番リリース・起動ゲートでは
 - [ ] 提示順はABDC / BCAD / CDBA / DACB
 - [ ] 固定値は72 / 高ストレス / pufferLevel 0.60
 - [ ] 時間は8秒 / 3秒 / 15秒 / 7秒
-- [ ] 参加者画面にA〜Dを表示しない
+- [ ] 参加者画面にA〜D、承認状態、Operator確認状態を表示しない
 - [ ] A/Bの右側表示が完全に同一
 - [ ] C/Dの右側表示と画面フグ動作が完全に同一
 - [ ] 4提示それぞれの`reset`後に`response`で停止する
 - [ ] 第1〜第3提示後は明示確認で次の`handling`、第4提示後は明示確認で`summary`へ進む
 - [ ] クラウド条件でも外部送信しない
-- [ ] クラウドと端末内を中立な同一色・線幅・占有領域で表す
 - [ ] 赤・緑、安全・危険、推奨・非推奨の価値判断がない
-
-## 8. UI・固定文言
-
-- [ ] 日本語中心で、装飾用英語eyebrow、同心円、軌道、浮遊点がない
-- [ ] 共通導入、フェーズ案内、結果、サマリーは中央基準
-- [ ] 条件画面は左右2パネルで表示領域を使う
 - [ ] 1366×768と1920×1080で欠け・不要なスクロールがない
-- [ ] 全結果画面に `この表示は医療上の診断ではありません。` がある
-- [ ] 共通導入とフッターに比較用シナリオであることを明示する
-- [ ] `response`見出しは `第{n}提示は終了しました`
-- [ ] `response`本文は `研究スタッフの案内をお待ちください。`
-- [ ] `response`に直前の刺激、外部フォーム名・URL・QRコード、回答内容・回答状況、内部条件コード、参加者操作ボタンがない
-- [ ] サマリー見出しは `4つの提示は終了しました`
-- [ ] サマリー本文1行目は `4つの提示は以上です。`
-- [ ] サマリー本文2行目は `研究スタッフの案内をお待ちください。`
-- [ ] サマリーに上記以外の外部回答導線がない
-- [ ] 中断・接続切れ・刺激異常画面は中立な文言である
+- [ ] `response`は`第{n}提示は終了しました`／`研究スタッフの案内をお待ちください。`だけ
+- [ ] サマリーは`4つの提示は終了しました`／`4つの提示は以上です。\n研究スタッフの案内をお待ちください。`
 
-## 9. screen実地試験
+## 9. 現地runtime check
 
-- 実験用Windows PC:
-- ブラウザ:
-- 実施場所:
-
-- [ ] 同じPCの`127.0.0.1`でOperatorと参加者画面を開いた
-- [ ] `VERIFY_RELEASE.cmd`がPASSした
-- [ ] `START_PRODUCTION.cmd`がmanifestとpreflight検証後に起動した
-- [ ] `CHECK_HEALTH.cmd`がprotocolVersion、appVersion、config hash、`deviceMode=screen`を返した
+- [ ] `VERIFY_RELEASE.cmd`が技術的な成果物整合をPASS
+- [ ] `START_PRODUCTION.cmd`がexternal compliance設定とpreflight検証後に起動
+- [ ] `CHECK_HEALTH.cmd`がprotocolVersion、appVersion、config hash、`deviceMode=screen`を返す
 - [ ] ScreenPufferDeviceは開始前に`idle`、level 0、faultなし
-- [ ] 6秒で0.60まで膨張し、結果終了まで保持し、6秒で収縮した
-- [ ] STOP、DEFLATE後に`idle`、level 0へ戻った
-- [ ] 4提示それぞれの`response`でOperatorの明示確認まで停止した
-- [ ] 回答チェックポイント確認後、第1〜第3提示は次の`handling`、第4提示は`summary`へ進んだ
-- [ ] 通常フェーズの再読み込みはOperator確認まで停止した
-- [ ] `result`/`reset`中の再読み込みはSTOP、DEFLATE、`error`となり再開不能だった
-- [ ] 最後のOperator lease喪失はSTOP、DEFLATE、`OPERATOR_CONNECTION_LOST`となった
-- [ ] 停電・PC断後に未終端セッションを再開せず、監査ログを保持した
+- [ ] 6秒で0.60まで膨張し、結果終了まで保持し、6秒で収縮
+- [ ] STOP、DEFLATE後に`idle`、level 0
+- [ ] 4提示それぞれの`response`でOperatorの明示確認まで停止
+- [ ] 通常フェーズの再読み込みはOperator確認まで停止
+- [ ] `result`/`reset`中の再読み込みはSTOP、DEFLATE、`error`となり再開不能
+- [ ] 最後のOperator lease喪失はSTOP、DEFLATE、`OPERATOR_CONNECTION_LOST`
 
-## 10. screenパイロット証跡
+非参加者screen pilotは任意の品質確認である。実施する場合も実参加者、正式ID、外部回答を使用せず、未実施または件数0を開始拒否理由にしない。
 
-- パイロット管理票ID:
-- 実施件数:
-- source commit:
-- source tree SHA-256:
-- pilot設定バイトSHA-256:
-- 管理票SHA-256:
+## 10. 技術判定
 
-- [ ] 研究チームの非参加者だけで3〜5件を実施した
-- [ ] 異なる`PILOT-xxx`を使用した
-- [ ] `研究参加用ではありません・外部回答送信なし`を常設した
-- [ ] 実参加者、正式ID、外部回答を使用しなかった
-- [ ] 候補リリースのsource evidenceと一致した
+```text
+TECHNICAL RELEASE: GO / NO-GO
+PARTICIPANT MODE: ENABLED / DISABLED
+COMPLIANCE MODE: EXTERNAL
+APPROVAL EVIDENCE: MANAGED OUTSIDE SYSTEM
+APPROVAL VERIFIED BY APPLICATION: NO
+```
 
-## 11. データ保護
-
-- [ ] 氏名、メール、学籍番号、IP、User-Agent全文、位置情報、生体データを収集・記録しない
-- [ ] 外部回答を取得・複製しない
-- [ ] 実ログはGit・クラウド同期対象外
-- [ ] 研究用ID registryと初期化anchorを独立に保全する
-- [ ] 撤回、分析除外、削除はサーバ停止後の承認済み外部手順だけで行う
-- [ ] 不可逆な変更機能を正式成果物へ含めない
-
-## 12. 独立二名照合
-
-- [ ] 照合者1と2は別々にmanifest SHA-256、source commit、appVersion、設定SHA-256、goEvidence SHA-256を転記した
-- [ ] 一方の画面や転記をもう一方が写していない
-- [ ] 2件の照合記録は異なる非個人識別review IDを持つ
-- [ ] 研究責任者が同じリリースmanifestを最終承認した
-
-## 13. 最終判定
-
-最終判定: [ ] GO / [ ] NO-GO
-
-- 照合者1・日時:
-- 照合者2・日時:
-- 研究責任者の最終承認・日時:
-- NO-GOの場合の理由:
-
-未記入または未確認の必須項目が一つでもある場合、判定はNO-GOとする。
+技術判定`GO`は倫理承認をアプリが確認したという意味ではない。開始時のセッション内確認、参加者ごとの同意、緊急停止、必須runtime checkのいずれかが欠ける場合は第1提示を開始しない。

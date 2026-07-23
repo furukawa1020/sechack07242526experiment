@@ -90,14 +90,16 @@ select:focus-visible {
 
 .participant-footer {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   align-items: center;
-  gap: 28px;
+  gap: 1px 24px;
   height: 56px;
-  padding: 0 32px;
+  padding: 4px 32px;
   border-top: 1px solid var(--line);
   background: #fff;
   font-size: 18px;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
@@ -106,7 +108,8 @@ select:focus-visible {
   letter-spacing: 0.04em;
 }
 
-.participant-footer span:nth-child(2) {
+.participant-footer span:nth-child(2),
+.participant-footer span:nth-child(4) {
   color: var(--muted-text);
 }
 
@@ -833,6 +836,54 @@ select:focus-visible {
   max-width: none;
 }
 
+.operator-session-gate {
+  display: grid;
+  gap: 16px;
+}
+
+.operator-session-gate .card-heading {
+  margin-bottom: 0;
+}
+
+.external-compliance-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #d6dde7;
+  background: #d6dde7;
+}
+
+.operator-session-description,
+.operator-session-confirmed {
+  margin: 0;
+  color: #3f4d63;
+  line-height: 1.7;
+}
+
+.operator-session-confirmed {
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  background: #f3f6fa;
+  font-weight: 700;
+}
+
+.operator-session-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.operator-session-check {
+  height: 100%;
+  margin: 0;
+}
+
+.global-emergency-button {
+  min-width: 120px;
+}
+
 .field-label,
 .display-url-block label {
   display: block;
@@ -1222,9 +1273,12 @@ button:disabled {
 .not-found a { color: var(--heading); font-weight: 800; }
 
 @media (max-width: 1000px) {
+  .participant-footer { font-size: 14px; }
   .operator-layout,
   .device-test-layout { grid-template-columns: 1fr; }
   .operator-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .external-compliance-status,
+  .operator-session-checks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .device-event-card { grid-column: auto; }
 }
 
@@ -1241,6 +1295,8 @@ button:disabled {
   .device-event-list { grid-template-columns: 1fr; }
   .display-url-block { grid-template-columns: 1fr; }
   .display-url-block label { grid-column: auto; }
+  .external-compliance-status,
+  .operator-session-checks { grid-template-columns: 1fr; }
 }
 
 /* Active sessions carry more audit fields than setup. At the approved

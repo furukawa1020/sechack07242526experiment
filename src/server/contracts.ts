@@ -61,8 +61,8 @@ export interface OperatorSessionConfirmationInput {
 export interface OperatorSessionConfirmationStatus {
   readonly confirmed: boolean;
   readonly checks: OperatorSessionConfirmationChecks;
-  readonly technicalReadiness: "GO";
-  readonly participantMode: "enabled";
+  readonly technicalReadiness: "GO" | "NO-GO";
+  readonly participantMode: "enabled" | "disabled";
   readonly complianceMode: "external";
   readonly approvalEvidence: "managed-outside-system";
   readonly approvalVerifiedByApplication: false;

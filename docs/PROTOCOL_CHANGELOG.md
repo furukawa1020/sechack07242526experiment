@@ -8,7 +8,9 @@
 - Operatorの操作を`POST /api/sessions/:id/confirm-response-checkpoint`へ固定した。この操作は参加者への案内と待機表示を確認するためのスタッフ引継ぎであり、外部回答の内容、送信または完了をアプリが確認したことを意味しない。
 - `response`中の参加者画面喪失は他の通常フェーズと同様に進行を停止し、再接続後もOperatorの復旧確認まで再開しない。`result`／`reset`中の喪失をSTOP、DEFLATE、`error`として再開不能にする規則は変更していない。
 - 正式アプリは引き続き外部アンケートを取得、表示、誘導、送信、複製、完了確認せず、外部runtime通信を行わない。
-- 参加者向け進行と固定文言を変更したため、既存のscreen-v2用`goEvidence`、screen pilotおよび独立二名照合は流用せず、screen-v3の最終source treeと設定へ結び付け直す。
+- 正式productionの運用責務をEXTERNAL COMPLIANCE MODEへ分離した。`technicalReadiness=GO`、`participantMode=enabled`、`complianceMode=external`、`approvalEvidence=managed-outside-system`、`approvalVerifiedByApplication=false`とし、本アプリは倫理承認資料を保管・検証しない。
+- 旧`goEvidence`、承認文書・hash、二名照合、reviewer identity、screen pilot件数、manual GO ticketを正式release/startハードゲートから外した。開始条件は、当日のOperatorセッション内確認、参加者ごとの提示前同意、緊急停止、必須runtime checkである。screen pilotは任意の品質確認へ変更した。
+- EXTERNAL COMPLIANCE MODEへの変更はOperator用の責務分離と技術的開始条件の変更であり、参加者が見る4条件、固定値、文言、提示時間、画面上フグ刺激を変更しないため、protocolVersionは`R8-010-2x2-screen-v3`を維持した。
 
 4条件そのものは不変だが、各提示直後の回答手順を再現可能にするため参加者向け画面と状態機械を変更した。実験手順の変更としてprotocolVersionを`R8-010-2x2-screen-v3`へ更新した。
 
@@ -21,7 +23,7 @@
 - 正式production設定を`formUrl=""`かつ`formAudit`なしとし、screen-v1の外部回答監査をscreen-v2のリリース・起動ゲートから外した。
 - 正式成果物から`FORM_*`、`MOCK_REHEARSAL.md`とMock用資材、`PUBLIC_DEMO.md`と公開レビュー用資材を除外する境界を明記した。
 - 正式deploymentは会場Windows PC 1台、`127.0.0.1`、`device.mode=screen`、物理装置なしに固定した。一般公開またはHugging Face上の静的レビュー版は正式productionではない。
-- 研究計画、倫理判断、提示前同意、データ管理計画、非参加者screenパイロット3〜5件、独立二名照合の6件を`goEvidence`として必須にするハードフェイルクローズは維持した。
+- 当時は研究計画、倫理判断、提示前同意、データ管理計画、非参加者screenパイロット3〜5件、独立二名照合を`goEvidence`として要求していた。この旧ゲートはscreen-v3のEXTERNAL COMPLIANCE MODE移行で廃止され、現在のrelease/start条件ではない。
 - A=cloud+label、B=local+label、C=local+puffer、D=cloud+puffer、ABDC / BCAD / CDBA / DACB、固定値72 / 高ストレス / 0.60、8秒 / 3秒 / 15秒 / 7秒、A/Bの同一右表示、C/Dの同一右表示と6秒膨張・保持・6秒収縮は変更していない。
 
 参加者が見る終了文言と、その後のスタッフ引継ぎ方法を変更したため、実験の再現性を優先してprotocolVersionを`R8-010-2x2-screen-v2`へ更新した。条件、提示順、固定値、タイミング、画面上フグ動作その他の研究刺激は変更していない。
@@ -36,16 +38,16 @@
 - 正式画面版はUSB機器を必要とせず、フグ制御のための外部通信を行わない。`serial`による物理フグは将来の別プロトコルへ分離。
 - 参加者向け共通文言を「固定模擬データ」「本人の測定ではない」「生体データ非取得」「画面上だけのフグ」に統一。
 - A=cloud+label、B=local+label、C=local+puffer、D=cloud+pufferの内部対応、提示順ABDC / BCAD / CDBA / DACB、固定値72 / 高ストレス / 0.60、8,000 / 3,000 / 15,000 / 7,000msのフェーズ時間は変更していない。
-- 運用上のフェイルクローズ強化として、フォーム監査とは別に研究計画、倫理判断、提示前同意、データ管理、screenパイロット、独立二名照合を非個人識別の`goEvidence`へ結び付け、manifest v4で設定・証跡・appVersion・production設定だけを除外したGit HEAD追跡tree SHA-256・source commitを封印した。
+- 当時の運用上のフェイルクローズ強化として、フォーム監査とは別に研究計画、倫理判断、提示前同意、データ管理、screenパイロット、独立二名照合を`goEvidence`へ結び付けていた。この旧設計はscreen-v3のEXTERNAL COMPLIANCE MODE移行で廃止され、承認証跡を現行アプリ、設定、Git、CI、manifest、ログへ保存しない。
 - 研究用ID単位のread-only Previewと保持期限レポートを追加した。アプリ内の分析除外・削除は安全上常に拒否し、正式リリースへ変更用CLIを同梱しない。変更は研究責任者が事前承認した外部手順へ引き渡し、外部回答は同じ研究用IDを外部側の管理者が別途手動照合する。
 - セッション作成時に研究用IDを排他的・永続的に予約するregistryを追加した。ログの移動・削除後もregistryを保持し、IDを再割付しない。
 - 外部回答側の公開内容監査へ、研究用ID欄の固定ラベル・必須設定・形式validationと、提示順・内部コード入力の不存在を追加した。
 - 初回GO前のscreenパイロット循環を解消するため、研究チームの非参加者専用`screen-pilot`経路を追加した。正式固定値・時間・順序とScreenPufferDeviceを使う一方、`PILOT-xxx`、空フォーム、loopback、隔離ログ、非参加者表示を強制し、正式リリースへ同梱しない。
 - `screen-pilot`起動を、毎回の再ビルド、cleanなGit HEAD、固定pilot設定の追跡・HEADバイト完全一致へ拘束した。起動時に`sourceCommit`、`sourceTreeSha256`、`configFileHash`を表示し、全PILOT JSONLイベントへ同じ3値を記録する。汎用サーバ起動からの迂回と既存ビルドの運用上の流用を禁止した。
-- screen-pilotとproduction候補のsource tree SHA-256定義を、固定production設定だけを除外する同一算法へ統一した。`goEvidence.screenPilot`へ実施時source tree SHA-256とpilot設定バイトSHA-256を必須化し、release候補treeとの一致および候補commit上の固定pilot設定blobとの一致を機械検証する。これは運用証跡の強化で参加者向け刺激を変更しないため、protocolVersionは維持した。
+- 当時はscreen-pilotとproduction候補のsource tree SHA-256を旧`goEvidence.screenPilot`へ結び付けていた。現行screen-v3ではscreen pilotを任意の技術品質確認とし、件数・実施有無・hashをrelease/startハードゲートにしない。
 - Operator WebSocketへ1秒challenge/nonce応答・5秒の往復leaseを追加し、silent LAN断、上り・下りのhalf-open、ブラウザ停止を検出する。確認済みleaseがなければ提示準備・開始・再開を拒否し、進行中の最後の有効lease喪失ではSTOP・DEFLATE・`OPERATOR_CONNECTION_LOST`とする。複数接続の1つが生存中は継続する。
 - 外部回答監査は、内部コードと伝え方だけの対応および「3つの提示」「3提示」等の旧表現も拒否するよう強化した。
-- 提示後評価フォームを同意取得経路と誤認させないため、固定タイトル候補を`身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価｜提示後アンケート`へ変更し、機械監査を完全一致判定へ強化した。研究説明と同意の双方は別の承認済み経路で提示開始前に提供・記録する。これは外部フォーム契約と運用安全性の整合であり、アプリ内の参加者向け刺激を変更しないためprotocolVersionは維持した。
+- 当時は提示後評価フォームを同意取得経路と分離する旧案を採用していた。現行screen-v3では、研究説明、参加同意、各提示直後11項目の回答を同じGoogleフォームでアプリ外運用する。いずれの版でもアプリはフォームを取得・表示・完了確認しない。
 - これらは本番開始条件、非参加者確認、監視安全性、データ管理、技術的来歴の実装強化であり、正式参加者が見る文言、条件、表示、提示順、タイミング、固定値、画面上フグ動作は変更していないため、protocolVersionは維持した。
 
 物理フグから画面上フグへの変更は参加者が見る研究刺激の変更である。実参加者へ使用する前に、研究責任者の承認を得て、所属機関で必要とされる倫理審査・研究計画の変更手続きを完了する。

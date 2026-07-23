@@ -125,8 +125,8 @@ export interface OperatorSessionConfirmationChecks {
 export interface OperatorSessionConfirmationStatus {
   readonly confirmed: boolean;
   readonly checks: OperatorSessionConfirmationChecks;
-  readonly technicalReadiness: "GO";
-  readonly participantMode: "enabled";
+  readonly technicalReadiness: "GO" | "NO-GO";
+  readonly participantMode: "enabled" | "disabled";
   readonly complianceMode: "external";
   readonly approvalEvidence: "managed-outside-system";
   readonly approvalVerifiedByApplication: false;
@@ -152,8 +152,8 @@ function parseOperatorSessionConfirmation(
     || typeof checks["participantConsentConfirmed"] !== "boolean"
     || typeof checks["stopOperationConfirmed"] !== "boolean"
     || typeof checks["physicalDeviceSafetyConfirmed"] !== "boolean"
-    || record["technicalReadiness"] !== "GO"
-    || record["participantMode"] !== "enabled"
+    || (record["technicalReadiness"] !== "GO" && record["technicalReadiness"] !== "NO-GO")
+    || (record["participantMode"] !== "enabled" && record["participantMode"] !== "disabled")
     || record["complianceMode"] !== "external"
     || record["approvalEvidence"] !== "managed-outside-system"
     || record["approvalVerifiedByApplication"] !== false
@@ -166,8 +166,8 @@ function parseOperatorSessionConfirmation(
       stopOperationConfirmed: checks["stopOperationConfirmed"],
       physicalDeviceSafetyConfirmed: checks["physicalDeviceSafetyConfirmed"],
     },
-    technicalReadiness: "GO",
-    participantMode: "enabled",
+    technicalReadiness: record["technicalReadiness"],
+    participantMode: record["participantMode"],
     complianceMode: "external",
     approvalEvidence: "managed-outside-system",
     approvalVerifiedByApplication: false,

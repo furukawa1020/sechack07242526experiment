@@ -138,8 +138,8 @@ export function assessReleaseFormVerification(
   for (const issue of productionPolicy.protocolIssues) {
     issues.push(`production-protocol-${issue}`);
   }
-  for (const issue of productionPolicy.goEvidence.issues) {
-    issues.push(`production-go-evidence-${issue}`);
+  for (const issue of productionPolicy.complianceIssues) {
+    issues.push(`production-compliance-${issue}`);
   }
   for (const issue of assessFormAudit(config, now).issues) {
     issues.push(`form-audit-${issue}`);
@@ -206,7 +206,7 @@ export async function verifyReleaseForm(
   const nonFormPolicyIssues = [
     ...productionPolicy.deviceIssues,
     ...productionPolicy.protocolIssues,
-    ...productionPolicy.goEvidence.issues,
+    ...productionPolicy.complianceIssues,
   ];
   if (nonFormPolicyIssues.length > 0) {
     throw new Error(

@@ -323,7 +323,7 @@ export class SessionController {
         physicalDeviceSafetyConfirmed: confirmed,
       }),
       technicalReadiness: "GO",
-      participantMode: "enabled",
+      participantMode: this.config.participantMode,
       complianceMode: "external",
       approvalEvidence: "managed-outside-system",
       approvalVerifiedByApplication: false,
@@ -1328,7 +1328,7 @@ export class SessionController {
   }
 
   private requireOperatorSessionConfirmation(): void {
-    if (!this.operatorSessionConfirmed) {
+    if (this.config.participantMode === "enabled" && !this.operatorSessionConfirmed) {
       throw conflict(
         "外部管理事項と当日運用の4項目を確認してから開始してください。",
         "OPERATOR_SESSION_CONFIRMATION_REQUIRED",

@@ -35,31 +35,31 @@
 
 Operatorは一般的なスタッフ引継ぎだけを確認し、`POST /api/sessions/:id/confirm-staff-handoff`でセッションを完了する。
 
-## 3. 本番GO条件
+## 3. EXTERNAL COMPLIANCE MODEと開始条件
 
-本番は常にフェイルクローズとする。次の6件が、同じprotocolVersion、appVersion、対象設定SHA-256、source tree SHA-256へ結び付いた有効な`goEvidence`でなければ、リリース生成と起動を拒否する。
+正式productionは`compliance.mode=external`を使用する。倫理承認の確認と証跡管理は研究責任者および当日の運用責任者が本システム外で行う。本アプリは承認PDF、承認文書参照、承認文書のSHA-256、確認者情報、署名を要求・保存・検証せず、承認済みとも表示しない。
 
-1. 承認済み研究計画
-2. 承認済み倫理判断
-3. 提示前同意の承認済み取得・記録手順
-4. 承認済みデータ管理計画
-5. 研究チームの非参加者によるscreenパイロット3〜5件
-6. 独立二名照合
+技術状態は次の意味へ分ける。
 
-外部回答監査はscreen-v3のリリースゲート・起動ゲートではない。本番設定は`formUrl=""`とし、`formAudit`を含めない。
+```text
+technicalReadiness = GO
+participantMode = enabled
+complianceMode = external
+approvalEvidence = managed-outside-system
+approvalVerifiedByApplication = false
+```
 
-次もすべて満たす。
+旧`goEvidence`、承認文書、承認hash、二名照合、reviewer identity、screen pilot件数、manual GO ticketはrelease/startのハードゲートに含めない。screen-v1の外部回答監査もscreen-v3のリリースゲート・起動ゲートではない。本番設定は`formUrl=""`とし、`formAudit`を含めない。
 
-- 固定模擬データ、本人非測定、生体データ非取得、画面内フグ、v3の固定文言が研究責任者に承認されている
-- 画面刺激版に必要な研究計画変更・倫理手続きが完了している
-- 1366×768と1920×1080で全画面を確認している
-- C/Dで6秒膨張、保持、6秒収縮が完全に同一である
-- 4提示それぞれの`response`でOperatorの明示確認まで停止し、確認後だけ所定の次状態へ進む
-- `result`/`reset`中の切断がSTOP、DEFLATE、`error`となり再開できない
-- 他フェーズの切断後はOperatorの明示確認まで進行しない
-- 全自動試験、本番preflight、二名manifest照合が成功している
+第1提示の開始には、次をすべて満たす。
 
-一つでも不足する場合は**NO-GO**である。
+- `participantMode=enabled`
+- 当日のOperatorセッション内確認済み
+- 参加者ごとの提示前同意確認済み
+- 緊急停止が利用可能
+- 必須runtime checkが成功
+
+Operator確認は氏名、メール、ID、署名、承認番号、承認文書、SHA-256を入力させず、サーバメモリまたは`sessionStorage`だけに保持する。アプリまたはブラウザ再起動後は再確認を要求する。
 
 ## 4. 本番設定
 
@@ -69,8 +69,21 @@ Operatorは一般的なスタッフ引継ぎだけを確認し、`POST /api/sess
 
 ```json
 {
+  "environment": "production",
+  "participantMode": "enabled",
   "protocolVersion": "R8-010-2x2-screen-v3",
   "bindHost": "127.0.0.1",
+  "compliance": {
+    "mode": "external",
+    "evidenceStorage": "outside-system",
+    "verifiedByApplication": false
+  },
+  "runtime": {
+    "requireOperatorSessionConfirmation": true,
+    "persistOperatorConfirmation": false,
+    "requireConsentConfirmation": true,
+    "requireEmergencyStopCheck": true
+  },
   "network": {
     "allowLan": false,
     "allowExternalRuntimeRequests": false
@@ -84,11 +97,11 @@ Operatorは一般的なスタッフ引継ぎだけを確認し、`POST /api/sess
 }
 ```
 
-`formAudit`は含めない。`goEvidence`は[本番GO証跡の作成・照合手順](GO_EVIDENCE.md)に従い、氏名、メール、署名画像を入れず、承認文書の非個人識別ID、版、SHA-256、承認日、適用期限を記録する。
+`formAudit`と`goEvidence`は含めない。[EXTERNAL COMPLIANCE MODEの責務境界](GO_EVIDENCE.md)に従い、承認資料・承認文書ハッシュ・確認者情報を設定へ記録しない。
 
-## 5. 非参加者screenパイロット
+## 5. 任意の非参加者screen品質確認
 
-初回GO前に、研究チームの非参加者が異なる`PILOT-xxx`で3〜5件を完走する。
+screen pilotは任意の品質確認であり、件数や実施有無を正式release/startの条件にしない。実施する場合は研究チームの非参加者だけが`PILOT-xxx`を使用する。
 
 ```powershell
 npm.cmd run screen-pilot
@@ -101,13 +114,13 @@ npm.cmd run screen-pilot
 - Operatorに `非参加者用の事前確認` と `画面版・PILOT/テスト`、参加者側に `非参加者用の事前確認` と `外部回答送信なし` が常設される
 - 外部回答導線が表示されない
 - 切断、中止、STOP、DEFLATEが安全側へ遷移する
-- 実施時のsource commit、source tree SHA-256、pilot設定バイトSHA-256、各ログSHA-256を承認済み外部管理票へ記録する
+- 必要に応じてsource commit、source tree SHA-256、pilot設定バイトSHA-256を技術的な再現性確認に使用する。これらを倫理承認証跡として扱わない
 
 パイロットは実参加者、正式`SH26-xxx`、外部回答を使用しない。正式成果物へscreen-pilotの設定、起動経路、ログを同梱しない。
 
 ## 6. 封印済みリリースの生成
 
-クリーンな承認済みcommitで、必要な5コマンドを実行する。
+クリーンな検証対象commitで、必要な5コマンドを実行する。
 
 ```powershell
 npm.cmd run lint
@@ -117,22 +130,22 @@ npm.cmd run test:e2e
 npm.cmd run build
 ```
 
-続けてsource evidenceを二名で照合し、リリースを生成する。
+続けて技術的なsource整合を確認し、リリースを生成する。
 
 ```powershell
 npm.cmd run release:source-evidence
 npm.cmd run deploy:prepare -- --config config/experiment.production.json
 ```
 
-リリース生成は、固定production設定の追跡・HEADバイト一致、appVersion、source commit、production設定だけを除外した追跡source tree SHA-256、pilot設定バイトSHA-256、goEvidence、共有build lockを検証する。失敗を回避するための直接起動、設定差し替え、既存build成果物の流用、環境変数上書きを行わない。
+リリース生成は、固定production設定の追跡・HEADバイト一致、appVersion、source commit、追跡source treeの技術的整合、external compliance設定、共有build lockを検証する。承認資料、承認文書ハッシュ、確認者情報、screen pilot件数は検証しない。失敗を回避するための直接起動、設定差し替え、既存build成果物の流用、環境変数上書きを行わない。
 
 正式成果物へ含めるもの:
 
 - ビルド済みクライアントとサーバ
 - production依存関係
-- 承認済み設定1ファイル
+- external compliance設定1ファイル
 - manifest検証、preflight、healthcheck
-- 本番に必要な実験仕様、固定文言、装置境界、RUNBOOK、GO証跡、データ管理文書
+- 本番に必要な実験仕様、固定文言、装置境界、RUNBOOK、external compliance境界、データ管理文書
 - `DEPLOYMENT_MANIFEST.json`
 - Windows用の検証・起動・healthcheckランチャー
 
@@ -152,7 +165,7 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 1. リリースディレクトリ全体を、Git・クラウド同期対象外のローカルディスクへコピーする。
 2. manifest記載と同じNode.js版とWindows architectureを用意する。
 3. 会場PCでは`npm install`、`npm ci`、buildを行わない。
-4. `VERIFY_RELEASE.cmd`を実行し、全ファイルSHA-256、manifest SHA-256、source commit、appVersion、設定、goEvidenceがPASSすることを二名が独立に確認する。
+4. `VERIFY_RELEASE.cmd`を実行し、全ファイルとmanifestの技術的整合、source commit、appVersion、external compliance設定がPASSすることを確認する。技術的ファイル整合のSHA-256は承認文書のSHA-256ではない。
 5. `data/`だけが実行時書込み領域であり、空き容量とアクセス権が適切であることを確認する。
 6. 同じ`data/`を使うサーバが起動していないことを確認する。二重起動拒否を別ポートや直接起動で回避しない。
 
@@ -161,11 +174,12 @@ npm.cmd run deploy:prepare -- --config config/experiment.production.json
 1. 不要なクラウド同期、通知、スリープ、ブラウザ拡張を停止する。
 2. 物理フグ、USBシリアル、生体センサが未接続であることを確認する。
 3. `START_PRODUCTION.cmd`を実行する。
-4. `CHECK_HEALTH.cmd`が`R8-010-2x2-screen-v3`、`deviceMode=screen`、承認済み設定hashを返すことを確認する。
+4. `CHECK_HEALTH.cmd`が`R8-010-2x2-screen-v3`、`deviceMode=screen`、検証対象の技術設定hashを返すことを確認する。
 5. 同じPCで `http://127.0.0.1:4173/operator` と `/device-test` を開く。
 6. ScreenPufferDeviceが`idle`、level 0、faultなしであることを確認する。
 7. 6秒膨張、保持、6秒収縮、STOP、DEFLATEを確認する。
-8. 参加者画面を同じPCの承認済みChromiumで全画面表示し、1366×768または1920×1080で欠けがないことを確認する。
+8. 参加者画面を同じPCの運用対象Chromiumで全画面表示し、1366×768または1920×1080で欠けがないことを確認する。
+9. Operator画面で「外部管理事項と当日運用の確認」を完了する。氏名、ID、署名、承認資料を入力せず、アプリまたはブラウザ再起動後に再確認されることを確認する。
 
 production起動後に模擬IDの練習セッションを作らない。一般公開URLへ誘導しない。会場ネットワークや別端末へbindしない。
 

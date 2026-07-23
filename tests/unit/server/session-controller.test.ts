@@ -27,11 +27,44 @@ import { SessionController } from "../../../src/server/sessions/session-controll
 import { createSession } from "../../../src/shared/experiment-machine.js";
 
 const CONFIG_HASH = "0".repeat(64);
+const OPERATOR_SESSION_CONFIRMATION = {
+  todayProcedureConfirmed: true,
+  participantConsentConfirmed: true,
+  stopOperationConfirmed: true,
+  physicalDeviceSafetyConfirmed: true,
+} as const;
 
 function testConfig() {
   return parseExperimentConfig({
     schemaVersion: 1,
     protocolVersion: SCREEN_PROTOCOL_VERSION,
+    environment: "test",
+    participantMode: "disabled",
+    compliance: {
+      mode: "external",
+      evidenceStorage: "outside-system",
+      verifiedByApplication: false,
+      requireApprovalDocument: false,
+      requireApprovalHash: false,
+      requireSecondVerifier: false,
+      requireReviewerIdentity: false,
+      requireScreenPilotForRelease: false,
+      requireManualGoTicket: false,
+    },
+    runtime: {
+      requireOperatorSessionConfirmation: true,
+      persistOperatorConfirmation: false,
+      requireConsentConfirmation: true,
+      requireEmergencyStopCheck: true,
+    },
+    privacy: {
+      storeOperatorIdentity: false,
+      storeApprovalEvidence: false,
+      storeApprovalHash: false,
+      storeIpAddress: false,
+      analyticsEnabled: false,
+      telemetryEnabled: false,
+    },
     studyTitle: "テスト",
     bindHost: "127.0.0.1",
     port: 4173,
@@ -247,6 +280,7 @@ function makeController(
     readonly device?: MockPufferDevice;
     readonly rehearsal?: boolean;
     readonly config?: ReturnType<typeof testConfig>;
+    readonly confirmOperatorSession?: boolean;
   } = {},
 ) {
   const device = options.device ?? new MockPufferDevice({ timingMode: "fast", initialConnected: true });
@@ -261,6 +295,9 @@ function makeController(
     random: () => orderSample,
     monotonicNow: () => Date.now(),
   });
+  if (options.confirmOperatorSession !== false) {
+    controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION);
+  }
   return { controller, device, logger };
 }
 
@@ -275,6 +312,7 @@ function makeScreenController(logger = new MemoryLogger()) {
     logger,
     monotonicNow: () => Date.now(),
   });
+  controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION);
   return { controller, device, logger };
 }
 
@@ -326,6 +364,84 @@ describe("SessionController", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("keeps external compliance separate from the transient Operator confirmation", async () => {
+    const config = parseExperimentConfig({ ...testConfig(), participantMode: "enabled" });
+    const { controller, logger } = makeController(0, {
+      config,
+      confirmOperatorSession: false,
+    });
+
+    expect(controller.getOperatorSessionConfirmation()).toEqual({
+      confirmed: false,
+      checks: {
+        todayProcedureConfirmed: false,
+        participantConsentConfirmed: false,
+        stopOperationConfirmed: false,
+        physicalDeviceSafetyConfirmed: false,
+      },
+      technicalReadiness: "GO",
+      participantMode: "enabled",
+      complianceMode: "external",
+      approvalEvidence: "managed-outside-system",
+      approvalVerifiedByApplication: false,
+    });
+    await expect(controller.create({
+      researchId: "SH26-001",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    })).rejects.toMatchObject({
+      code: "OPERATOR_SESSION_CONFIRMATION_REQUIRED",
+      status: 409,
+    });
+
+    expect(controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION)).toMatchObject({
+      confirmed: true,
+      checks: OPERATOR_SESSION_CONFIRMATION,
+    });
+    await expect(controller.create({
+      researchId: "SH26-001",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    })).resolves.toMatchObject({ snapshot: { phase: "setup" } });
+    expect(JSON.stringify(logger.events)).not.toMatch(
+      /operatorSession|approvalEvidence|approvalVerified|reviewer|email|sha-256/iu,
+    );
+    controller.dispose();
+  });
+
+  it("does not let an incomplete confirmation or missing consent reach the first presentation", async () => {
+    const { controller } = makeController(0, { confirmOperatorSession: false });
+
+    expect(() => controller.confirmOperatorSession({
+      ...OPERATOR_SESSION_CONFIRMATION,
+      participantConsentConfirmed: false,
+    } as never)).toThrow(expect.objectContaining({
+      code: "OPERATOR_SESSION_CONFIRMATION_INCOMPLETE",
+      status: 400,
+    }));
+    controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION);
+    await expect(controller.create({
+      researchId: "SH26-001",
+      consentConfirmed: false as true,
+      orderCode: "ABDC",
+    })).rejects.toMatchObject({
+      code: "CONSENT_NOT_CONFIRMED",
+      status: 400,
+    });
+    expect(controller.getActiveOperatorSnapshot()).toBeNull();
+    controller.dispose();
+  });
+
+  it("keeps STOP available before the transient Operator confirmation", async () => {
+    const { controller, device } = makeController(0, { confirmOperatorSession: false });
+
+    await expect(controller.stopDevice()).resolves.toMatchObject({
+      status: { state: "stopped" },
+    });
+    expect(device.commandHistory.map((entry) => entry.command)).toContain("stop");
+    controller.dispose();
   });
 
   it("runs all four conditions using only server timers and exposes no internal code publicly", async () => {
@@ -657,6 +773,7 @@ describe("SessionController", () => {
       orderCode: "ABDC",
     });
     await controller.delete(created.snapshot.id);
+    controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION);
     await expect(
       controller.create({ researchId: "SH26-001", consentConfirmed: true, orderCode: "ABDC" }),
     ).rejects.toMatchObject({ code: "DUPLICATE_RESEARCH_ID", status: 409 });
@@ -698,6 +815,7 @@ describe("SessionController", () => {
       logger,
       monotonicNow: () => Date.now(),
     });
+    controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION);
     try {
       await expect(controller.create({
         researchId: "SH26-001",
@@ -1092,6 +1210,7 @@ describe("SessionController", () => {
   it("aborts an unattended run and protects running and error sessions from deletion", async () => {
     const { controller, device } = makeController();
     controller.markOperatorDisconnected();
+    controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION);
     const created = await controller.create({
       researchId: "SH26-001",
       consentConfirmed: true,
@@ -1099,6 +1218,7 @@ describe("SessionController", () => {
     });
     controller.markOperatorDisconnected();
     expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("setup");
+    controller.confirmOperatorSession(OPERATOR_SESSION_CONFIRMATION);
     controller.markDisplayReady(created.displayToken, "display-1");
     await controller.prepare(created.snapshot.id);
     await controller.start(created.snapshot.id);
@@ -1369,6 +1489,26 @@ describe("SessionController", () => {
       phase: "completed",
       result: "ok",
     });
+    controller.dispose();
+  });
+
+  it("does not complete the staff handoff after the participant display is lost", async () => {
+    const { controller } = makeController();
+    const created = await preparedSession(controller, "ABDC");
+    await controller.start(created.snapshot.id);
+    await advanceThroughResponseCheckpoints(controller, created.snapshot.id);
+
+    controller.markDisplayDisconnected(created.displayToken, "display-1");
+    expect(controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+      phase: "summary",
+      displayConnected: false,
+      recoveryRequired: true,
+    });
+    await expect(controller.confirmStaffHandoff(created.snapshot.id)).rejects.toMatchObject({
+      code: "RECOVERY_REQUIRED",
+      status: 409,
+    });
+    expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("summary");
     controller.dispose();
   });
 });

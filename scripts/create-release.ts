@@ -32,12 +32,10 @@ import {
 } from "../src/shared/production-policy.js";
 import {
   SCREEN_PROTOCOL_VERSION,
-  type ExperimentConfig,
 } from "../src/shared/schemas.js";
 import {
   hashProductionSourceTreeListing,
   PRODUCTION_CONFIG_PATH,
-  SCREEN_PILOT_CONFIG_PATH,
 } from "../src/server/production-source-tree.js";
 import { acquireBuildLock } from "./build-lock.mjs";
 
@@ -273,29 +271,11 @@ interface TrackedPackage {
   readonly version: string;
 }
 
-export interface ProductionSourceEvidenceSummary {
+export interface ProductionSourceIntegritySummary {
   readonly appVersion: string;
   readonly criticalConfigSha256: string;
-  readonly pilotConfigFileHash: string;
   readonly sourceCommit: string;
   readonly sourceTreeSha256: string;
-}
-
-async function hashTrackedScreenPilotConfig(
-  rootDirectory: string,
-  sourceCommit: string,
-): Promise<string> {
-  const committed = await runGitBytes(rootDirectory, [
-    "cat-file",
-    "blob",
-    `${sourceCommit}:${SCREEN_PILOT_CONFIG_PATH}`,
-  ]);
-  if (committed.exitCode !== 0) {
-    throw new Error(
-      `Screen-pilot config must be tracked at ${SCREEN_PILOT_CONFIG_PATH} in the recorded source commit.`,
-    );
-  }
-  return createHash("sha256").update(committed.stdout).digest("hex");
 }
 
 async function readTrackedPackage(
@@ -326,52 +306,18 @@ async function readTrackedPackage(
   return Object.freeze({ source: Object.freeze({ ...source }), version });
 }
 
-function assertProductionReleaseSourceEvidence(
-  config: ExperimentConfig,
-  appVersion: string,
-  sourceTreeSha256: string,
-  pilotConfigFileHash: string,
-): void {
-  const releaseVerification = config.goEvidence?.releaseVerification;
-  const screenPilot = config.goEvidence?.screenPilot;
-  const failures: string[] = [];
-  if (releaseVerification === undefined) {
-    failures.push("goEvidence.releaseVerification");
-  } else {
-    if (releaseVerification.appVersion !== appVersion) {
-      failures.push("goEvidence.releaseVerification.appVersion");
-    }
-    if (releaseVerification.sourceTreeSha256 !== sourceTreeSha256) {
-      failures.push("goEvidence.releaseVerification.sourceTreeSha256");
-    }
-  }
-  if (screenPilot === undefined) {
-    failures.push("goEvidence.screenPilot");
-  } else {
-    if (screenPilot.sourceTreeSha256 !== sourceTreeSha256) {
-      failures.push("goEvidence.screenPilot.sourceTreeSha256");
-    }
-    if (screenPilot.pilotConfigFileHash !== pilotConfigFileHash) {
-      failures.push("goEvidence.screenPilot.pilotConfigFileHash");
-    }
-  }
-  if (failures.length > 0) {
-    throw new Error(`Production source evidence gate failed: ${failures.join(", ")}`);
-  }
-}
-
-/** Read-only helper used before independent review to obtain the exact values
- * that must be copied into releaseVerification and screenPilot. It requires a
- * clean Git HEAD and the same fixed config invariants as release creation. */
-export async function inspectProductionSourceEvidence(
+/**
+ * Optional read-only technical-integrity diagnostic. It is not an approval
+ * check, does not inspect ethics material, and is never a release/start gate.
+ */
+export async function inspectProductionSourceIntegrity(
   rootDirectory = process.cwd(),
-): Promise<ProductionSourceEvidenceSummary> {
+): Promise<ProductionSourceIntegritySummary> {
   const root = resolve(rootDirectory);
   const provenance = await collectSourceProvenance(root);
-  const [configSnapshot, sourceTreeSha256, pilotConfigFileHash, trackedPackage] = await Promise.all([
-    loadExperimentConfig(DEFAULT_CONFIG_PATH, { rootDirectory: root, production: false }),
+  const [configSnapshot, sourceTreeSha256, trackedPackage] = await Promise.all([
+    loadExperimentConfig(DEFAULT_CONFIG_PATH, { rootDirectory: root, production: true }),
     hashTrackedSourceTreeAtCommit(root, provenance.sourceCommit),
-    hashTrackedScreenPilotConfig(root, provenance.sourceCommit),
     readTrackedPackage(root, provenance.sourceCommit),
   ]);
   await assertTrackedProductionConfig(
@@ -383,7 +329,6 @@ export async function inspectProductionSourceEvidence(
   return Object.freeze({
     appVersion: trackedPackage.version,
     criticalConfigSha256: hashProductionCriticalConfig(configSnapshot.config),
-    pilotConfigFileHash,
     sourceCommit: provenance.sourceCommit,
     sourceTreeSha256,
   });
@@ -673,7 +618,6 @@ function assertMockRehearsalReleaseConfig(report: PreflightReport, rootDirectory
   }
   if (report.formUrl !== "") failures.push("formUrl");
   if (report.formAuditStatus !== "MISSING") failures.push("formAudit");
-  if (report.goEvidenceStatus !== "MISSING") failures.push("goEvidence");
   if (report.researchIdPattern !== "^DEMO-[0-9]{3}$") {
     failures.push("researchIdPattern");
   }
@@ -702,13 +646,15 @@ function assertProductionReleaseMetadata(report: PreflightReport): void {
   }
   if (report.formUrl !== "") failures.push("formUrl");
   if (report.formAuditStatus !== "MISSING") failures.push("formAudit");
-  if (report.goEvidenceStatus !== "GO") failures.push("goEvidence.status");
-  if (
-    report.goEvidenceCriticalConfigSha256 !== report.computedCriticalConfigSha256
-  ) {
-    failures.push("goEvidence.criticalConfigSha256");
+  if (report.technicalReadiness !== "GO") failures.push("technicalReadiness");
+  if (report.participantMode !== "enabled") failures.push("participantMode");
+  if (report.complianceMode !== "external") failures.push("complianceMode");
+  if (report.approvalEvidence !== "managed-outside-system") {
+    failures.push("approvalEvidence");
   }
-  if (report.goEvidenceSha256 === "") failures.push("goEvidence.sha256");
+  if (report.approvalVerifiedByApplication) {
+    failures.push("approvalVerifiedByApplication");
+  }
   if (failures.length > 0) {
     throw new Error(`Production screen release metadata gate failed: ${failures.join(", ")}`);
   }
@@ -852,7 +798,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   // the packaged config below are bound back to this same snapshot.
   const configSnapshot = await loadExperimentConfig(configPath, {
     rootDirectory,
-    production: false,
+    production: releaseKind === "production",
   });
   if (releaseKind === "production") {
     await assertTrackedProductionConfig(
@@ -891,17 +837,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
   if (releaseKind === "mock-rehearsal") {
     assertMockRehearsalReleaseConfig(report, rootDirectory);
   } else {
-    const pilotConfigFileHash = await hashTrackedScreenPilotConfig(
-      rootDirectory,
-      sourceProvenance.sourceCommit,
-    );
     assertProductionReleaseMetadata(report);
-    assertProductionReleaseSourceEvidence(
-      configSnapshot.config,
-      appVersion,
-      sourceTreeSha256,
-      pilotConfigFileHash,
-    );
   }
 
   if (options.buildArtifacts ?? true) {
@@ -987,9 +923,15 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     const packagedConfigName =
       releaseKind === "production" ? "experiment.json" : "experiment.mock-rehearsal.json";
     const packagedConfigPath = `config/${packagedConfigName}`;
+    const packagedConfigBytes = releaseKind === "production"
+      ? Buffer.from(`${JSON.stringify(configSnapshot.config, null, 2)}\n`, "utf8")
+      : Buffer.from(configSnapshot.sourceBytes);
+    const packagedConfigFileHash = createHash("sha256")
+      .update(packagedConfigBytes)
+      .digest("hex");
     await writeFile(
       resolve(stagingDirectory, "config", packagedConfigName),
-      configSnapshot.sourceBytes,
+      packagedConfigBytes,
       { flag: "wx" },
     );
     if (releaseKind === "production") {
@@ -1003,9 +945,9 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       );
       if (
         packagedConfig.configHash !== configSnapshot.configHash ||
-        packagedConfig.configFileHash !== configSnapshot.configFileHash
+        packagedConfig.configFileHash !== packagedConfigFileHash
       ) {
-        throw new Error("Packaged production screen config does not match the validated byte snapshot.");
+        throw new Error("Packaged production screen config does not match the validated normalized config.");
       }
       await mkdir(resolve(stagingDirectory, "docs"));
       for (const name of [
@@ -1017,7 +959,6 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
         "TEST_REPORT.md",
         "RELEASE_CHECKLIST.md",
         "DEPLOYMENT.md",
-        "GO_EVIDENCE.md",
         "DATA_LIFECYCLE.md",
       ] as const) {
         await copyRegularFileStable(
@@ -1087,7 +1028,7 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       appVersion,
       protocolVersion: report.protocolVersion,
       configHash: configSnapshot.configHash,
-      configFileHash: configSnapshot.configFileHash,
+      configFileHash: packagedConfigFileHash,
       sourceCommit: sourceProvenance.sourceCommit,
       sourceTreeSha256,
       ...(sourceProvenance.sourceRepository === undefined

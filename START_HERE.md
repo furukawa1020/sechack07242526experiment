@@ -12,13 +12,13 @@
 2. `docs/EXPERIMENT_SPEC.md`
 3. `docs/UI_COPY.md`
 4. `docs/DEVICE_PROTOCOL.md`
-5. `docs/GO_EVIDENCE.md`
+5. `docs/GO_EVIDENCE.md`（EXTERNAL COMPLIANCE MODEの責務境界）
 6. `docs/DATA_LIFECYCLE.md`
 7. `config/experiment.example.json`（開発・Mock用）
 8. `config/experiment.screen-pilot.example.json`（非参加者の画面版技術パイロット用）
-9. `config/experiment.production.example.json`（正式screen用。GO証跡完了までNO-GO）
+9. `config/experiment.production.example.json`（正式screen・external compliance用）
 
-`docs/FORM_*`はv1の履歴またはアプリ外アンケートの任意資料であり、v2の正式release/start gateではない。
+`docs/FORM_*`はv1の履歴またはアプリ外アンケートの任意資料であり、v3の正式release/start gateではない。
 
 このタスクは、説明だけ、モック画像だけ、途中の雛形だけで終了しないでください。実装、テスト、ビルド、実行手順、運用手順、スクリーンショット生成まで完了してください。
 
@@ -33,8 +33,10 @@
   - C = この端末内 × 画面上のフグのふくらみ
   - D = クラウド × 画面上のフグのふくらみ
 - 「クラウド」は比較用シナリオであり、アプリから身体データや研究データを外部へ送信してはならない。
-- 提示前の研究説明と参加同意は、アプリ外の承認済み経路で提示開始前に提供・記録する。フォームその他の外部アンケートを用いる場合の告知・運用も研究スタッフがアプリ外で行い、アプリは取得・表示・誘導・送信・完了確認しない。スタッフ画面の確認欄は同意記録そのものではなく、今回のアプリは研究説明・同意・外部回答を置き換えない。
-- `goEvidence`の研究計画、倫理判断、提示前同意、データ管理計画、非参加者screen pilot 3〜5件、独立二名reviewがすべて承認済みになるまで、本番起動や参加者案内を行わない。フォーム監査はv2の本番ゲートではない。
+- 提示前の研究説明と参加同意は、アプリ外で提示開始前に提供・記録する。フォームその他の外部アンケートを用いる場合の告知・運用も研究スタッフがアプリ外で行い、アプリは取得・表示・誘導・送信・完了確認しない。スタッフ画面の確認欄は同意記録そのものではなく、今回のアプリは研究説明・同意・外部回答を置き換えない。
+- 正式productionは`compliance.mode=external`とする。倫理承認資料と証跡は本システム外で管理し、本アプリ、設定、Git、CI、manifest、ログへ承認PDF、承認文書参照、承認文書のSHA-256、確認者情報、署名を要求・保存・生成しない。本アプリは倫理承認を検証した、承認済みである、二名照合済みであるとは表示しない。
+- 状態は`technicalReadiness=GO`、`participantMode=enabled`、`complianceMode=external`、`approvalEvidence=managed-outside-system`、`approvalVerifiedByApplication=false`へ分離する。
+- 正式開始条件は、参加者モード有効、当日のOperatorセッション内確認、参加者ごとの提示前同意確認、緊急停止の利用可能性、必須runtime check成功だけとする。旧`goEvidence`、承認文書、承認hash、二名照合、reviewer identity、screen pilot件数、manual GO ticketをrelease/startのハードゲートにしない。
 - 参加者画面にはA/B/C/Dの内部コード、仮説、期待される結果、条件の優劣を表示しない。
 - 参加者画面で変えてよいのは、原則として「処理場所の説明」と「伝え方」の2点だけである。
 - クラウドを赤、ローカルを緑にするなど、条件の安全性・危険性を色で暗示してはならない。
@@ -44,7 +46,7 @@
 - 本番アプリはローカルで動作し、デフォルトでは `127.0.0.1` のみにバインドする。
 - 正式MVPは`device.mode=screen`と`ScreenPufferDevice`を使用し、USB機器を接続せず、画面上のフグだけを動かす。フグ制御のための外部通信を行わない。
 - `mock`は開発、自動テスト、明示的な模擬リハーサル専用とし、正式実施に使用しない。
-- 初回GO前の画面版パイロットは、研究チームの非参加者だけがcleanなGit worktreeルートから`npm run screen-pilot`を使用する。このコマンドで毎回再ビルドし、固定pilot設定の追跡・HEADバイト一致を検証し、`sourceCommit`、固定production設定だけを除外した`sourceTreeSha256`、pilot設定バイトの`configFileHash`を全PILOT JSONLへ結び付ける。後二者はGO証跡へ記録してproduction候補と機械照合する。直接のビルド済みentryは使わない。正式固定値・時間・順序と`ScreenPufferDevice`を保ち、loopback、外部回答送信なし、`PILOT-xxx`、隔離ログ、非参加者表示を強制し、実参加者や正式研究用IDを使用しない。
+- 画面版パイロットは任意の品質確認である。実施する場合は、研究チームの非参加者だけがcleanなGit worktreeルートから`npm run screen-pilot`を使用する。正式固定値・時間・順序と`ScreenPufferDevice`を保ち、loopback、外部回答送信なし、`PILOT-xxx`、隔離ログ、非参加者表示を強制し、実参加者や正式研究用IDを使用しない。件数や実施有無を正式release/startのハードゲートにしない。
 - `serial`による物理フグは将来の別プロトコルとし、`R8-010-2x2-screen-v3`へ混在させない。
 - C/Dでは、`result`開始から6秒で画面上のフグを同じ形状まで膨張させ、結果終了まで保持し、`reset`開始から6秒で収縮させる。描画はサーバ時刻へ同期する。`result`または`reset`中の切断・再読み込みは刺激欠損として安全停止し、そのセッションを再開しない。他フェーズではOperatorの復旧確認まで停止する。
 - 参加者向け文言は `docs/UI_COPY.md` を単一の正として実装し、独自に言い換えない。
@@ -82,12 +84,15 @@
 ## 必須機能
 
 - 研究用ID入力と形式検証
+- Operatorのセッション内「外部管理事項と当日運用の確認」。氏名、ID、署名、承認資料を入力させず、永続保存しない
+- 参加者ごとの提示前同意確認
 - 4つの提示順 `ABDC / BCAD / CDBA / DACB`
 - 最少使用回数の順序を優先する自動割付と手動選択
 - 同一の固定状態データをセッション中ロック
 - サーバを唯一の状態源とする実験ステートマシン
 - スタッフ画面と参加者画面のリアルタイム同期
 - 4条件の自動進行
+- 4提示それぞれの`reset`後に中立な`response`で停止し、`confirm-response-checkpoint`の明示操作だけで次へ進む
 - ScreenPufferDevice
 - MockDevice
 - 将来用として分離されたSerialDevice
@@ -167,7 +172,7 @@ npm run build
 - 正式`screen`モードでの実機なし運用手順
 - MockDeviceでのデモ手順
 - 将来の物理フグを正式版から分離する境界文書
-- Playwrightで`artifacts/screenshots/`へ生成した各画面のPNG（ローカルで生成・二名確認し、Gitおよび本番成果物には含めない）
+- Playwrightで`artifacts/screenshots/`へ生成した各画面のPNG（ローカルで目視確認し、Gitおよび本番成果物には含めない）
 - 実行したコマンドと結果の最終報告
 
 物理フグから画面上フグへの変更は研究刺激の変更です。実参加者へ使用する前に、固定模擬データ、本人非測定、生体データ非取得および画面上フグが承認済み研究計画と一致していることを研究責任者が確認し、所属機関で必要な倫理審査・変更手続きを完了してください。

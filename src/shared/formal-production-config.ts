@@ -2,6 +2,7 @@ import {
   hashExperimentConfig,
   hashProductionCriticalConfig,
   loadExperimentConfig,
+  normalizeExternalComplianceConfigInput,
 } from "./config-loader.js";
 import { assessProductionPolicy } from "./production-policy.js";
 import {
@@ -49,7 +50,7 @@ function productionPolicyErrors(config: ExperimentConfig): readonly string[] {
 }
 
 export function parseFormalProductionConfig(input: unknown): FormalProductionConfig {
-  const config = parseExperimentConfig(input);
+  const config = parseExperimentConfig(normalizeExternalComplianceConfigInput(input));
   const issues = productionPolicyErrors(config);
   if (issues.length > 0) {
     throw new Error(`Formal production config rejected (${issues.join(", ")}).`);

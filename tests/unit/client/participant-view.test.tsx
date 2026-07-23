@@ -276,6 +276,7 @@ describe("participant presentation invariants", () => {
     expect(footer).not.toBeNull();
     expect(within(footer as HTMLElement).getByText(UI_COPY.footer.scenario)).toBeInTheDocument();
     expect(within(footer as HTMLElement).getByText(UI_COPY.footer.medical)).toBeInTheDocument();
+    expect(within(footer as HTMLElement).getByText(UI_COPY.footer.withdrawal)).toBeInTheDocument();
 
     rerender(<ParticipantView snapshot={snapshot("local", "label")} />);
     expect(screen.getByText(UI_COPY.result.metric)).toBeInTheDocument();

@@ -27,7 +27,8 @@ export interface ReleaseManifest {
   readonly configHash: string;
   readonly configFileHash: string;
   readonly criticalConfigSha256: string;
-  readonly goEvidenceSha256: string | null;
+  /** Schema-v4 compatibility marker. External compliance requires null. */
+  readonly goEvidenceSha256: null;
   readonly sourceCommit: string;
   readonly sourceTreeSha256: string;
   readonly sourceEvidenceBindingSha256: string;
@@ -53,7 +54,7 @@ export interface ReleaseVerificationResult {
     readonly configHash: string;
     readonly configFileHash: string;
     readonly criticalConfigSha256: string;
-    readonly goEvidenceSha256: string | null;
+    readonly goEvidenceSha256: null;
     readonly sourceTreeSha256: string;
     readonly sourceEvidenceBindingSha256: string;
   } | null;
@@ -72,11 +73,11 @@ export function hashSourceEvidenceBinding(input: {
   readonly sourceCommit: string;
   readonly sourceTreeSha256: string;
   readonly criticalConfigSha256: string;
-  readonly goEvidenceSha256: string | null;
+  readonly goEvidenceSha256: null;
 }): string {
   return createHash("sha256").update(
     [
-      "sechack-release-source-evidence-v2",
+      "sechack-release-technical-binding-v3",
       input.appVersion,
       input.sourceCommit,
       input.sourceTreeSha256,
@@ -182,13 +183,7 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
     !SHA256_PATTERN.test(String(candidate.configHash)) ||
     !SHA256_PATTERN.test(String(candidate.configFileHash)) ||
     !SHA256_PATTERN.test(String(candidate.criticalConfigSha256)) ||
-    !(
-      candidate.goEvidenceSha256 === null
-      || (
-        typeof candidate.goEvidenceSha256 === "string"
-        && SHA256_PATTERN.test(candidate.goEvidenceSha256)
-      )
-    ) ||
+    candidate.goEvidenceSha256 !== null ||
     typeof candidate.sourceCommit !== "string" ||
     !SOURCE_COMMIT_PATTERN.test(candidate.sourceCommit) ||
     typeof candidate.sourceTreeSha256 !== "string" ||
@@ -288,7 +283,7 @@ export async function createReleaseManifest(
   }
   const includedConfigPaths = RELEASE_CONFIG_PATHS.filter((path) => paths.includes(path));
   if (includedConfigPaths.length !== 1) {
-    throw new Error("Release payload must include exactly one approved experiment config path.");
+    throw new Error("Release payload must include exactly one formal experiment config path.");
   }
   const configPath = includedConfigPaths[0]!;
   const configSource = await readFile(resolve(rootDirectory, configPath));
@@ -311,19 +306,6 @@ export async function createReleaseManifest(
   }
   const criticalConfigSha256 = hashProductionCriticalConfig(config);
   const goEvidenceSha256 = hashProductionGoEvidence(config);
-  const releaseVerification = config.goEvidence?.releaseVerification;
-  if (
-    releaseVerification !== undefined
-    && releaseVerification.appVersion !== metadata.appVersion
-  ) {
-    throw new Error("Release appVersion does not match the packaged GO evidence.");
-  }
-  if (
-    releaseVerification !== undefined
-    && releaseVerification.sourceTreeSha256 !== metadata.sourceTreeSha256
-  ) {
-    throw new Error("Release source tree SHA-256 does not match the packaged GO evidence.");
-  }
   const sourceEvidenceBindingSha256 = hashSourceEvidenceBinding({
     appVersion: metadata.appVersion,
     sourceCommit: metadata.sourceCommit,
@@ -433,7 +415,7 @@ export async function verifyReleaseDirectoryDetailed(
     goEvidenceSha256: parsed.goEvidenceSha256,
   });
   if (parsed.sourceEvidenceBindingSha256 !== expectedSourceEvidenceBindingSha256) {
-    errors.push("Source, application, config, and GO evidence binding SHA-256 mismatch.");
+    errors.push("Source, application, and technical config binding SHA-256 mismatch.");
   }
   if (parsed.buildRuntime.node !== process.version) {
     errors.push(
@@ -472,7 +454,7 @@ export async function verifyReleaseDirectoryDetailed(
     parsed.files.some((file) => file.path === path),
   );
   if (includedConfigPaths.length !== 1) {
-    errors.push("Manifest must control exactly one approved experiment config path.");
+    errors.push("Manifest must control exactly one formal experiment config path.");
   } else {
     const configPath = includedConfigPaths[0]!;
     const configEntry = parsed.files.find((file) => file.path === configPath)!;
@@ -502,20 +484,7 @@ export async function verifyReleaseDirectoryDetailed(
       }
       const packagedGoEvidenceSha256 = hashProductionGoEvidence(packagedConfig);
       if (packagedGoEvidenceSha256 !== parsed.goEvidenceSha256) {
-        errors.push(`GO evidence SHA-256 mismatch: ${configPath}`);
-      }
-      const packagedReleaseVerification = packagedConfig.goEvidence?.releaseVerification;
-      if (
-        packagedReleaseVerification !== undefined
-        && packagedReleaseVerification.appVersion !== parsed.appVersion
-      ) {
-        errors.push(`GO evidence appVersion mismatch: ${configPath}`);
-      }
-      if (
-        packagedReleaseVerification !== undefined
-        && packagedReleaseVerification.sourceTreeSha256 !== parsed.sourceTreeSha256
-      ) {
-        errors.push(`GO evidence source tree SHA-256 mismatch: ${configPath}`);
+        errors.push(`External-compliance manifests must not contain an approval-evidence hash: ${configPath}`);
       }
     } catch {
       errors.push(`Packaged config could not be parsed and bound to manifest metadata: ${configPath}`);

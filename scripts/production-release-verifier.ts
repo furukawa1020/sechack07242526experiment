@@ -57,7 +57,7 @@ function hashSourceEvidenceBinding(input: {
 }): string {
   return createHash("sha256").update(
     [
-      "sechack-release-source-evidence-v2",
+      "sechack-release-technical-binding-v3",
       input.appVersion,
       input.sourceCommit,
       input.sourceTreeSha256,
@@ -119,13 +119,7 @@ function isReleaseManifest(value: unknown): value is ReleaseManifest {
     || !SHA256_PATTERN.test(String(candidate.configHash))
     || !SHA256_PATTERN.test(String(candidate.configFileHash))
     || !SHA256_PATTERN.test(String(candidate.criticalConfigSha256))
-    || !(
-      candidate.goEvidenceSha256 === null
-      || (
-        typeof candidate.goEvidenceSha256 === "string"
-        && SHA256_PATTERN.test(candidate.goEvidenceSha256)
-      )
-    )
+    || candidate.goEvidenceSha256 !== null
     || typeof candidate.sourceCommit !== "string"
     || !SOURCE_COMMIT_PATTERN.test(candidate.sourceCommit)
     || typeof candidate.sourceTreeSha256 !== "string"
@@ -353,7 +347,7 @@ export async function verifyFormalReleaseDirectoryDetailed(
     goEvidenceSha256: parsed.goEvidenceSha256,
   });
   if (parsed.sourceEvidenceBindingSha256 !== expectedBinding) {
-    errors.push("Source, application, config, and GO evidence binding SHA-256 mismatch.");
+    errors.push("Source, application, and technical config binding SHA-256 mismatch.");
   }
   if (parsed.buildRuntime.node !== process.version) {
     errors.push(`Node runtime mismatch: expected ${parsed.buildRuntime.node}, got ${process.version}`);
@@ -422,15 +416,7 @@ export async function verifyFormalReleaseDirectoryDetailed(
         errors.push("Critical config SHA-256 mismatch.");
       }
       if (hashFormalProductionGoEvidence(config) !== parsed.goEvidenceSha256) {
-        errors.push("GO evidence SHA-256 mismatch.");
-      }
-      if (config.goEvidence.releaseVerification.appVersion !== parsed.appVersion) {
-        errors.push("GO evidence appVersion mismatch.");
-      }
-      if (
-        config.goEvidence.releaseVerification.sourceTreeSha256 !== parsed.sourceTreeSha256
-      ) {
-        errors.push("GO evidence source tree SHA-256 mismatch.");
+        errors.push("External-compliance manifests must not contain an approval-evidence hash.");
       }
     } catch (error) {
       errors.push(
