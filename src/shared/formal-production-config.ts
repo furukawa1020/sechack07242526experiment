@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import type { ExperimentConfig } from "./schemas.js";
 
-export const FORMAL_SCREEN_PROTOCOL_VERSION = "R8-010-3condition-screen-v1";
+export const FORMAL_SCREEN_PROTOCOL_VERSION = "R8-010-2x2-screen-v2";
 export const FORMAL_PRODUCTION_CONFIG_PATH = "config/experiment.json";
 export const FORMAL_PRODUCTION_BIND_HOST = "127.0.0.1";
 export const FORMAL_PRODUCTION_PORT = 4_173;
@@ -36,9 +36,83 @@ const safeRelativeDirectory = z.string().min(1).max(240).refine(
   "The logging directory contains a forbidden character.",
 );
 
+const evidenceDateSchema = z.string().regex(
+  /^\d{4}-\d{2}-\d{2}$/u,
+  "Evidence dates must use YYYY-MM-DD.",
+).refine((value) => {
+  const milliseconds = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(milliseconds)
+    && new Date(milliseconds).toISOString().slice(0, 10) === value;
+}, "Evidence dates must be valid calendar dates.");
+
+const sha256Schema = z.string().regex(
+  /^[a-f0-9]{64}$/u,
+  "Evidence digests must be lowercase SHA-256 values.",
+);
+
+const evidenceIdentifierSchema = z.string().regex(
+  /^[A-Z0-9][A-Z0-9._:/-]{2,79}$/u,
+  "Evidence identifiers must be opaque uppercase codes without names, email addresses or whitespace.",
+);
+
+const evidenceVersionSchema = z.string().regex(
+  /^[A-Za-z0-9][A-Za-z0-9._:-]{0,39}$/u,
+  "Evidence versions may contain only letters, digits, dot, underscore, colon and hyphen.",
+);
+
+const approvalEvidenceSchema = z.object({
+  status: z.enum(["GO", "NO-GO"]),
+  protocolVersion: singleLineText,
+  documentId: evidenceIdentifierSchema,
+  documentVersion: evidenceVersionSchema,
+  contentSha256: sha256Schema,
+  approvedOn: evidenceDateSchema.nullable(),
+  applicableUntil: evidenceDateSchema.nullable(),
+}).strict();
+
+const screenPilotEvidenceSchema = approvalEvidenceSchema.extend({
+  completedSessions: z.number().int().min(3).max(5).nullable(),
+  sourceTreeSha256: sha256Schema,
+  pilotConfigFileHash: sha256Schema,
+}).strict();
+
+const releaseReviewSchema = z.object({
+  reviewId: evidenceIdentifierSchema,
+  reviewerCode: z.string().regex(
+    /^REV-[A-Z0-9]{4,32}$/u,
+    "reviewerCode must be an opaque REV- code and must not contain a person's name.",
+  ),
+  reviewVersion: evidenceVersionSchema,
+  status: z.enum(["GO", "NO-GO"]),
+  protocolVersion: singleLineText,
+  criticalConfigSha256: sha256Schema,
+  reviewedOn: evidenceDateSchema.nullable(),
+  applicableUntil: evidenceDateSchema.nullable(),
+  attestationSha256: sha256Schema,
+}).strict();
+
+const productionGoEvidenceSchema = z.object({
+  status: z.enum(["GO", "NO-GO"]),
+  protocolVersion: singleLineText,
+  criticalConfigSha256: sha256Schema,
+  researchPlan: approvalEvidenceSchema,
+  ethicsDetermination: approvalEvidenceSchema,
+  preStimulusConsent: approvalEvidenceSchema,
+  dataManagementPlan: approvalEvidenceSchema,
+  screenPilot: screenPilotEvidenceSchema,
+  releaseVerification: z.object({
+    status: z.enum(["GO", "NO-GO"]),
+    protocolVersion: singleLineText,
+    appVersion: evidenceVersionSchema,
+    criticalConfigSha256: sha256Schema,
+    sourceTreeSha256: sha256Schema,
+    reviews: z.tuple([releaseReviewSchema, releaseReviewSchema]),
+  }).strict(),
+}).strict();
+
 /**
- * Closed production schema. The external questionnaire remains a staff-operated
- * workflow and is deliberately not embedded in the participant application.
+ * Closed production schema. It deliberately has no legacy questionnaire-audit
+ * field and accepts only an empty external-questionnaire destination.
  */
 const formalProductionConfigSchema = z.object({
   schemaVersion: z.literal(1),
@@ -48,12 +122,10 @@ const formalProductionConfigSchema = z.object({
   port: z.literal(FORMAL_PRODUCTION_PORT),
   researchIdPattern: z.literal("^SH26-[0-9]{3}$"),
   orders: z.tuple([
-    z.literal("ABC"),
-    z.literal("ACB"),
-    z.literal("BAC"),
-    z.literal("BCA"),
-    z.literal("CAB"),
-    z.literal("CBA"),
+    z.literal("ABDC"),
+    z.literal("BCAD"),
+    z.literal("CDBA"),
+    z.literal("DACB"),
   ]),
   fixedState: z.object({
     score: z.literal(FORMAL_FIXED_STATE.score),
@@ -76,6 +148,7 @@ const formalProductionConfigSchema = z.object({
     allowMockInProduction: z.literal(false),
   }).strict(),
   formUrl: z.literal(""),
+  goEvidence: productionGoEvidenceSchema,
   logging: z.object({
     directory: safeRelativeDirectory,
     includeAbortedInOrderBalancing: z.boolean(),
@@ -101,9 +174,15 @@ export interface FormalLoadedExperimentConfig {
 export interface LoadFormalProductionConfigOptions {
   readonly rootDirectory?: string;
   readonly allowedDirectory?: string;
-  /** Retained for API compatibility; formal config no longer embeds dated attestations. */
   readonly currentDate?: Date;
 }
+
+const DAY_MS = 86_400_000;
+const JST_OFFSET_MS = 9 * 60 * 60 * 1_000;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+const PLACEHOLDER_SHA256 = "0".repeat(64);
+const PLACEHOLDER_TOKEN_PATTERN = /(?:^|[._:/-])(?:PENDING|TBD|TODO|EXAMPLE|PLACEHOLDER|DUMMY|SAMPLE)(?:[0-9]+)?(?:$|[._:/-])/iu;
+const MAX_RELEASE_REVIEW_AGE_DAYS = 30;
 
 function deepFreeze<Value>(value: Value): Value {
   if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {

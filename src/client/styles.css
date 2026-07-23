@@ -643,7 +643,7 @@ select:focus-visible {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   width: 100%;
   margin: 24px auto 0;
@@ -1026,21 +1026,6 @@ button:disabled {
   flex-wrap: wrap;
   align-items: center;
   gap: 11px;
-}
-
-.response-checkpoint {
-  display: grid;
-  width: 100%;
-  gap: 12px;
-}
-
-.response-checkpoint .operator-banner {
-  max-width: none;
-  margin: 0;
-}
-
-.response-checkpoint .primary-button {
-  justify-self: start;
 }
 
 .prerequisite-block {

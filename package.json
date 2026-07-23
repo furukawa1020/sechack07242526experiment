@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx src/server/index.ts",
     "rehearsal": "npm run preflight -- --allow-mock --config config/experiment.mock-rehearsal.json && npm run build && node dist-server/rehearsal.js --mock-rehearsal",
-    "screen-pilot": "scripts\\START_SCREEN_PILOT.cmd",
+    "screen-pilot": "tsx scripts/screen-pilot-launcher.ts",
     "audit:form": "tsx scripts/audit-public-form.ts",
     "verify:form-release": "tsx scripts/verify-release-form.ts",
     "data:lifecycle": "tsx scripts/data-lifecycle.ts",

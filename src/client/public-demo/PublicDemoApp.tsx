@@ -402,10 +402,7 @@ function RehearsalScene({
 }
 
 function conditionLabel(condition: PublicDemoCondition): string {
-  if (condition.processing === "cloud") return PUBLIC_DEMO_COPY.summary.conditionLabels.cloudLabel;
-  return condition.presentation === "label"
-    ? PUBLIC_DEMO_COPY.summary.conditionLabels.localLabel
-    : PUBLIC_DEMO_COPY.summary.conditionLabels.localPuffer;
+  return PUBLIC_DEMO_COPY.summary.conditionLabels[condition.processing][condition.presentation];
 }
 
 function SummaryScene(): React.JSX.Element {
