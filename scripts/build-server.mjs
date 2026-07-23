@@ -73,6 +73,12 @@ async function buildServer() {
       target: "node22",
       sourcemap: true,
       legalComments: "none",
+      // Express still contains a few guarded CommonJS requires for Node
+      // built-ins.  The sealed artifact is ESM and dependency-free, so expose
+      // only Node's standard createRequire bridge inside the generated bundle.
+      banner: {
+        js: 'import { createRequire as __sechackCreateRequire } from "node:module"; const require = __sechackCreateRequire(import.meta.url);',
+      },
     });
 
     // Development-only and nonparticipant rehearsal seams are compiled under

@@ -66,18 +66,29 @@ export async function buildViteTarget(targetName) {
     throw new Error("Usage: node scripts/build-vite.mjs <client|public-demo>");
   }
   const buildLock = await acquireBuildLock(WORKSPACE_DIRECTORY);
+  const previousNodeEnvironment = process.env.NODE_ENV;
   try {
+    // Playwright and other callers may run with NODE_ENV=test.  A formal client
+    // build must still select React's production transform deterministically;
+    // otherwise development-only diagnostic URLs are embedded in the bundle.
+    process.env.NODE_ENV = "production";
     const outputDirectory = resolve(WORKSPACE_DIRECTORY, target.outputName);
     await cleanViteOutputDirectory(outputDirectory, target.outputName);
     await build({
       configFile: target.configFile,
       root: target.rootDirectory,
+      mode: "production",
       build: {
         emptyOutDir: false,
         outDir: outputDirectory,
       },
     });
   } finally {
+    if (previousNodeEnvironment === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousNodeEnvironment;
+    }
     await buildLock.release();
   }
 }
