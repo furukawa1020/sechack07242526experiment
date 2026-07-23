@@ -252,8 +252,88 @@ test("built nonparticipant client keeps direct routes, caching, and runtime requ
   const connected = await request.post(`${baseUrl}/api/device/connect`);
   expect(connected.ok()).toBeTruthy();
   await operator.goto(`${baseUrl}/operator`);
+
+  const initialOperatorConfirmation = await request.get(
+    `${baseUrl}/api/operator/session-confirmation`,
+  );
+  expect(initialOperatorConfirmation.ok()).toBeTruthy();
+  expect(await initialOperatorConfirmation.json()).toEqual({
+    confirmed: false,
+    checks: {
+      todayProcedureConfirmed: false,
+      participantConsentConfirmed: false,
+      stopOperationConfirmed: false,
+      physicalDeviceSafetyConfirmed: false,
+    },
+    technicalReadiness: "GO",
+    participantMode: "disabled",
+    complianceMode: "external",
+    approvalEvidence: "managed-outside-system",
+    approvalVerifiedByApplication: false,
+  });
+
+  const rejectedWithoutConsent = await request.post(`${baseUrl}/api/sessions`, {
+    data: {
+      researchId: "TEST-949",
+      consentConfirmed: false,
+      orderCode: "ABDC",
+    },
+  });
+  expect(rejectedWithoutConsent.status()).toBe(400);
+  expect(await rejectedWithoutConsent.json()).toMatchObject({ code: "INVALID_INPUT" });
+
+  const operatorGate = operator.getByRole("region", {
+    name: "外部管理事項と当日運用の確認",
+  });
+  await expect(operatorGate).toContainText("技術状態");
+  await expect(operatorGate).toContainText("実施可能");
+  await expect(operatorGate).toContainText("参加者モード");
+  await expect(operatorGate).toContainText("無効");
+  await expect(operatorGate).toContainText("承認証跡");
+  await expect(operatorGate).toContainText("本システム外で管理");
+  await expect(operatorGate).toContainText("本システムによる承認検証");
+  await expect(operatorGate).toContainText("実施しない");
+  await expect(operatorGate).not.toContainText(/承認済み|二名照合|SHA-256/u);
+
+  const confirmOperatorSessionButton = operator.getByRole("button", {
+    name: "当日の実験運用を開始する",
+  });
+  await expect(confirmOperatorSessionButton).toBeDisabled();
+  await operator.getByRole("checkbox", {
+    name: "本日の実施が、研究責任者から指示された手順に従っている",
+  }).check();
+  await operator.getByRole("checkbox", { name: "実験中止操作を確認した" }).check();
+  await operator.getByRole("checkbox", {
+    name: "実機を使用する場合、STOPおよび収縮動作を確認した",
+  }).check();
+  await expect(confirmOperatorSessionButton).toBeDisabled();
+  await operator.getByRole("checkbox", {
+    name: "参加者が研究説明・同意フォームを完了したことを確認した",
+  }).check();
+  await expect(confirmOperatorSessionButton).toBeEnabled();
+  await confirmOperatorSessionButton.click();
+  await expect(operatorGate.getByRole("status")).toContainText(
+    "これは倫理承認の証跡ではありません。",
+  );
+
+  const confirmedOperatorSession = await request.get(
+    `${baseUrl}/api/operator/session-confirmation`,
+  );
+  expect(confirmedOperatorSession.ok()).toBeTruthy();
+  expect(await confirmedOperatorSession.json()).toMatchObject({
+    confirmed: true,
+    checks: {
+      todayProcedureConfirmed: true,
+      participantConsentConfirmed: true,
+      stopOperationConfirmed: true,
+      physicalDeviceSafetyConfirmed: true,
+    },
+    complianceMode: "external",
+    approvalEvidence: "managed-outside-system",
+    approvalVerifiedByApplication: false,
+  });
+
   await operator.getByLabel("研究用ID").fill("TEST-950");
-  await operator.getByRole("checkbox", { name: /リハーサル開始条件を確認済み/u }).check();
   await operator.getByRole("button", { name: "リハーサルを準備" }).click();
   await expect(operator.getByRole("heading", { name: "進行状況" })).toBeVisible();
   const sessionId = await operator.evaluate(() => window.sessionStorage.getItem("sechack.active-session-id"));

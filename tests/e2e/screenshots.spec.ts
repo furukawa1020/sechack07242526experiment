@@ -52,6 +52,12 @@ async function waitForDisplay(request: APIRequestContext, id: string): Promise<v
 }
 
 async function openConfirmedOperator(page: Page): Promise<void> {
+  const confirmationLoaded = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/operator/session-confirmation"
+      && response.request().method() === "GET"
+      && response.ok();
+  });
   const leaseConfirmed = new Promise<void>((resolve, reject) => {
     let settled = false;
     const timeout = setTimeout(() => {
@@ -82,7 +88,31 @@ async function openConfirmedOperator(page: Page): Promise<void> {
     });
   });
   await page.goto("/operator");
-  await leaseConfirmed;
+  await Promise.all([leaseConfirmed, confirmationLoaded]);
+
+  const confirmedMessage = page.getByText(
+    "当日の安全な操作手順を、このセッション内で確認しました。これは倫理承認の証跡ではありません。",
+    { exact: true },
+  );
+  const confirmButton = page.getByRole("button", {
+    name: "当日の実験運用を開始する",
+    exact: true,
+  });
+  await expect(confirmedMessage.or(confirmButton)).toBeVisible();
+  if (await confirmButton.isVisible()) {
+    const checks = [
+      "本日の実施が、研究責任者から指示された手順に従っている",
+      "参加者が研究説明・同意フォームを完了したことを確認した",
+      "実験中止操作を確認した",
+      "実機を使用する場合、STOPおよび収縮動作を確認した",
+    ] as const;
+    for (const label of checks) {
+      await page.getByRole("checkbox", { name: label, exact: true }).check();
+    }
+    await expect(confirmButton).toBeEnabled();
+    await confirmButton.click();
+  }
+  await expect(confirmedMessage).toBeVisible();
 }
 
 async function expectNoViewportOverflow(page: Page): Promise<void> {
@@ -358,6 +388,7 @@ async function processingLocationAppearance(page: Page): Promise<Record<string, 
 test("主要画面の承認用スクリーンショットを生成する", async ({ page, request }) => {
   test.setTimeout(90_000);
   await ensureDevice(request);
+  await openConfirmedOperator(page);
   // The preceding emergency-stop E2E intentionally locks device-test actions.
   // Creating and safely deleting a setup session is the production reset path.
   const resetSession = await create(request, "TEST-939", "ABDC");
@@ -430,7 +461,10 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await expect(operatorPage.getByTestId("operator-app")).toContainText("全画面表示");
     await expect(operatorPage.getByTestId("operator-app")).not.toContainText("Fullscreen API");
     await expect(operatorPage.locator(".event-list strong").first()).not.toHaveText(/^(?:display|session|device|phase)\./u);
-    await expect(operatorPage.getByRole("button", { name: /緊急停止/u })).toBeVisible();
+    await expect(operatorPage.locator(".safety-actions").getByRole("button", {
+      name: "緊急停止 画面刺激を直ちにSTOP · Ctrl+Alt+Shift+S",
+      exact: true,
+    })).toBeVisible();
     await operatorPage.getByRole("checkbox", { name: /全画面表示し、目視確認済み/u }).check();
     await capture(operatorPage, `operator-session-${viewport.label}`);
     await operatorPage.getByRole("button", { name: "共通導入を表示" }).click();
@@ -504,12 +538,12 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await sessionAction(request, labelSession.id, "confirm-staff-handoff");
     await operatorPage.close();
 
-    const pufferSession = await create(request, `TEST-94${viewportIndex * 2 + 1}`, "CDBA");
-    await page.goto(pufferSession.displayUrl);
-    await waitForDisplay(request, pufferSession.id);
     const pufferOperatorPage = await page.context().newPage();
     await pufferOperatorPage.setViewportSize({ width: viewport.width, height: viewport.height });
     await openConfirmedOperator(pufferOperatorPage);
+    const pufferSession = await create(request, `TEST-94${viewportIndex * 2 + 1}`, "CDBA");
+    await page.goto(pufferSession.displayUrl);
+    await waitForDisplay(request, pufferSession.id);
     await expect(pufferOperatorPage.getByRole("heading", { name: "進行状況" })).toBeVisible();
     await pufferOperatorPage.getByRole("checkbox", { name: /全画面表示し、目視確認済み/u }).check();
     await pufferOperatorPage.getByRole("button", { name: "共通導入を表示" }).click();
