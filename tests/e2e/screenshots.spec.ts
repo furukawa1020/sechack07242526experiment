@@ -179,6 +179,19 @@ async function expectNoViewportOverflow(page: Page): Promise<void> {
 }
 
 async function capture(page: Page, name: string): Promise<void> {
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.scrollTo(0, 0);
+    const scrollingElement = document.scrollingElement;
+    if (scrollingElement !== null) {
+      scrollingElement.scrollLeft = 0;
+      scrollingElement.scrollTop = 0;
+    }
+    for (const surface of document.querySelectorAll<HTMLElement>("[data-surface]")) {
+      surface.scrollLeft = 0;
+      surface.scrollTop = 0;
+    }
+  });
   await expectNoViewportOverflow(page);
   await page.screenshot({ path: `artifacts/screenshots/${name}.png`, fullPage: false });
 }
@@ -232,11 +245,16 @@ async function expectParticipantSurfaceFillsViewport(page: Page): Promise<void> 
   expect(geometry.top).toBeCloseTo(0, 1);
   expect(geometry.width).toBeCloseTo(geometry.viewportWidth, 1);
   expect(geometry.height).toBeCloseTo(geometry.viewportHeight, 1);
-  expect(geometry.footerBottom).toBeCloseTo(geometry.viewportHeight, 1);
+  if (geometry.footerBottom !== null) {
+    expect(geometry.footerBottom).toBeCloseTo(geometry.viewportHeight, 1);
+  }
   expect(geometry.sceneLeft).toBeCloseTo(0, 1);
   expect(geometry.sceneTop).toBeCloseTo(geometry.expectedSceneTop, 1);
   expect(geometry.sceneWidth).toBeCloseTo(geometry.viewportWidth, 1);
-  expect(geometry.sceneBottom).toBeCloseTo(geometry.footerTop ?? Number.NaN, 1);
+  expect(geometry.sceneBottom).toBeCloseTo(
+    geometry.footerTop ?? geometry.viewportHeight,
+    1,
+  );
 }
 
 async function expectChildrenCenteredWithin(

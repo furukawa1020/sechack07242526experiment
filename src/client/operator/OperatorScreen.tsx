@@ -158,7 +158,10 @@ interface StatusItemProps {
 
 function StatusItem({ label, value, emphasis = false }: StatusItemProps): React.JSX.Element {
   return (
-    <div className={emphasis ? "operator-status-item is-emphasis" : "operator-status-item"}>
+    <div
+      className={emphasis ? "operator-status-item is-emphasis" : "operator-status-item"}
+      data-status-label={label}
+    >
       <dt>{label}</dt>
       <dd>{value}</dd>
     </div>

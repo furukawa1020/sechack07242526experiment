@@ -78,6 +78,14 @@ select:focus-visible {
   grid-template-rows: auto minmax(0, 1fr) 56px;
 }
 
+.participant-app[data-phase="response"] {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.participant-app[data-rehearsal="true"][data-phase="response"] {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .participant-rehearsal-notice strong {
   font-size: 16px;
 }
@@ -1332,6 +1340,32 @@ button:disabled {
     gap: 16px;
   }
 
+  .operator-app:has(.session-overview) .operator-main-column {
+    grid-template-columns: minmax(340px, 0.85fr) minmax(0, 1.35fr);
+    grid-template-rows: auto auto;
+  }
+
+  .operator-app:has(.session-overview) .session-overview {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .operator-app:has(.session-overview) .operator-session-gate {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .operator-app:has(.session-overview) .action-panel {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+
+  .operator-app:has(.session-overview)
+  .session-overview
+  .operator-status-item[data-status-label="設定SHA-256"] {
+    grid-column: span 2;
+  }
+
   .operator-app:has(.session-overview) .operator-side-column {
     grid-template-rows: auto minmax(0, 1fr);
   }
@@ -1461,6 +1495,82 @@ button:disabled {
   .operator-side-column {
     min-height: 0;
     gap: 12px;
+  }
+
+  .operator-app:has(.session-overview) .operator-main-column {
+    grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.35fr);
+    grid-template-rows: auto auto;
+  }
+
+  .operator-app:has(.session-overview) .session-overview {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .operator-app:has(.session-overview) .operator-session-gate {
+    grid-row: 1;
+    grid-column: 1;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+    align-items: start;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .operator-app:has(.session-overview) .operator-session-gate .card-heading {
+    grid-column: 1 / -1;
+  }
+
+  .operator-app:has(.session-overview) .operator-session-gate .external-compliance-status {
+    grid-row: 2 / span 2;
+    grid-column: 1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operator-app:has(.session-overview) .operator-session-description,
+  .operator-app:has(.session-overview) .operator-session-confirmed {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .operator-app:has(.session-overview) .operator-session-description {
+    grid-row: 2;
+    grid-column: 2;
+  }
+
+  .operator-app:has(.session-overview) .operator-session-confirmed {
+    grid-row: 3;
+    grid-column: 2;
+    padding: 7px 9px;
+  }
+
+  .operator-app:has(.session-overview)
+  .session-overview
+  .operator-status-item[data-status-label="設定SHA-256"] {
+    grid-column: span 2;
+  }
+
+  .operator-app:has(.session-overview) .action-panel {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    padding: 10px;
+  }
+
+  .operator-app:has(.session-overview) .action-panel .card-heading {
+    margin-bottom: 8px;
+  }
+
+  .operator-app:has(.session-overview) .action-panel .display-url-block {
+    margin-bottom: 7px;
+    padding: 7px;
+  }
+
+  .operator-app:has(.session-overview) .action-panel .prerequisite-block {
+    padding: 7px;
+  }
+
+  .operator-app:has(.session-overview) .action-panel .safety-actions {
+    margin-top: 8px;
+    padding-top: 7px;
   }
 
   .operator-side-column {
