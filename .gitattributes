@@ -1,0 +1,7 @@
+# Provenance checks compare the exact tracked configuration bytes. Keep JSON
+# stable across Windows and Unix checkouts instead of relying on core.autocrlf.
+/config/*.json text eol=lf
+/SecHack_Experiment_Codex_Package/config/*.json text eol=lf
+
+# Venue launchers are native Windows command files.
+*.cmd text eol=crlf
