@@ -834,9 +834,19 @@ export function OperatorScreen(): React.JSX.Element {
       window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
       setSession(null);
       setResearchId("");
-      setOperatorConfirmation(EMPTY_OPERATOR_CONFIRMATION);
-      setOperatorConfirmationDraft(EMPTY_OPERATOR_CONFIRMATION.checks);
-      setOperatorConfirmationLoaded(false);
+      const clearedChecks: OperatorSessionConfirmationChecks = {
+        todayProcedureConfirmed: false,
+        participantConsentConfirmed: false,
+        stopOperationConfirmed: false,
+        physicalDeviceSafetyConfirmed: false,
+      };
+      setOperatorConfirmation({
+        ...operatorConfirmation,
+        confirmed: false,
+        checks: clearedChecks,
+      });
+      setOperatorConfirmationDraft(clearedChecks);
+      setOperatorConfirmationLoaded(true);
       setStaffHandoffConfirmed(false);
       setFullscreenConfirmed(false);
       setNotice("次の参加者を受け付けられます。");
