@@ -1065,6 +1065,34 @@ button:disabled {
   background: #477c74;
 }
 
+.response-checkpoint-panel {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid #d5dce7;
+  background: #f7f9fb;
+}
+
+.response-checkpoint-panel h3 {
+  margin: 0;
+  color: var(--navy);
+  font-size: 18px;
+}
+
+.response-checkpoint-panel p {
+  margin: 7px 0 0;
+  color: #526078;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.response-checkpoint-panel .primary-button {
+  min-width: 210px;
+}
+
 .compact-check {
   margin: 0;
   padding: 10px 12px;
@@ -1207,6 +1235,7 @@ button:disabled {
   .order-fieldset { grid-template-columns: 1fr 1fr; }
   .order-fieldset select { grid-column: 1 / -1; }
   .safety-actions,
+  .response-checkpoint-panel,
   .device-status-hero,
   .device-command-grid,
   .device-event-list { grid-template-columns: 1fr; }

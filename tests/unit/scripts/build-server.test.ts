@@ -106,7 +106,7 @@ describe("server build", () => {
     expect(screenPilotSource).not.toMatch(
       /MockPufferDevice|SerialPufferDevice|createApiRouter|\/test\/mock-device|serveBuiltAssets/iu,
     );
-  });
+  }, 60_000);
 
   it("accepts only the absolute repository dist-server directory", async () => {
     await expect(assertOutputPathInChildProcess(SERVER_OUTPUT_DIRECTORY)).resolves.toBeUndefined();

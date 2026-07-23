@@ -262,10 +262,10 @@ export function evaluatePreflightGates(
         ? "fail"
         : "warning",
     detail: productionPolicy.protocolIssues.length === 0
-      ? "screen-v2の固定状態、提示時間、膨張時間、収縮時間、提示順、ID形式が正式値と一致しています。"
+      ? "screen-v3の固定状態、提示時間、膨張時間、収縮時間、提示順、ID形式が正式値と一致しています。"
       : production
-        ? `screen-v2の固定パラメータが正式値と一致しません（${productionPolicy.protocolIssues.join(", ")}）。`
-        : "開発用Mockでは短縮時間を許可しますが、本番screen-v2には使用できません。",
+        ? `screen-v3の固定パラメータが正式値と一致しません（${productionPolicy.protocolIssues.join(", ")}）。`
+        : "開発用Mockでは短縮時間を許可しますが、本番screen-v3には使用できません。",
   });
 
   checks.push({

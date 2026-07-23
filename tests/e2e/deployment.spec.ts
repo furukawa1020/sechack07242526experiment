@@ -294,6 +294,22 @@ test("built nonparticipant client keeps direct routes, caching, and runtime requ
   await expect(display.getByRole("heading", { name: "同じ固定模擬データを、4つの方法で提示します" })).toBeVisible();
   await operator.getByRole("button", { name: "提示を開始" }).click();
 
+  for (let position = 1; position <= 4; position += 1) {
+    await expect(
+      display.getByRole("heading", { name: `第${String(position)}提示は終了しました` }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(display.getByText("研究スタッフの案内をお待ちください。")).toBeVisible();
+    const checkpointText = await display.getByTestId("participant-app").innerText();
+    expect(checkpointText).not.toMatch(
+      /Googleフォーム|forms\.gle|QRコード|アンケート|高ストレス|72\s*\/\s*100/iu,
+    );
+    const checkpointButton = operator.getByRole("button", {
+      name: "待機表示を確認して次へ",
+    });
+    await expect(checkpointButton).toBeEnabled();
+    await checkpointButton.click();
+  }
+
   await expect(display.getByRole("heading", { name: "4つの提示は終了しました" })).toBeVisible({
     timeout: 15_000,
   });

@@ -966,7 +966,7 @@ describe("release creation", () => {
     ["Serial device", { mode: "serial", serialPath: "COM3" } satisfies ConfigOverrides, "device.mode"],
     [
       "arbitrary protocol",
-      { protocolVersion: "arbitrary-screen-v2" } satisfies ConfigOverrides,
+      { protocolVersion: "arbitrary-screen-v3" } satisfies ConfigOverrides,
       "protocolVersion",
     ],
     [

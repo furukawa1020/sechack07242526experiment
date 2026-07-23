@@ -133,4 +133,25 @@ describe("client boundary parsers", () => {
       expect(parseParticipantSnapshot(malformed)).toBeNull();
     }
   });
+
+  it("accepts the untimed per-presentation response checkpoint", () => {
+    expect(parseParticipantSnapshot({
+      phase: "response",
+      sequenceIndex: 2,
+      current: null,
+      fixedState: null,
+      pufferSurface: "screen",
+      pufferRamp: { inflateMs: 6000, deflateMs: 6000 },
+      phaseStartedAt: "2026-07-19T12:00:00.000Z",
+      phaseEndsAt: null,
+      serverNow: "2026-07-19T12:00:01.000Z",
+      remainingMs: null,
+      summary: [],
+    })).toMatchObject({
+      phase: "response",
+      sequenceIndex: 2,
+      condition: null,
+      remainingMs: null,
+    });
+  });
 });

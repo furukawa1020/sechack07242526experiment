@@ -461,7 +461,7 @@ describe("shared production policy", () => {
       .toContain("screen-protocol-mode-mismatch");
   });
 
-  it("publishes the immutable formal screen-v2 parameter set", () => {
+  it("publishes the immutable formal screen-v3 parameter set", () => {
     expect(SCREEN_PRODUCTION_FIXED_STATE).toEqual({
       score: 72,
       label: "高ストレス",
@@ -485,7 +485,7 @@ describe("shared production policy", () => {
   });
 
   it.each(SCREEN_PROTOCOL_MUTATIONS)(
-    "rejects a modified formal screen-v2 %s",
+    "rejects a modified formal screen-v3 %s",
     (_label, mutate, issueCode) => {
       const assessment = assess(mutate(productionConfig("screen")));
       expect(assessment.approved).toBe(false);

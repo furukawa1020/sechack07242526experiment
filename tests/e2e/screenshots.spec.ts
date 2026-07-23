@@ -38,7 +38,7 @@ async function create(
 async function sessionAction(
   request: APIRequestContext,
   id: string,
-  action: "prepare" | "start" | "abort" | "confirm-staff-handoff",
+  action: "prepare" | "start" | "abort" | "confirm-response-checkpoint" | "confirm-staff-handoff",
 ): Promise<void> {
   const response = await request.post(`/api/sessions/${encodeURIComponent(id)}/${action}`);
   expect(response.ok()).toBeTruthy();
@@ -451,6 +451,35 @@ test("主要画面の承認用スクリーンショットを生成する", async
     await expectParticipantSurfaceFillsViewport(page);
     await expectChildrenCenteredWithin(page.locator(".label-result"), ":scope > *");
     await capture(page, `participant-label-result-${viewport.label}`);
+    for (let presentation = 1; presentation <= 4; presentation += 1) {
+      await expect(page.getByTestId("participant-app")).toHaveAttribute("data-phase", "response", {
+        timeout: 5_000,
+      });
+      await expect(page.getByRole("heading", {
+        name: `第${presentation}提示は終了しました`,
+      })).toBeVisible();
+      await expect(page.getByText("研究スタッフの案内をお待ちください。", { exact: true }))
+        .toBeVisible();
+      await expect(page.locator("[data-testid='result-panel'], [data-testid='screen-puffer-visual']"))
+        .toHaveCount(0);
+      await expect(page.locator("button, a, img")).toHaveCount(0);
+      expect(await page.locator("body").innerText()).not.toMatch(
+        /Googleフォーム|フォーム|forms\.gle|QRコード|アンケート|回答済み|回答完了|高ストレス|72\s*\/\s*100/iu,
+      );
+      if (presentation === 1) {
+        await expectParticipantSurfaceFillsViewport(page);
+        await expectChildrenCenteredWithin(
+          page.locator(".participant-centered"),
+          ":scope > .participant-message-card",
+        );
+        await capture(page, `participant-response-checkpoint-${viewport.label}`);
+        await expect(operatorPage.getByRole("heading", { name: "提示後のスタッフ確認" }))
+          .toBeVisible();
+        await expect(operatorPage.getByRole("button", { name: "待機表示を確認して次へ" }))
+          .toBeVisible();
+      }
+      await sessionAction(request, labelSession.id, "confirm-response-checkpoint");
+    }
     const summaryHeading = page.getByRole("heading", { name: "4つの提示は終了しました" });
     await expect(summaryHeading).toBeVisible({
       timeout: 15_000,

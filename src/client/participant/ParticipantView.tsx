@@ -1,5 +1,9 @@
 import type { CSSProperties } from "react";
-import { UI_COPY, formatPresentationPosition } from "../../shared/copy.js";
+import {
+  UI_COPY,
+  formatPresentationPosition,
+  formatResponseCheckpointTitle,
+} from "../../shared/copy.js";
 import type {
   ParticipantFixedState,
   ParticipantSnapshot,
@@ -345,6 +349,23 @@ function ScreenPufferReset({ snapshot }: { readonly snapshot: ParticipantSnapsho
   );
 }
 
+function ResponseCheckpoint({
+  sequenceIndex,
+}: {
+  readonly sequenceIndex: 0 | 1 | 2 | 3 | null;
+}): React.JSX.Element {
+  if (sequenceIndex === null) {
+    return <CenteredMessage title={UI_COPY.error.title} body={UI_COPY.error.waiting} />;
+  }
+  const position = sequenceIndex + 1;
+  return (
+    <CenteredMessage
+      title={formatResponseCheckpointTitle(position as 1 | 2 | 3 | 4)}
+      body={UI_COPY.response.waiting}
+    />
+  );
+}
+
 function conditionLabel(condition: PublicCondition, pufferSurface: PufferSurface): string {
   if (pufferSurface === "screen" && condition.presentation === "puffer") {
     return UI_COPY.summary.screenPufferLabels[condition.processing];
@@ -391,6 +412,8 @@ function phaseContent(snapshot: ParticipantSnapshot): React.JSX.Element {
         return <ScreenPufferReset snapshot={snapshot} />;
       }
       return <CenteredMessage title={UI_COPY.reset.title} body={UI_COPY.reset.waiting} />;
+    case "response":
+      return <ResponseCheckpoint sequenceIndex={snapshot.sequenceIndex} />;
     case "summary":
       return <Summary snapshot={snapshot} />;
     case "completed":

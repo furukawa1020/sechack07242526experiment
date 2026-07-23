@@ -165,7 +165,14 @@ export const experimentApi = {
 
   async sessionAction(
     sessionId: string,
-    action: "prepare" | "start" | "resume" | "abort" | "emergency-stop" | "confirm-staff-handoff",
+    action:
+      | "prepare"
+      | "start"
+      | "resume"
+      | "abort"
+      | "emergency-stop"
+      | "confirm-response-checkpoint"
+      | "confirm-staff-handoff",
   ): Promise<OperatorSnapshot | null> {
     const raw = await requestJson(`/api/sessions/${encoded(sessionId)}/${action}`, { method: "POST" });
     if (raw === null) return null;

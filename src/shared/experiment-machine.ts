@@ -17,6 +17,7 @@ export const EXPERIMENT_PHASES = [
   "processing",
   "result",
   "reset",
+  "response",
   "summary",
   "completed",
   "aborted",
@@ -46,9 +47,16 @@ const DISPLAY_DEPENDENT_PHASES = new Set<ExperimentPhase>([
   "processing",
   "result",
   "reset",
+  "response",
   "summary",
 ]);
 const NON_RESUMABLE_DISPLAY_LOSS_PHASES = new Set<ExperimentPhase>(["result", "reset"]);
+const PRESENTATION_PHASES = new Set<ExperimentPhase>([
+  "handling",
+  "processing",
+  "result",
+  "reset",
+]);
 
 export interface Session {
   readonly id: string;
@@ -110,6 +118,7 @@ export interface TransitionContext {
   readonly durationMs?: number;
   readonly prerequisites?: SetupPrerequisites;
   readonly deviceReady?: boolean;
+  readonly responseCheckpointConfirmed?: boolean;
   readonly staffHandoffConfirmed?: boolean;
   readonly errorCode?: string;
 }
@@ -138,6 +147,8 @@ export interface PublicPufferRamp {
 export interface PublicSnapshot {
   readonly rehearsal: boolean;
   readonly phase: ExperimentPhase;
+  /** Presentation position only; never exposes the internal A/B/C/D condition code. */
+  readonly sequenceIndex: SequenceIndex | null;
   readonly current: PublicCurrentPresentation | null;
   readonly fixedState: PublicFixedState | null;
   /** Participant-safe rendering contract; never contains A/B/C/D or a physical pressure. */
@@ -162,7 +173,8 @@ export const ALLOWED_TRANSITIONS: Readonly<Record<ExperimentPhase, readonly Expe
     handling: phases("processing", "aborted", "error"),
     processing: phases("result", "aborted", "error"),
     result: phases("reset", "aborted", "error"),
-    reset: phases("handling", "summary", "aborted", "error"),
+    reset: phases("response", "aborted", "error"),
+    response: phases("handling", "summary", "aborted", "error"),
     summary: phases("completed", "aborted", "error"),
     completed: phases(),
     aborted: phases(),
@@ -232,7 +244,7 @@ function isTimedForwardTransition(from: ExperimentPhase, to: ExperimentPhase): b
   return (from === "handling" && to === "processing")
     || (from === "processing" && to === "result")
     || (from === "result" && to === "reset")
-    || (from === "reset" && (to === "handling" || to === "summary"));
+    || (from === "reset" && to === "response");
 }
 
 function assertTransitionGuard(
@@ -257,9 +269,17 @@ function assertTransitionGuard(
     }
   }
 
-  if (session.phase === "reset" && (target === "handling" || target === "summary")) {
+  if (session.phase === "reset" && target === "response") {
     if (context.deviceReady !== true) {
       throw new InvalidSessionTransitionError("The device must be ready before leaving reset.");
+    }
+  }
+
+  if (session.phase === "response" && (target === "handling" || target === "summary")) {
+    if (context.responseCheckpointConfirmed !== true) {
+      throw new InvalidSessionTransitionError(
+        "The response checkpoint must be confirmed before continuing.",
+      );
     }
     if (target === "handling" && session.sequenceIndex === 3) {
       throw new InvalidSessionTransitionError("The fourth presentation must transition to summary.");
@@ -423,7 +443,9 @@ export function toPublicSnapshot(
   rehearsal = false,
   serverNow = session.updatedAt,
 ): PublicSnapshot {
-  const current = session.currentCondition === null || session.sequenceIndex === null
+  const current = session.currentCondition === null
+    || session.sequenceIndex === null
+    || !PRESENTATION_PHASES.has(session.phase)
     ? null
     : Object.freeze({
       position: (session.sequenceIndex + 1) as 1 | 2 | 3 | 4,
@@ -443,6 +465,7 @@ export function toPublicSnapshot(
   return Object.freeze({
     rehearsal,
     phase: session.phase,
+    sequenceIndex: session.sequenceIndex,
     current,
     fixedState: showLabelState
       ? Object.freeze({ score: session.fixedState.score, label: session.fixedState.label })

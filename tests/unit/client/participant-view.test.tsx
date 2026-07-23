@@ -2,7 +2,11 @@
 
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { UI_COPY, formatPresentationPosition } from "../../../src/shared/copy.js";
+import {
+  UI_COPY,
+  formatPresentationPosition,
+  formatResponseCheckpointTitle,
+} from "../../../src/shared/copy.js";
 import { ParticipantView } from "../../../src/client/participant/ParticipantView.js";
 import {
   parseParticipantSnapshot,
@@ -297,13 +301,42 @@ describe("participant presentation invariants", () => {
   it("renders all participant-safe phases with the stable phase attribute", () => {
     const phases: readonly ParticipantSnapshot["phase"][] = [
       "idle", "setup", "intro", "handling", "processing", "result", "reset",
-      "summary", "completed", "aborted", "error", "recovery",
+      "response", "summary", "completed", "aborted", "error", "recovery",
     ];
     const view = render(<ParticipantView snapshot={snapshot("local", "label", { phase: "idle" })} />);
     for (const phase of phases) {
       view.rerender(<ParticipantView snapshot={snapshot("local", "label", { phase })} />);
       expect(screen.getByTestId("participant-app")).toHaveAttribute("data-phase", phase);
     }
+  });
+
+  it("shows only neutral staff-waiting copy at each response checkpoint", () => {
+    const view = render(<ParticipantView snapshot={snapshot("cloud", "label", {
+      phase: "response",
+      sequenceIndex: 2,
+      condition: null,
+      fixedState: null,
+      phaseEndsAt: null,
+      remainingMs: null,
+    })} />);
+
+    const message = view.container.querySelector(".participant-message-card");
+    expect(message).not.toBeNull();
+    expect(within(message as HTMLElement).getByRole("heading", {
+      name: formatResponseCheckpointTitle(3),
+    })).toBeInTheDocument();
+    expect(within(message as HTMLElement).getByText(UI_COPY.response.waiting)).toBeInTheDocument();
+    expect(message).toHaveTextContent(
+      `${formatResponseCheckpointTitle(3)}${UI_COPY.response.waiting}`,
+    );
+    expect(view.container.querySelector(
+      ".condition-grid, [data-testid='result-panel'], [data-testid='screen-puffer-visual']",
+    )).toBeNull();
+    expect(view.container.textContent).not.toMatch(
+      /高ストレス|72\s*\/\s*100|クラウド|この端末内|Googleフォーム|フォーム|QRコード|アンケート|回答済み|回答完了/iu,
+    );
+    expect(view.container.textContent).not.toMatch(/\b[ABCD]\b/u);
+    expect(view.container.querySelectorAll("button, a, img")).toHaveLength(0);
   });
 
   it("keeps the summary in actual presentation order without exposing internal codes", () => {

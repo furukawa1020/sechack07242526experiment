@@ -27,7 +27,7 @@ import {
 
 const FIXED_NOW = new Date("2026-07-23T03:00:00.000Z");
 const FIXED_DAY = "2026-07-23";
-const PROTOCOL_VERSION = "R8-010-2x2-screen-v2";
+const PROTOCOL_VERSION = "R8-010-2x2-screen-v3";
 const temporaryRoots: string[] = [];
 
 function digest(label: string): string {

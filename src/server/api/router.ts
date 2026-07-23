@@ -105,6 +105,7 @@ export function createApiRouter(
   snapshotAction("resume", (id) => controller.resume(id));
   snapshotAction("abort", (id) => controller.abort(id));
   snapshotAction("emergency-stop", (id) => controller.emergencyStop(id));
+  snapshotAction("confirm-response-checkpoint", (id) => controller.confirmResponseCheckpoint(id));
   snapshotAction("confirm-staff-handoff", (id) => controller.confirmStaffHandoff(id));
 
   router.delete(

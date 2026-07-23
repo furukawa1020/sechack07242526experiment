@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import type { ExperimentConfig } from "./schemas.js";
 
-export const FORMAL_SCREEN_PROTOCOL_VERSION = "R8-010-2x2-screen-v2";
+export const FORMAL_SCREEN_PROTOCOL_VERSION = "R8-010-2x2-screen-v3";
 export const FORMAL_PRODUCTION_CONFIG_PATH = "config/experiment.json";
 export const FORMAL_PRODUCTION_BIND_HOST = "127.0.0.1";
 export const FORMAL_PRODUCTION_PORT = 4_173;

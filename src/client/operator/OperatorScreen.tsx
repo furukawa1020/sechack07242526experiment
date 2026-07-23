@@ -26,6 +26,7 @@ const PHASE_LABELS: Readonly<Record<ExperimentPhase, string>> = {
   processing: "処理中",
   result: "結果提示",
   reset: "リセット",
+  response: "提示後のスタッフ確認",
   summary: "サマリー",
   completed: "完了",
   aborted: "中止",
@@ -324,7 +325,7 @@ function ActionPanel({
   readonly isRehearsal: boolean;
   readonly onStaffHandoffConfirmed: (checked: boolean) => void;
   readonly onFullscreenConfirmed: (checked: boolean) => void;
-  readonly onAction: (action: "prepare" | "start" | "resume" | "abort" | "confirm-staff-handoff") => void;
+  readonly onAction: (action: "prepare" | "start" | "resume" | "abort" | "confirm-response-checkpoint" | "confirm-staff-handoff") => void;
   readonly onEmergency: () => void;
   readonly onReset: () => void;
 }): React.JSX.Element {
@@ -392,6 +393,25 @@ function ActionPanel({
           <button type="button" className="primary-button" onClick={() => onAction("resume")} disabled={busy}>
             セッションを再開
           </button>
+        ) : null}
+        {session.phase === "response" ? (
+          <section
+            className="response-checkpoint-panel"
+            aria-labelledby="response-checkpoint-title"
+          >
+            <div>
+              <h3 id="response-checkpoint-title">提示後のスタッフ確認</h3>
+              <p>参加者画面が待機表示になっていることを確認してください。</p>
+            </div>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => onAction("confirm-response-checkpoint")}
+              disabled={busy}
+            >
+              待機表示を確認して次へ
+            </button>
+          </section>
         ) : null}
         {session.phase === "summary" ? (
           <label className="check-row compact-check">
@@ -585,7 +605,7 @@ export function OperatorScreen(): React.JSX.Element {
   };
 
   const sessionAction = async (
-    action: "prepare" | "start" | "resume" | "abort" | "confirm-staff-handoff",
+    action: "prepare" | "start" | "resume" | "abort" | "confirm-response-checkpoint" | "confirm-staff-handoff",
   ): Promise<void> => {
     if (session === null) return;
     if (action === "abort" && !window.confirm("実験を中止します。セッションは再開できません。よろしいですか？")) return;

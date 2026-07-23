@@ -56,6 +56,10 @@ export const UI_COPY = {
     title: "次の提示に移ります",
     waiting: "研究スタッフの案内をお待ちください",
   },
+  response: {
+    title: "第{n}提示は終了しました",
+    waiting: "研究スタッフの案内をお待ちください。",
+  },
   summary: {
     title: "4つの提示は終了しました",
     body: "4つの提示は以上です。\n研究スタッフの案内をお待ちください。",
@@ -92,4 +96,8 @@ export const UI_COPY = {
 
 export function formatPresentationPosition(position: 1 | 2 | 3 | 4): string {
   return UI_COPY.header.position.replace("{n}", String(position));
+}
+
+export function formatResponseCheckpointTitle(position: 1 | 2 | 3 | 4): string {
+  return UI_COPY.response.title.replace("{n}", String(position));
 }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import {
 } from "../../../src/shared/config-loader.js";
 import {
   FORMAL_SCREEN_PROTOCOL_VERSION,
+  formatFormalProductionConfigError,
   hashFormalProductionConfig,
   hashFormalProductionCriticalConfig,
   hashFormalProductionGoEvidence,
@@ -22,6 +23,34 @@ import { parseExperimentConfig } from "../../../src/shared/schemas.js";
 
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function recordAt(record: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = record[key];
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${key} is not an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+async function writeFormalSource(
+  source: Record<string, unknown>,
+): Promise<{ readonly configPath: string; readonly root: string }> {
+  const root = await mkdtemp(join(tmpdir(), "sechack-formal-config-"));
+  const configDirectory = join(root, "config");
+  const configPath = join(configDirectory, "experiment.json");
+  await mkdir(configDirectory);
+  await writeFile(configPath, JSON.stringify(source), "utf8");
+  return { configPath, root };
+}
+
+async function rejectionMessage(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error("Expected the operation to reject.");
 }
 
 function formalSource(): Record<string, unknown> {
@@ -139,6 +168,194 @@ describe("formal production config boundary", () => {
       ...source,
       device: { ...(source["device"] as Record<string, unknown>), mode: "mock" },
     })).toThrow();
+  });
+
+  it("formats schema, root-level, Error, and unknown failures without leaking mutable arrays", () => {
+    const invalidTitle = formalSource();
+    invalidTitle["studyTitle"] = "";
+    let fieldError: unknown;
+    try {
+      parseFormalProductionConfig(invalidTitle);
+    } catch (error) {
+      fieldError = error;
+    }
+    const fieldMessages = formatFormalProductionConfigError(fieldError);
+    expect(fieldMessages).toEqual([
+      expect.stringContaining("studyTitle:"),
+    ]);
+    expect(Object.isFrozen(fieldMessages)).toBe(true);
+
+    let rootError: unknown;
+    try {
+      parseFormalProductionConfig(null);
+    } catch (error) {
+      rootError = error;
+    }
+    expect(formatFormalProductionConfigError(rootError)[0]).toMatch(/^config:/u);
+    expect(formatFormalProductionConfigError(new Error("read failed"))).toEqual([
+      "read failed",
+    ]);
+    expect(formatFormalProductionConfigError("not-an-error")).toEqual([
+      "Unknown configuration error.",
+    ]);
+  });
+
+  it("reports every fail-closed GO evidence class with parse-valid opaque metadata", async () => {
+    const source = formalSource();
+    const evidence = recordAt(source, "goEvidence");
+    const wrongDigest = digest("wrong-critical-config");
+    const repeatedDigest = "ab".repeat(32);
+    evidence["status"] = "NO-GO";
+    evidence["protocolVersion"] = "OTHER-PROTOCOL";
+    evidence["criticalConfigSha256"] = wrongDigest;
+
+    const approvalKeys = [
+      "researchPlan",
+      "ethicsDetermination",
+      "preStimulusConsent",
+      "dataManagementPlan",
+      "screenPilot",
+    ] as const;
+    approvalKeys.forEach((key, index) => {
+      const approval = recordAt(evidence, key);
+      const pending = index % 2 === 0;
+      approval["status"] = "NO-GO";
+      approval["protocolVersion"] = "OTHER-PROTOCOL";
+      approval["contentSha256"] = pending ? "0".repeat(64) : repeatedDigest;
+      approval["documentId"] = pending
+        ? `DOCUMENT-PENDING-${String(index)}`
+        : `DOCUMENT-EXAMPLE-${String(index)}`;
+      approval["documentVersion"] = pending ? "PENDING" : "EXAMPLE";
+    });
+
+    const researchPlan = recordAt(evidence, "researchPlan");
+    researchPlan["approvedOn"] = null;
+    researchPlan["applicableUntil"] = null;
+    const ethicsDetermination = recordAt(evidence, "ethicsDetermination");
+    ethicsDetermination["approvedOn"] = "2026-07-24";
+    ethicsDetermination["applicableUntil"] = "2026-07-25";
+    const preStimulusConsent = recordAt(evidence, "preStimulusConsent");
+    preStimulusConsent["approvedOn"] = "2026-07-22";
+    preStimulusConsent["applicableUntil"] = "2026-07-21";
+    const dataManagementPlan = recordAt(evidence, "dataManagementPlan");
+    dataManagementPlan["approvedOn"] = "2026-01-01";
+    dataManagementPlan["applicableUntil"] = "2026-01-02";
+
+    const screenPilot = recordAt(evidence, "screenPilot");
+    screenPilot["completedSessions"] = null;
+    screenPilot["sourceTreeSha256"] = repeatedDigest;
+    screenPilot["pilotConfigFileHash"] = "0".repeat(64);
+
+    const releaseVerification = recordAt(evidence, "releaseVerification");
+    releaseVerification["status"] = "NO-GO";
+    releaseVerification["protocolVersion"] = "OTHER-PROTOCOL";
+    releaseVerification["appVersion"] = "PLACEHOLDER";
+    releaseVerification["criticalConfigSha256"] = wrongDigest;
+    releaseVerification["sourceTreeSha256"] = "0".repeat(64);
+    const reviewsValue = releaseVerification["reviews"];
+    if (!Array.isArray(reviewsValue) || reviewsValue.length !== 2) {
+      throw new Error("releaseVerification.reviews must contain two records.");
+    }
+    reviewsValue.forEach((value, index) => {
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("release review is not an object.");
+      }
+      const review = value as Record<string, unknown>;
+      review["reviewId"] = "RELEASE-PENDING-001";
+      review["reviewerCode"] = "REV-PENDING";
+      review["reviewVersion"] = index === 0 ? "PENDING" : "EXAMPLE";
+      review["status"] = "NO-GO";
+      review["protocolVersion"] = "OTHER-PROTOCOL";
+      review["criticalConfigSha256"] = wrongDigest;
+      review["reviewedOn"] = "2026-01-01";
+      review["applicableUntil"] = "2026-01-02";
+      review["attestationSha256"] = "0".repeat(64);
+    });
+
+    const parsed = parseFormalProductionConfig(source);
+    expect(hashFormalProductionGoEvidence(parsed)).toMatch(/^[a-f0-9]{64}$/u);
+    const { root } = await writeFormalSource(source);
+    const message = await rejectionMessage(loadFormalProductionConfig(undefined, {
+      rootDirectory: root,
+      currentDate: new Date("2026-07-23T03:00:00.000Z"),
+    }));
+    for (const issue of [
+      "status-not-go",
+      "protocol-version-mismatch",
+      "critical-config-sha256-mismatch",
+      "content-sha256-unapproved",
+      "document-id-pending",
+      "document-id-placeholder",
+      "document-version-pending",
+      "document-version-placeholder",
+      "approval-date-missing",
+      "applicability-deadline-missing",
+      "approval-date-in-future",
+      "invalid-applicability-range",
+      "applicability-expired-",
+      "screenPilot:completed-sessions-missing",
+      "screenPilot:source-tree-sha256-unapproved",
+      "screenPilot:pilot-config-file-hash-unapproved",
+      "releaseVerification:app-version-placeholder",
+      "releaseVerification:source-tree-sha256-unapproved",
+      "screenPilot:source-tree-sha256-mismatch",
+      "attestation-sha256-unapproved",
+      "review-id-pending",
+      "review-version-placeholder",
+      "review-stale-",
+      "duplicate-review-id",
+      "duplicate-reviewer-code",
+      "review-version-mismatch",
+      "duplicate-attestation-sha256",
+    ]) {
+      expect(message).toContain(issue);
+    }
+  });
+
+  it("rejects an invalid wall clock instead of treating dated evidence as current", async () => {
+    const { root } = await writeFormalSource(formalSource());
+    await expect(loadFormalProductionConfig(undefined, {
+      rootDirectory: root,
+      currentDate: new Date(Number.NaN),
+    })).rejects.toThrow("clock:calendar-date-invalid");
+  });
+
+  it("enforces lexical, symbolic-link, and resolved-path config boundaries", async () => {
+    const { configPath, root } = await writeFormalSource(formalSource());
+    await expect(loadFormalProductionConfig("../outside.json", {
+      rootDirectory: root,
+    })).rejects.toThrow("inside the allowed config directory");
+
+    await expect(loadFormalProductionConfig(configPath, {
+      allowedDirectory: configPath,
+      currentDate: new Date("2026-07-23T03:00:00.000Z"),
+    })).resolves.toMatchObject({ path: configPath });
+
+    const outsideDirectory = join(root, "outside");
+    await mkdir(outsideDirectory);
+    await writeFile(
+      join(outsideDirectory, "experiment.json"),
+      JSON.stringify(formalSource()),
+      "utf8",
+    );
+    await symlink(outsideDirectory, join(root, "config", "direct-link"), "junction");
+    await expect(loadFormalProductionConfig("config/direct-link", {
+      rootDirectory: root,
+    })).rejects.toThrow("must not be a symbolic link or junction");
+
+    await symlink(outsideDirectory, join(root, "config", "nested-link"), "junction");
+    await expect(loadFormalProductionConfig("config/nested-link/experiment.json", {
+      rootDirectory: root,
+    })).rejects.toThrow("resolved outside the allowed config directory");
+  });
+
+  it("wraps malformed JSON with a stable production configuration error", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sechack-formal-invalid-json-"));
+    await mkdir(join(root, "config"));
+    await writeFile(join(root, "config", "experiment.json"), "{", "utf8");
+    await expect(loadFormalProductionConfig(undefined, {
+      rootDirectory: root,
+    })).rejects.toThrow("Experiment config is not valid JSON");
   });
 
   it("loads only a current, fully bound formal config snapshot", async () => {

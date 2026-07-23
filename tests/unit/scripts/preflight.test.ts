@@ -245,14 +245,14 @@ describe("preflight production gates", () => {
     const base = parseExperimentConfig(configSource({ mode: "screen" }));
     const arbitrary = {
       ...base,
-      protocolVersion: "arbitrary-screen-v2",
+      protocolVersion: "arbitrary-screen-v3",
     } as ExperimentConfig;
     expect(evaluatePreflightGates(arbitrary, false, AUDIT_NOW).find(
       (check) => check.name === "protocolVersion",
     )).toMatchObject({ status: "fail" });
   });
 
-  it("fails modified screen-v2 parameters only at the production gate", () => {
+  it("fails modified screen-v3 parameters only at the production gate", () => {
     const base = parseExperimentConfig(configSource({ mode: "screen" }));
     const modified = {
       ...base,

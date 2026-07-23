@@ -3,7 +3,11 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { formatPresentationPosition, UI_COPY } from "../../../src/shared/copy.js";
+import {
+  formatPresentationPosition,
+  formatResponseCheckpointTitle,
+  UI_COPY,
+} from "../../../src/shared/copy.js";
 
 const normalizeLineEndings = (value: string): string => value.replace(/\r\n?/gu, "\n");
 
@@ -47,6 +51,15 @@ describe("participant UI copy", () => {
     expect([1, 2, 3, 4].map((position) =>
       formatPresentationPosition(position as 1 | 2 | 3 | 4),
     )).toEqual(["第1提示 / 4", "第2提示 / 4", "第3提示 / 4", "第4提示 / 4"]);
+    expect([1, 2, 3, 4].map((position) =>
+      formatResponseCheckpointTitle(position as 1 | 2 | 3 | 4),
+    )).toEqual([
+      "第1提示は終了しました",
+      "第2提示は終了しました",
+      "第3提示は終了しました",
+      "第4提示は終了しました",
+    ]);
+    expect(UI_COPY.response.waiting).toBe("研究スタッフの案内をお待ちください。");
     expect(UI_COPY.footer.medical).toBe("この表示は医療上の診断ではありません。");
   });
 
@@ -78,6 +91,7 @@ describe("participant UI copy", () => {
       UI_COPY.result.pufferScreen,
       ...Object.values(UI_COPY.footer),
       ...Object.values(UI_COPY.reset),
+      ...Object.values(UI_COPY.response),
       UI_COPY.summary.title,
       UI_COPY.summary.body,
       ...UI_COPY.summary.cards,

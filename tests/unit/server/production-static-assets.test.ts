@@ -38,7 +38,7 @@ function manifestSource(files: readonly {
   return `${JSON.stringify({
     schemaVersion: 4,
     appVersion: "1.1.0",
-    protocolVersion: "R8-010-2x2-screen-v2",
+    protocolVersion: "R8-010-2x2-screen-v3",
     configHash: "1".repeat(64),
     configFileHash: "2".repeat(64),
     criticalConfigSha256: "3".repeat(64),
@@ -85,7 +85,7 @@ async function createAssetRelease(options: {
 
 const FORMAL_CONFIG = {
   schemaVersion: 1,
-  protocolVersion: "R8-010-2x2-screen-v2",
+  protocolVersion: "R8-010-2x2-screen-v3",
   studyTitle: "formal static asset test",
   bindHost: "127.0.0.1",
   port: 4_173,

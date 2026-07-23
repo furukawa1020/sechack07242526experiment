@@ -7,7 +7,7 @@
 - 処理場所：クラウド / この端末内
 - 伝え方：状態ラベル / 画面上のフグのふくらみ
 
-このアプリは、参加者へ4条件を正確かつ再現可能に提示し、研究スタッフが安全に進行するためのものである。正式MVPのプロトコルは`R8-010-2x2-screen-v2`とする。
+このアプリは、参加者へ4条件を正確かつ再現可能に提示し、各提示直後の中立なスタッフ引継ぎチェックポイントを含めて研究スタッフが安全に進行するためのものである。正式MVPのプロトコルは`R8-010-2x2-screen-v3`とする。
 
 このアプリは診断システムではない。ストレスや健康状態を医学的に判定しない。参加者が同じ身体状態の提示をどう意味づけるかを評価するための実験提示システムである。
 
@@ -27,12 +27,13 @@
 - ローカルログ
 - CSVエクスポート
 - 異常停止・復旧
+- 各提示後の中立なスタッフ引継ぎチェックポイント
 - 4提示後の中立なスタッフ引継ぎ案内
 - 運用ドキュメントとテスト
 
 ### 実装しない
 
-- 外部回答に関する名称、導線、回答方法
+- 外部アンケートの名称、URL、リンク、QRコード、回答方法
 - フォームその他の外部アンケート回答の取得、表示、送信、完了確認
 - 同意文書の再実装
 - 外部クラウドへのデータ送信
@@ -105,11 +106,12 @@ export const CONDITIONS = {
 - 研究スタッフのPCでローカルサーバを起動
 - 同じPCの別ウィンドウ、または外部ディスプレイで参加者画面を表示
 - 参加者は提示開始前に、アプリ外の承認済み経路で研究説明を読み、参加同意を記録する。この経路は研究説明と同意の双方を提示前に提供・記録する
-- 外部アンケートを用いる場合、その告知・運用は研究スタッフがアプリ外で行う。アプリは外部回答に関する名称、導線、回答方法、回答状況を保持しない
+- 外部アンケートを用いる場合、その告知・操作・送信は研究スタッフがアプリ外で行う。アプリは各提示後に中立な待機画面を表示するが、外部回答に関する名称、URL、QRコード、回答内容、回答方法、回答状況を保持しない
 - スタッフは同意記録そのものをアプリへ複製せず、承認済み手順で同意済みを確認する
 - スタッフ画面で研究用IDと提示順を設定
 - 正式装置モードが`screen`であり、USB実機が接続されていないことを確認
-- 4条件を自動提示
+- 4条件を自動提示し、各提示のreset後に`response`で停止する
+- 研究スタッフが参加者画面の待機表示と承認済みのアプリ外運用手順を確認し、`confirm-response-checkpoint`で次へ進める。この操作は回答内容・送信状況・完了をアプリが検証したという意味ではない
 - 最後に参加者画面へ4提示のサマリーを表示
 - 参加者画面は`4つの提示は以上です。`と`研究スタッフの案内をお待ちください。`だけを案内する
 - スタッフが汎用的な引継ぎ完了を確認し、セッションを完了する。外部回答の完了確認とはしない
@@ -275,9 +277,21 @@ CとDでDOM構造、文字、位置、サイズ、画面上のフグ、装置抽
 
 フグ条件後は、`reset`開始と同じサーバ時刻から6,000msで画面上のフグを収縮させる。`ScreenPufferDevice`が収縮完了状態になってから次へ進み、状態が不整合ならerrorへ移行する。
 
-### 5.1.6 サマリー
+### 5.1.6 回答チェックポイント
 
-4提示終了後：
+各提示の`reset`終了後は`response`へ遷移し、自動進行を停止する。
+
+- 見出しは`第{n}提示は終了しました`
+- 本文は`研究スタッフの案内をお待ちください。`
+- 直前の処理場所、状態ラベル、数値、フグ、内部コードその他の条件刺激を残さない
+- フォーム名、URL、リンク、QRコード、回答内容、回答方法、回答状況を表示しない
+- 参加者画面に操作ボタンを置かない
+- Operatorの`confirm-response-checkpoint`まで次の条件またはサマリーへ進めない
+- 当該操作は回答内容・送信・完了をアプリが検証したことを意味しない
+
+### 5.1.7 サマリー
+
+第4提示後の回答チェックポイント確認を経て：
 
 - 第1〜第4提示の小カードを横並びまたは2×2で表示
 - 各カードには、参加者が見た処理場所と伝え方を短く表示
@@ -324,7 +338,7 @@ CとDでDOM構造、文字、位置、サイズ、画面上のフグ、装置抽
 - フグがidle/deflated
 - 設定検証成功
 
-`R8-010-2x2-screen-v2`の正式開始条件では、Device modeが`screen`であることも必須とする。`screen`のreadyはインプロセスの`ScreenPufferDevice`と参加者画面の描画準備完了を意味し、USB機器の接続状態を意味しない。`mock`または`serial`なら正式セッションを開始しない。
+`R8-010-2x2-screen-v3`の正式開始条件では、Device modeが`screen`であることも必須とする。`screen`のreadyはインプロセスの`ScreenPufferDevice`と参加者画面の描画準備完了を意味し、USB機器の接続状態を意味しない。`mock`または`serial`なら正式セッションを開始しない。
 
 ### 実験中
 
@@ -345,6 +359,7 @@ CとDでDOM構造、文字、位置、サイズ、画面上のフグ、装置抽
 操作：
 
 - 開始
+- 各提示後のスタッフ引継ぎ確認
 - 中止
 - 緊急停止
 - 再接続
@@ -356,6 +371,7 @@ CとDでDOM構造、文字、位置、サイズ、画面上のフグ、装置抽
 ### 完了
 
 - 4提示終了
+- 4件すべての回答チェックポイント確認
 - スタッフ引継ぎ確認
 - セッション完了
 - ログ出力
@@ -416,8 +432,10 @@ stateDiagram-v2
     processing --> result: timer
     processing --> processing: display loss / pause until Operator confirms
     result --> reset: timer
-    reset --> handling: next condition and device ready
-    reset --> summary: fourth condition finished
+    reset --> response: reset timer
+    response --> response: display loss / pause until Operator confirms
+    response --> handling: checkpoint confirmed / next condition
+    response --> summary: checkpoint confirmed / fourth condition finished
     summary --> summary: display loss / pause until Operator confirms
     summary --> completed: staff handoff confirmed
     idle --> aborted: abort
@@ -427,6 +445,7 @@ stateDiagram-v2
     processing --> aborted: abort
     result --> aborted: abort
     reset --> aborted: abort
+    response --> aborted: abort
     summary --> aborted: abort
     setup --> error: device fault
     intro --> error: device fault
@@ -434,13 +453,14 @@ stateDiagram-v2
     processing --> error: device fault
     result --> error: device fault or A-D display loss after safety sequence
     reset --> error: device fault or A-D display loss after safety sequence
+    response --> error: device fault
     summary --> error: device fault
     error --> aborted: operator acknowledges
 ```
 
 `result`または`reset`中の参加者画面喪失は、提示方式に関係なくA〜Dすべてで再開不能とする。遷移順は、(1) タイマー停止と参加者表示の即時中立化、(2) STOP試行、(3) DEFLATE試行と完了確認、(4) 成功時の`device.deflate.complete`または確認失敗の監査記録、(5) `error`遷移と`session.error`記録、の順に固定する。DEFLATEを確認できなくても提示へ戻してはならない。
 
-`intro`、`handling`、`processing`または`summary`中の参加者画面喪失は、同じフェーズのままタイマーを停止して`recoveryRequired`とする。再接続だけでは進行を再開せず、Operatorが明示確認した後に限り、保存した残り時間と新しいサーバ時刻から再開する。
+`intro`、`handling`、`processing`、`response`または`summary`中の参加者画面喪失は、同じフェーズのままタイマーを停止して`recoveryRequired`とする。再接続だけでは進行を再開せず、Operatorが明示確認した後に限り、保存した残り時間と新しいサーバ時刻から再開する。`response`は時間制限を持たず、復旧後もOperatorが回答チェックポイントを明示確認するまで進めない。
 
 不正な遷移はHTTP 409またはドメインエラーとして拒否する。
 
@@ -455,6 +475,7 @@ stateDiagram-v2
 - `POST /api/sessions/:id/start`
 - `POST /api/sessions/:id/abort`
 - `POST /api/sessions/:id/emergency-stop`
+- `POST /api/sessions/:id/confirm-response-checkpoint`
 - `POST /api/sessions/:id/confirm-staff-handoff`
 - `DELETE /api/sessions/:id`
 - `GET /api/exports/sessions.csv`
@@ -505,15 +526,15 @@ stateDiagram-v2
 
 設定のSHA-256ハッシュをセッションログへ記録する。
 
-`R8-010-2x2-screen-v2`の正式設定は`device.mode=screen`、`allowMockInProduction=false`、空の`serialPath`、空の`formUrl`、不在の`formAudit`とする。`mock`は開発・テスト・明示的な模擬リハーサルだけに許可する。`serial`は将来の別プロトコルへ移行しない限り本番ゲートで拒否する。
+`R8-010-2x2-screen-v3`の正式設定は`device.mode=screen`、`allowMockInProduction=false`、空の`serialPath`、空の`formUrl`、不在の`formAudit`とする。`mock`は開発・テスト・明示的な模擬リハーサルだけに許可する。`serial`は将来の別プロトコルへ移行しない限り本番ゲートで拒否する。
 
 正式productionは、研究計画、倫理判断、提示開始前の同意手順、データ管理計画、研究チームの非参加者による3〜5件の画面版技術パイロット、および独立二名の設定候補照合を`goEvidence`として検証する。証跡は同じprotocolVersionと、`goEvidence`自体を除く正式設定のcanonical SHA-256へ結び付ける。確認者の氏名、メールアドレス、署名画像、参加者情報は設定やmanifestへ入れず、外部管理された文書の非個人識別ID、版、SHA-256、承認日、今回の実施への適用期限だけを記録する。
 
 `goEvidence.screenPilot`は、承認管理票に加えて実施時の`sourceTreeSha256`と`pilotConfigFileHash`を必須とする。pilotのsource treeは`releaseVerification.sourceTreeSha256`と完全一致させる。両経路のtree SHA-256は、自己参照を避けるため固定production設定だけを除外し、固定pilot設定を含む他の全追跡entryを対象にする。productionリリース生成時は候補commitの`config/experiment.screen-pilot.json`のバイトSHA-256を再計算し、`pilotConfigFileHash`と一致しなければ拒否する。
 
-本番preflight、リリース生成、manifest検証、production起動のすべてが、`goEvidence`の欠落、NO-GO、期限切れ、protocolVersion不一致、設定SHA-256不一致、仮識別子、ゼロSHA、同一照合者コードをフェイルクローズで拒否する。v1用のフォーム監査はv2のrelease/start gateに含めない。
+本番preflight、リリース生成、manifest検証、production起動のすべてが、`goEvidence`の欠落、NO-GO、期限切れ、protocolVersion不一致、設定SHA-256不一致、仮識別子、ゼロSHA、同一照合者コードをフェイルクローズで拒否する。v1用のフォーム監査はv3のrelease/start gateに含めない。
 
-正式production成果物には`FORM_*`文書・機能、`MOCK_REHEARSAL`文書・起動物、`PUBLIC_DEMO`文書・成果物を含めない。これらはv1履歴または非参加者用の任意資料であり、screen-v2の正式参加者UI、release/start gate、会場運用へ混在させない。
+正式production成果物には`FORM_*`文書・機能、`MOCK_REHEARSAL`文書・起動物、`PUBLIC_DEMO`文書・成果物を含めない。これらはv1履歴または非参加者用の任意資料であり、screen-v3の正式参加者UI、release/start gate、会場運用へ混在させない。
 
 ## 10. ログ
 
@@ -640,7 +661,7 @@ ScreenPufferDevice：
 
 SerialDevice：
 
-- `R8-010-2x2-screen-v2`では正式実施に使用しない
+- `R8-010-2x2-screen-v3`では正式実施に使用しない
 - 物理フグ版として研究責任者の承認と必要な倫理手続き後に別プロトコルへ分離
 - 改行区切りJSON
 - ACKのrequestId照合
@@ -762,6 +783,8 @@ SerialDevice：
 - 中断のカウント方針
 - 固定値ロック
 - 不正状態遷移拒否
+- 4提示それぞれの`response`停止と明示確認
+- 第1〜第3提示後は次の`handling`、第4提示後は`summary`へだけ進むこと
 
 ### UI
 
@@ -772,6 +795,8 @@ SerialDevice：
 - 文言がUI_COPYと一致
 - 1366×768、1920×1080でスクロールなし
 - サマリーの順序が実際の提示順と一致
+- `response`で中立な2文だけを表示し、直前の刺激、外部フォーム名・URL・QRコード、回答内容・回答状況、内部条件コードを表示しない
+- `response`に参加者操作ボタンを置かない
 
 ### 装置
 
@@ -801,6 +826,7 @@ E2Eサーバは明示的な`test`モードで起動し、参加者画面とOpera
 各E2Eで確認：
 
 - 全フェーズ
+- 4回すべての回答チェックポイント停止とOperator明示確認
 - 画面文言
 - ログ
 - サマリー
@@ -830,6 +856,7 @@ E2Eサーバは明示的な`test`モードで起動し、参加者画面とOpera
 - 同一固定値が4条件へ使われる
 - A/Bの右表示が同一
 - C/Dの画面上フグと装置抽象化の動作が同一
+- 4提示すべての終了後に中立な回答チェックポイントで停止し、Operator確認前に次へ進まない
 - 外部自動通信なし
 - 全ログが研究用IDで対応
 - PIIなし

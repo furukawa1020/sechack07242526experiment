@@ -69,6 +69,8 @@ function context(monotonicMs: number, extra: Record<string, unknown> = {}) {
 describe("experiment state machine", () => {
   it("exposes only the protocol transition graph", () => {
     expect(ALLOWED_TRANSITIONS.idle).toEqual(["setup", "aborted"]);
+    expect(ALLOWED_TRANSITIONS.reset).toEqual(["response", "aborted", "error"]);
+    expect(ALLOWED_TRANSITIONS.response).toEqual(["handling", "summary", "aborted", "error"]);
     expect(ALLOWED_TRANSITIONS.completed).toEqual([]);
     expect(canTransition("handling", "processing")).toBe(true);
     expect(canTransition("completed", "setup")).toBe(false);
@@ -85,7 +87,7 @@ describe("experiment state machine", () => {
     for (let presentation = 0; presentation < 4; presentation += 1) {
       session = transitionSession(session, "handling", context(now, {
         timingMs: timing,
-        ...(presentation === 0 ? {} : { deviceReady: true }),
+        ...(presentation === 0 ? {} : { responseCheckpointConfirmed: true }),
       }));
       expect(session.sequenceIndex).toBe(presentation);
       expect(session.currentCondition).toBe(expectedConditions[presentation]);
@@ -100,8 +102,13 @@ describe("experiment state machine", () => {
       now += timing.result;
       session = transitionSession(session, "reset", context(now, { timingMs: timing }));
       now += timing.reset;
+      session = transitionSession(session, "response", context(now, { deviceReady: true }));
+      expect(session.phase).toBe("response");
+      expect(session.phaseEndsAt).toBeNull();
       if (presentation === 3) {
-        session = transitionSession(session, "summary", context(now, { deviceReady: true }));
+        session = transitionSession(session, "summary", context(now, {
+          responseCheckpointConfirmed: true,
+        }));
       }
     }
     expect(session.phase).toBe("summary");
@@ -115,7 +122,7 @@ describe("experiment state machine", () => {
     expect(session.remainingMs).toBeNull();
   });
 
-  it("rejects missing setup guards, early timers and incorrect reset branches", () => {
+  it("rejects missing setup guards, early timers and incorrect response branches", () => {
     let session = transitionSession(newSession(), "setup", context(1));
     expect(() => transitionSession(session, "intro", context(2)))
       .toThrow(InvalidSessionTransitionError);
@@ -134,12 +141,25 @@ describe("experiment state machine", () => {
       currentCondition: "C",
       phaseEndsMonotonicMs: 0,
     };
-    expect(() => transitionSession(fourthReset, "handling", context(100, { deviceReady: true })))
-      .toThrow(/fourth presentation/iu);
-    expect(() => transitionSession(fourthReset, "summary", context(100, { deviceReady: false })))
+    expect(() => transitionSession(fourthReset, "response", context(100, { deviceReady: false })))
       .toThrow(/device must be ready/iu);
-    const firstReset = { ...fourthReset, sequenceIndex: 0 as const, currentCondition: "A" as const };
-    expect(() => transitionSession(firstReset, "summary", context(100, { deviceReady: true })))
+    const fourthResponse = transitionSession(fourthReset, "response", context(100, {
+      deviceReady: true,
+    }));
+    expect(() => transitionSession(fourthResponse, "handling", context(101, {
+      responseCheckpointConfirmed: true,
+    })))
+      .toThrow(/fourth presentation/iu);
+    expect(() => transitionSession(fourthResponse, "summary", context(101)))
+      .toThrow(/response checkpoint/iu);
+    const firstResponse = {
+      ...fourthResponse,
+      sequenceIndex: 0 as const,
+      currentCondition: "A" as const,
+    };
+    expect(() => transitionSession(firstResponse, "summary", context(101, {
+      responseCheckpointConfirmed: true,
+    })))
       .toThrow(/fourth presentation/iu);
   });
 
@@ -163,7 +183,7 @@ describe("experiment state machine", () => {
 
   it("allows abort only from the documented nonterminal phases", () => {
     const abortable: readonly ExperimentPhase[] = [
-      "idle", "setup", "intro", "handling", "processing", "result", "reset", "summary",
+      "idle", "setup", "intro", "handling", "processing", "result", "reset", "response", "summary",
     ];
     for (const phase of abortable) {
       const session: Session = { ...newSession(), phase };
@@ -171,13 +191,13 @@ describe("experiment state machine", () => {
     }
   });
 
-  it.each(["intro", "handling", "processing", "summary"] as const)(
+  it.each(["intro", "handling", "processing", "response", "summary"] as const)(
     "marks %s display loss for operator-confirmed recovery",
     (phase) => {
       const active: Session = {
         ...newSession(),
         phase,
-        ...(phase === "handling" || phase === "processing"
+        ...(phase === "handling" || phase === "processing" || phase === "response"
           ? { sequenceIndex: 0 as const, currentCondition: "A" as const }
           : {}),
       };
@@ -272,6 +292,11 @@ describe("experiment state machine", () => {
     )).not.toHaveProperty("formUrl");
     expect(toPublicSnapshot({ ...active, deviceMode: "serial" }, 25, timing).pufferSurface)
       .toBe("physical");
+    expect(toPublicSnapshot({ ...active, phase: "response" }, 25, timing)).toMatchObject({
+      phase: "response",
+      sequenceIndex: 0,
+      current: null,
+    });
     expect(getRemainingMs(newSession(), 10)).toBeNull();
   });
 

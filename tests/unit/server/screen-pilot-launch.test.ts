@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   freshBuildInvocation,
   runScreenPilotLauncher,
+  sanitizedChildEnvironment,
 } from "../../../scripts/screen-pilot-launcher.js";
 import {
   consumeScreenPilotLaunchCapability,
@@ -99,18 +100,85 @@ afterEach(async () => {
 });
 
 describe("fresh screen-pilot launch capability", () => {
-  it("uses an explicit Windows command processor for the npm command shim", () => {
-    const invocation = freshBuildInvocation("win32", {
-      ComSpec: "C:\\Windows\\System32\\cmd.exe",
-    });
-    expect(invocation).toEqual({
-      command: "C:\\Windows\\System32\\cmd.exe",
-      args: ["/d", "/s", "/c", "npm.cmd run build"],
-    });
-    expect(() => freshBuildInvocation("win32", { ComSpec: "npm.cmd" }))
-      .toThrow(/absolute Windows ComSpec/iu);
-    expect(() => freshBuildInvocation("win32", { ComSpec: "C:\\tools\\not-cmd.exe" }))
-      .toThrow(/absolute Windows ComSpec/iu);
+  it.runIf(process.platform === "win32")(
+    "uses the current trusted Node and its absolute npm CLI instead of PATH npm.cmd",
+    () => {
+      const invocation = freshBuildInvocation("win32", process.env, process.execPath);
+      expect(invocation).toEqual({
+        command: process.execPath,
+        args: [
+          resolve(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+          "run",
+          "build",
+        ],
+      });
+      expect(invocation.args.join(" ")).not.toMatch(/npm\.cmd/iu);
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "pins the real System32 command processor and rejects environment redirection",
+    () => {
+      expect(() => freshBuildInvocation("win32", {
+        ...process.env,
+        ComSpec: "npm.cmd",
+      }, process.execPath)).toThrow(/absolute trusted Windows System32 command processor/iu);
+      expect(() => freshBuildInvocation("win32", {
+        ...process.env,
+        ComSpec: process.execPath,
+      }, process.execPath)).toThrow(/untrusted Windows System32 command processor/iu);
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "rejects npm and Node lifecycle paths outside the current Node installation",
+    () => {
+      expect(() => freshBuildInvocation("win32", {
+        ...process.env,
+        npm_execpath: process.execPath,
+      }, process.execPath)).toThrow(/untrusted npm CLI/iu);
+      expect(() => freshBuildInvocation("win32", {
+        ...process.env,
+        npm_node_execpath: resolve(dirname(process.execPath), "npm.cmd"),
+      }, process.execPath)).toThrow(/npm Node executable/iu);
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "creates a child allowlist that drops executable environment injection",
+    async () => {
+      const environment = sanitizedChildEnvironment("win32", {
+        ...process.env,
+        Path: "C:\\attacker-bin",
+        BASH_ENV: "C:\\attacker\\profile.sh",
+        ESBUILD_BINARY_PATH: "C:\\attacker\\esbuild.exe",
+        NODE_OPTIONS: "--import=C:\\attacker\\hook.mjs",
+        NPM_CONFIG_GLOBALCONFIG: "C:\\attacker\\npmrc",
+        npm_config_script_shell: "C:\\attacker\\shell.exe",
+      }, process.execPath);
+      const keys = Object.keys(environment).map((key) => key.toUpperCase());
+      expect(environment.ComSpec).toMatch(/\\System32\\cmd\.exe$/iu);
+      expect(environment.NPM_CONFIG_SCRIPT_SHELL).toBe(environment.ComSpec);
+      expect(environment.Path).not.toContain("attacker-bin");
+      expect(environment.NODE_OPTIONS).toBe("");
+      expect(environment.NPM_CONFIG_USERCONFIG).toBe("NUL");
+      expect(environment.NPM_CONFIG_IGNORE_SCRIPTS).toBe("true");
+      expect(environment.Path).toContain("\\Git\\cmd");
+      expect(keys).not.toContain("BASH_ENV");
+      expect(keys).not.toContain("ESBUILD_BINARY_PATH");
+      expect(keys).not.toContain("NPM_CONFIG_GLOBALCONFIG");
+      expect(Object.hasOwn(environment, "npm_config_script_shell")).toBe(false);
+      const gitVersion = await execFileAsync("git", ["--version"], {
+        env: environment,
+        windowsHide: true,
+      });
+      expect(gitVersion.stdout).toMatch(/^git version /u);
+    },
+  );
+
+  it("keeps the existing non-Windows npm invocation contract", () => {
+    expect(freshBuildInvocation("linux", { PATH: "/trusted/bin" }, "/usr/bin/node"))
+      .toEqual({ command: "npm", args: ["run", "build"] });
   });
 
   it("rejects invoking the launcher outside npm run screen-pilot", async () => {

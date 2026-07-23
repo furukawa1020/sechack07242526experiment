@@ -491,6 +491,24 @@ export class SessionController {
     return this.operatorSnapshot(this.get(updated.id));
   }
 
+  public async confirmResponseCheckpoint(sessionId: string): Promise<OperatorSessionSnapshot> {
+    this.requireOperatorLease();
+    const session = this.requireActive(sessionId);
+    this.requirePhase(session, "response");
+    if (session.recoveryRequired) {
+      throw conflict("参加者画面の復旧確認を先に行ってください。", "RECOVERY_REQUIRED");
+    }
+    if (!session.displayConnected) {
+      throw conflict("参加者画面が接続されていません。", "DISPLAY_NOT_READY");
+    }
+
+    const index = this.requireSequenceIndex(session);
+    const updated = index === 3
+      ? await this.enterUntimedPhase(session, "summary", { currentCondition: null })
+      : await this.enterTimedPhase(session, "handling", (index + 1) as 0 | 1 | 2 | 3);
+    return this.operatorSnapshot(updated);
+  }
+
   public async delete(sessionId: string): Promise<void> {
     let session = this.get(sessionId);
     if (this.activeSessionId === sessionId && session.phase !== "setup") {
@@ -566,7 +584,12 @@ export class SessionController {
 
     if (
       this.activeSessionId === updated.id &&
-      (TIMED_PHASES.has(updated.phase) || updated.phase === "intro" || updated.phase === "summary")
+      (
+        TIMED_PHASES.has(updated.phase)
+        || updated.phase === "intro"
+        || updated.phase === "response"
+        || updated.phase === "summary"
+      )
     ) {
       if (TIMED_PHASES.has(updated.phase)) {
         const remaining = Math.max(0, (updated.phaseEndsMonotonicMs ?? this.monotonicNow()) - this.monotonicNow());
@@ -864,7 +887,7 @@ export class SessionController {
 
   private async enterUntimedPhase(
     session: RuntimeSession,
-    phase: "intro" | "summary",
+    phase: "intro" | "response" | "summary",
     patch: Partial<RuntimeSession> = {},
   ): Promise<RuntimeSession> {
     const monotonic = this.monotonicNow();
@@ -992,12 +1015,7 @@ export class SessionController {
           || current.sequenceIndex !== index
           || current.recoveryRequired
         ) return;
-        if (index === 3) {
-          await this.enterUntimedPhase(current, "summary", { currentCondition: null });
-        } else {
-          const nextIndex = (index + 1) as 0 | 1 | 2 | 3;
-          await this.enterTimedPhase(current, "handling", nextIndex);
-        }
+        await this.enterUntimedPhase(current, "response");
         return;
       }
       default:

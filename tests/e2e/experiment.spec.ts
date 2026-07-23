@@ -65,13 +65,38 @@ async function mockCommandHistory(request: APIRequestContext): Promise<readonly 
 async function action(
   request: APIRequestContext,
   sessionId: string,
-  name: "prepare" | "start" | "resume" | "abort" | "emergency-stop" | "confirm-staff-handoff",
+  name:
+    | "prepare"
+    | "start"
+    | "resume"
+    | "abort"
+    | "emergency-stop"
+    | "confirm-response-checkpoint"
+    | "confirm-staff-handoff",
 ): Promise<JsonRecord> {
   const response = await request.post(
     `/api/sessions/${encodeURIComponent(sessionId)}/${name}`,
   );
   expect(response.ok()).toBeTruthy();
   return asRecord(asRecord(await response.json()).snapshot);
+}
+
+async function completeResponseCheckpoints(
+  page: Page,
+  request: APIRequestContext,
+  sessionId: string,
+): Promise<void> {
+  for (let position = 1; position <= 4; position += 1) {
+    await expect(
+      page.getByRole("heading", { name: `第${String(position)}提示は終了しました` }),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("研究スタッフの案内をお待ちください。")).toBeVisible();
+    await expect(page.getByRole("button")).toHaveCount(0);
+    const waitingText = await page.getByTestId("participant-app").innerText();
+    expect(waitingText).not.toMatch(/Googleフォーム|forms\.gle|QRコード|アンケート|高ストレス|72\s*\/\s*100/iu);
+    expect((await operatorSnapshot(request, sessionId)).phase).toBe("response");
+    await action(request, sessionId, "confirm-response-checkpoint");
+  }
 }
 
 async function openReadyDisplay(page: Page, displayUrl: string, request: APIRequestContext, sessionId: string): Promise<void> {
@@ -152,6 +177,7 @@ test("4つの固定提示順をMockDeviceで完走し、参加者へ内部コー
     await expect(page.getByRole("heading", { name: "同じ固定模擬データを、4つの方法で提示します" })).toBeVisible();
     await action(request, sessionId, "start");
 
+    await completeResponseCheckpoints(page, request, sessionId);
     await expect(page.getByRole("heading", { name: "4つの提示は終了しました" })).toBeVisible({
       timeout: 15_000,
     });
@@ -222,6 +248,7 @@ test("途中リロード後は明示的な復旧確認まで進行しない", as
   expect((await operatorSnapshot(request, created.sessionId)).phase).toBe(pausedPhase);
 
   await action(request, created.sessionId, "resume");
+  await completeResponseCheckpoints(page, request, created.sessionId);
   await expect(page.getByRole("heading", { name: "4つの提示は終了しました" })).toBeVisible({
     timeout: 15_000,
   });

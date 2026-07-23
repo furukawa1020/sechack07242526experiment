@@ -16,6 +16,7 @@ export const EXPERIMENT_PHASES = [
   "processing",
   "result",
   "reset",
+  "response",
   "summary",
   "completed",
   "aborted",

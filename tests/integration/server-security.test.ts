@@ -80,6 +80,19 @@ async function close(server: Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
+async function waitForPhase(
+  controller: SessionController,
+  sessionId: string,
+  phase: string,
+): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (controller.getOperatorSnapshot(sessionId).phase === phase) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Timed out waiting for phase ${phase}.`);
+}
+
 describe("server HTTP security", () => {
   const servers: Server[] = [];
   const controllers: SessionController[] = [];
@@ -217,5 +230,44 @@ describe("server HTTP security", () => {
     expect(payload.status.mode).toBe("mock");
     expect(payload.ack).toMatchObject({ ok: true, state: "inflating" });
     expect(payload.ack.requestId).toMatch(/^[0-9a-f-]{36}$/u);
+  });
+
+  it("exposes an explicit response-checkpoint confirmation endpoint", async () => {
+    const running = await listen();
+    servers.push(running.server);
+    controllers.push(running.controller);
+    const created = await running.controller.create({
+      researchId: "SH26-001",
+      consentConfirmed: true,
+      orderCode: "ABDC",
+    });
+    running.controller.markDisplayReady(created.displayToken, "display-1");
+    await running.controller.prepare(created.snapshot.id);
+    await running.controller.start(created.snapshot.id);
+    await waitForPhase(running.controller, created.snapshot.id, "response");
+
+    const confirmed = await fetch(
+      `${running.url}/api/sessions/${created.snapshot.id}/confirm-response-checkpoint`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    );
+    expect(confirmed.status).toBe(200);
+    await expect(confirmed.json()).resolves.toMatchObject({
+      snapshot: { phase: "handling", sequenceIndex: 1 },
+    });
+
+    const duplicate = await fetch(
+      `${running.url}/api/sessions/${created.snapshot.id}/confirm-response-checkpoint`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      },
+    );
+    expect(duplicate.status).toBe(409);
+    await expect(duplicate.json()).resolves.toMatchObject({ code: "INVALID_STATE" });
   });
 });

@@ -303,6 +303,21 @@ function waitForSessionError(controller: SessionController): Promise<void> {
   });
 }
 
+async function advanceThroughResponseCheckpoints(
+  controller: SessionController,
+  sessionId: string,
+): Promise<void> {
+  for (let index = 0; index < 4; index += 1) {
+    await vi.advanceTimersByTimeAsync(50);
+    expect(controller.getOperatorSnapshot(sessionId)).toMatchObject({
+      phase: "response",
+      sequenceIndex: index,
+    });
+    const confirmed = await controller.confirmResponseCheckpoint(sessionId);
+    expect(confirmed.phase).toBe(index === 3 ? "summary" : "handling");
+  }
+}
+
 describe("SessionController", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -318,7 +333,7 @@ describe("SessionController", () => {
     const created = await preparedSession(controller, "ABDC");
 
     await controller.start(created.snapshot.id);
-    await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
+    await advanceThroughResponseCheckpoints(controller, created.snapshot.id);
 
     const operator = controller.getOperatorSnapshot(created.snapshot.id);
     const participant = controller.getPublicSnapshot(created.displayToken);
@@ -329,7 +344,7 @@ describe("SessionController", () => {
     expect(participant.pufferSurface).toBe("screen");
     expect(participant.pufferRamp).toEqual({ inflateMs: 1, deflateMs: 1 });
     expect(participant.phaseStartedAt).not.toBeNull();
-    expect(participant.serverNow).toBe("2026-07-19T00:00:00.170Z");
+    expect(participant.serverNow).toBe("2026-07-19T00:00:00.200Z");
     expect(JSON.stringify(participant)).not.toMatch(/SH26|ABDC|"A"|conditionCode|researchId|sessionId|formUrl/u);
     expect(JSON.stringify(participant)).not.toContain("pufferLevel");
     expect(logger.events.filter((event) => event.eventType === "phase.result")).toHaveLength(4);
@@ -337,6 +352,83 @@ describe("SessionController", () => {
     const completed = await controller.confirmStaffHandoff(created.snapshot.id);
     expect(completed.phase).toBe("completed");
     expect(completed.result).toBe("ok");
+    controller.dispose();
+  });
+
+  it("waits at every response checkpoint until the Operator explicitly confirms", async () => {
+    const { controller } = makeController();
+    const created = await preparedSession(controller, "ABDC");
+    await controller.start(created.snapshot.id);
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+      phase: "response",
+      sequenceIndex: 0,
+      currentCondition: "A",
+    });
+    expect(controller.getPublicSnapshot(created.displayToken)).toMatchObject({
+      phase: "response",
+      sequenceIndex: 0,
+      current: null,
+      remainingMs: null,
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("response");
+    await expect(controller.confirmStaffHandoff(created.snapshot.id)).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    await expect(controller.confirmResponseCheckpoint(created.snapshot.id)).resolves.toMatchObject({
+      phase: "handling",
+      sequenceIndex: 1,
+      currentCondition: "B",
+    });
+    controller.dispose();
+  });
+
+  it("makes response display loss recoverable and guards checkpoint confirmation", async () => {
+    const { controller } = makeController();
+    const created = await preparedSession(controller, "ABDC");
+    await controller.start(created.snapshot.id);
+    await vi.advanceTimersByTimeAsync(50);
+
+    controller.markDisplayDisconnected(created.displayToken, "display-1");
+    expect(controller.getOperatorSnapshot(created.snapshot.id)).toMatchObject({
+      phase: "response",
+      displayConnected: false,
+      recoveryRequired: true,
+    });
+    await expect(controller.confirmResponseCheckpoint(created.snapshot.id)).rejects.toMatchObject({
+      code: "RECOVERY_REQUIRED",
+    });
+    controller.markDisplayReady(created.displayToken, "display-2");
+    await expect(controller.confirmResponseCheckpoint(created.snapshot.id)).rejects.toMatchObject({
+      code: "RECOVERY_REQUIRED",
+    });
+    await controller.resume(created.snapshot.id);
+    await expect(controller.confirmResponseCheckpoint(created.snapshot.id)).resolves.toMatchObject({
+      phase: "handling",
+      sequenceIndex: 1,
+    });
+    controller.dispose();
+  });
+
+  it("requires a live Operator lease before confirming a response checkpoint", async () => {
+    const { controller } = makeController();
+    const created = await preparedSession(controller, "ABDC");
+    await controller.start(created.snapshot.id);
+    await vi.advanceTimersByTimeAsync(50);
+
+    controller.enableOperatorLeaseSupervision();
+    await expect(controller.confirmResponseCheckpoint(created.snapshot.id)).rejects.toMatchObject({
+      code: "OPERATOR_CONNECTION_REQUIRED",
+    });
+    expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("response");
+    controller.markOperatorConnected();
+    await expect(controller.confirmResponseCheckpoint(created.snapshot.id)).resolves.toMatchObject({
+      phase: "handling",
+      sequenceIndex: 1,
+    });
     controller.dispose();
   });
 
@@ -694,7 +786,7 @@ describe("SessionController", () => {
     const { controller, device } = makeController();
     const created = await preparedSession(controller, "ABDC");
     await controller.start(created.snapshot.id);
-    await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
+    await advanceThroughResponseCheckpoints(controller, created.snapshot.id);
     expect(controller.getOperatorSnapshot(created.snapshot.id).phase).toBe("summary");
 
     const completion = controller.confirmStaffHandoff(created.snapshot.id);
@@ -1139,7 +1231,7 @@ describe("SessionController", () => {
     const terminal = makeController(0, { logger });
     const terminalCreated = await preparedSession(terminal.controller, "ABDC");
     await terminal.controller.start(terminalCreated.snapshot.id);
-    await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
+    await advanceThroughResponseCheckpoints(terminal.controller, terminalCreated.snapshot.id);
     const completion = terminal.controller.confirmStaffHandoff(terminalCreated.snapshot.id);
     await logger.started;
     await terminal.controller.shutdown();
@@ -1252,7 +1344,7 @@ describe("SessionController", () => {
     const created = await preparedSession(controller, "ABDC");
     expect(controller.getPublicSnapshot(created.displayToken)).not.toHaveProperty("formUrl");
     await controller.start(created.snapshot.id);
-    await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
+    await advanceThroughResponseCheckpoints(controller, created.snapshot.id);
 
     expect(controller.getPublicSnapshot(created.displayToken)).toMatchObject({ phase: "summary" });
     expect(controller.getPublicSnapshot(created.displayToken)).not.toHaveProperty("formUrl");
@@ -1264,7 +1356,7 @@ describe("SessionController", () => {
     const { controller } = makeController();
     const created = await preparedSession(controller, "ABDC");
     await controller.start(created.snapshot.id);
-    await vi.advanceTimersByTimeAsync(4 * (10 + 10 + 10 + 10) + 10);
+    await advanceThroughResponseCheckpoints(controller, created.snapshot.id);
 
     controller.enableOperatorLeaseSupervision();
     await expect(controller.confirmStaffHandoff(created.snapshot.id)).rejects.toMatchObject({

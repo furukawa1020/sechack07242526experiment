@@ -4,7 +4,7 @@ import { ORDER_CODES } from "./conditions.js";
 
 export { STUDY_FORM_URL } from "./form-audit.js";
 
-export const SCREEN_PROTOCOL_VERSION = "R8-010-2x2-screen-v2";
+export const SCREEN_PROTOCOL_VERSION = "R8-010-2x2-screen-v3";
 
 const singleLineText = z.string().min(1).max(200).refine(
   (value) => !/[\r\n]/u.test(value),
@@ -230,10 +230,10 @@ export const ExperimentConfigSchema = z.object({
   fixedState: FixedStateSchema,
   timingMs: TimingSchema,
   device: DeviceConfigSchema,
-  // Formal screen-v2 runs require this to be empty. The field remains in the
+  // Formal screen-v3 runs require this to be empty. The field remains in the
   // shared schema so older non-production audit fixtures can still be parsed.
   formUrl: formUrlSchema,
-  // Legacy/standalone form-audit metadata. Formal screen-v2 production
+  // Legacy/standalone form-audit metadata. Formal screen-v3 production
   // explicitly rejects its presence and does not ship or call the audit path.
   formAudit: FormAuditSchema.optional(),
   // Optional for development and test fixtures. Every production entry point

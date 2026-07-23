@@ -26,12 +26,14 @@ class FakeSerialPort {
   public readonly writes: string[] = [];
   public autoAck = true;
   public deferOpen = false;
+  public deferClose = false;
   public closeCalls = 0;
   public synchronousWriteFailures = 0;
   public synchronousWriteFailureValue: unknown = new Error("injected synchronous write failure");
   public asynchronousWriteFailures = 0;
   public closeError: Error | null = null;
   private deferredOpenCallback: ((error?: Error | null) => void) | null = null;
+  private deferredCloseCallback: ((error?: Error | null) => void) | null = null;
   private readonly dataListeners = new Set<DataListener>();
   private readonly errorListeners = new Set<ErrorListener>();
   private readonly closeListeners = new Set<CloseListener>();
@@ -47,6 +49,10 @@ class FakeSerialPort {
 
   public close(callback: (error?: Error | null) => void): void {
     this.closeCalls += 1;
+    if (this.deferClose) {
+      this.deferredCloseCallback = callback;
+      return;
+    }
     if (this.closeError !== null) {
       callback(this.closeError);
       return;
@@ -81,6 +87,15 @@ class FakeSerialPort {
     this.deferredOpenCallback = null;
     if (error === undefined) this.isOpen = true;
     callback(error);
+  }
+
+  public completeClose(error?: Error): void {
+    const callback = this.deferredCloseCallback;
+    if (callback === null) throw new Error("No deferred close is pending.");
+    this.deferredCloseCallback = null;
+    this.isOpen = false;
+    callback(error);
+    for (const listener of this.closeListeners) listener();
   }
 
   public on(event: "data", listener: DataListener): this;
@@ -155,7 +170,9 @@ function setup(override: {
     path: "COM-TEST",
     baudRate: 115_200,
     ackTimeoutMs: override.ackTimeoutMs ?? 1_000,
-    stopAckTimeoutMs: override.stopAckTimeoutMs ?? 500,
+    ...(override.stopAckTimeoutMs === undefined
+      ? {}
+      : { stopAckTimeoutMs: override.stopAckTimeoutMs }),
     ...(override.maxLineBytes === undefined ? {} : { maxLineBytes: override.maxLineBytes }),
     portFactory: () => port,
   });
@@ -551,6 +568,24 @@ describe("SerialPufferDevice", () => {
     ]);
     expect(port.closeCalls).toBe(1);
     await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+  });
+
+  it("times out serial close, detaches safely and ignores a late close callback", async () => {
+    vi.useFakeTimers();
+    const { device, port } = setup({ ackTimeoutMs: 100 });
+    await device.connect();
+    port.deferClose = true;
+
+    const disconnect = device.disconnect();
+    const rejection = expect(disconnect).rejects.toBeInstanceOf(AggregateError);
+    await vi.waitFor(() => expect(port.closeCalls).toBe(1));
+    await vi.advanceTimersByTimeAsync(100);
+    await rejection;
+
+    expect(port.isOpen).toBe(true);
+    await expect(device.getStatus()).rejects.toBeInstanceOf(DeviceNotConnectedError);
+    port.completeClose();
+    expect(port.isOpen).toBe(false);
   });
 
   it("disconnects safely when the port closes before the close event is delivered", async () => {

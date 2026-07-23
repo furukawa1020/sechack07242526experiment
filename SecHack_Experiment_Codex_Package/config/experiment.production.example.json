@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "protocolVersion": "R8-010-2x2-screen-v2",
+  "protocolVersion": "R8-010-2x2-screen-v3",
   "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
   "bindHost": "127.0.0.1",
   "port": 4173,
@@ -29,11 +29,11 @@
   "formUrl": "",
   "goEvidence": {
     "status": "NO-GO",
-    "protocolVersion": "R8-010-2x2-screen-v2",
+    "protocolVersion": "R8-010-2x2-screen-v3",
     "criticalConfigSha256": "884cd35698c341d95c34f4e8e8cce282e6b0b3a2c1b54eae89cc2e3d36dc13e6",
     "researchPlan": {
       "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v2",
+      "protocolVersion": "R8-010-2x2-screen-v3",
       "documentId": "PENDING-RESEARCH-PLAN",
       "documentVersion": "PENDING",
       "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -42,7 +42,7 @@
     },
     "ethicsDetermination": {
       "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v2",
+      "protocolVersion": "R8-010-2x2-screen-v3",
       "documentId": "PENDING-ETHICS-DETERMINATION",
       "documentVersion": "PENDING",
       "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -51,7 +51,7 @@
     },
     "preStimulusConsent": {
       "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v2",
+      "protocolVersion": "R8-010-2x2-screen-v3",
       "documentId": "PENDING-PRE-STIMULUS-CONSENT",
       "documentVersion": "PENDING",
       "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -60,7 +60,7 @@
     },
     "dataManagementPlan": {
       "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v2",
+      "protocolVersion": "R8-010-2x2-screen-v3",
       "documentId": "PENDING-DATA-MANAGEMENT-PLAN",
       "documentVersion": "PENDING",
       "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -69,7 +69,7 @@
     },
     "screenPilot": {
       "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v2",
+      "protocolVersion": "R8-010-2x2-screen-v3",
       "documentId": "PENDING-SCREEN-PILOT",
       "documentVersion": "PENDING",
       "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -81,7 +81,7 @@
     },
     "releaseVerification": {
       "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v2",
+      "protocolVersion": "R8-010-2x2-screen-v3",
       "appVersion": "PENDING",
       "criticalConfigSha256": "884cd35698c341d95c34f4e8e8cce282e6b0b3a2c1b54eae89cc2e3d36dc13e6",
       "sourceTreeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -91,7 +91,7 @@
           "reviewerCode": "REV-PENDING01",
           "reviewVersion": "PENDING",
           "status": "NO-GO",
-          "protocolVersion": "R8-010-2x2-screen-v2",
+          "protocolVersion": "R8-010-2x2-screen-v3",
           "criticalConfigSha256": "884cd35698c341d95c34f4e8e8cce282e6b0b3a2c1b54eae89cc2e3d36dc13e6",
           "reviewedOn": null,
           "applicableUntil": null,
@@ -102,7 +102,7 @@
           "reviewerCode": "REV-PENDING02",
           "reviewVersion": "PENDING",
           "status": "NO-GO",
-          "protocolVersion": "R8-010-2x2-screen-v2",
+          "protocolVersion": "R8-010-2x2-screen-v3",
           "criticalConfigSha256": "884cd35698c341d95c34f4e8e8cce282e6b0b3a2c1b54eae89cc2e3d36dc13e6",
           "reviewedOn": null,
           "applicableUntil": null,
