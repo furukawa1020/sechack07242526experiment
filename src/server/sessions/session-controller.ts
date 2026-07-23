@@ -164,6 +164,7 @@ export class SessionController {
         await this.safeStopAndDeflate();
         this.throwIfSafetyUnconfirmed();
         this.activeSessionId = null;
+        this.operatorSessionConfirmed = false;
         return;
       }
       await this.abort(active.id);
@@ -316,15 +317,16 @@ export class SessionController {
     return Object.freeze({
       confirmed,
       checks: Object.freeze({
-        researchGovernanceReviewed: confirmed,
-        consentProcedureReviewed: confirmed,
-        dataManagementReviewed: confirmed,
-        venueOperationReviewed: confirmed,
+        todayProcedureConfirmed: confirmed,
+        participantConsentConfirmed: confirmed,
+        stopOperationConfirmed: confirmed,
+        physicalDeviceSafetyConfirmed: confirmed,
       }),
-      technicalStatus: "実施可能",
-      participantMode: "有効",
-      approvalEvidence: "本システム外で管理",
-      approvalVerification: "実施しない",
+      technicalReadiness: "GO",
+      participantMode: "enabled",
+      complianceMode: "external",
+      approvalEvidence: "managed-outside-system",
+      approvalVerifiedByApplication: false,
     });
   }
 
@@ -333,10 +335,10 @@ export class SessionController {
   ): OperatorSessionConfirmationStatus {
     this.requireOperatorLease();
     if (
-      input.researchGovernanceReviewed !== true
-      || input.consentProcedureReviewed !== true
-      || input.dataManagementReviewed !== true
-      || input.venueOperationReviewed !== true
+      input.todayProcedureConfirmed !== true
+      || input.participantConsentConfirmed !== true
+      || input.stopOperationConfirmed !== true
+      || input.physicalDeviceSafetyConfirmed !== true
     ) {
       throw badRequest(
         "当日の実験運用を開始するには、4項目すべての確認が必要です。",
@@ -366,6 +368,7 @@ export class SessionController {
     }
     const status = await this.runDeviceOperation(() => this.device.getStatus());
     this.requireOperatorLease();
+    this.requireOperatorSessionConfirmation();
     const session = this.requireActive(sessionId);
     this.requirePhase(session, "setup");
     if (!session.displayConnected) {
@@ -458,7 +461,10 @@ export class SessionController {
         );
         this.requireSafetyConfirmed();
         this.requireAuditStorageHealthy();
-        if (this.activeSessionId === sessionId) this.activeSessionId = null;
+        if (this.activeSessionId === sessionId) {
+          this.activeSessionId = null;
+          this.operatorSessionConfirmed = false;
+        }
         return this.operatorSnapshot(terminal);
       }
     }
@@ -499,6 +505,7 @@ export class SessionController {
       this.requireAuditStorageHealthy();
       if (this.activeSessionId === sessionId && TERMINAL_PHASES.has(this.get(sessionId).phase)) {
         this.activeSessionId = null;
+        this.operatorSessionConfirmed = false;
       }
       return this.operatorSnapshot(this.get(sessionId));
     }
@@ -521,6 +528,7 @@ export class SessionController {
     this.requireAuditStorageHealthy();
     if (this.activeSessionId === sessionId && TERMINAL_PHASES.has(this.get(sessionId).phase)) {
       this.activeSessionId = null;
+      this.operatorSessionConfirmed = false;
     }
     return this.operatorSnapshot(this.get(sessionId));
   }
@@ -529,9 +537,19 @@ export class SessionController {
     this.requireOperatorLease();
     const session = this.requireActive(sessionId);
     this.requirePhase(session, "summary");
+    if (session.recoveryRequired) {
+      throw conflict("参加者画面の復旧確認を先に行ってください。", "RECOVERY_REQUIRED");
+    }
+    if (!session.displayConnected) {
+      throw conflict("参加者画面が接続されていません。", "DISPLAY_NOT_READY");
+    }
     const updated = await this.enterTerminalPhase(session, "completed", "ok", null, "session.completed");
     this.requireAuditStorageHealthy();
-    if (this.activeSessionId === sessionId) this.activeSessionId = null;
+    if (this.activeSessionId === sessionId) {
+      this.activeSessionId = null;
+      this.operatorSessionConfirmed = false;
+    }
+    this.operatorSessionConfirmed = false;
     return this.operatorSnapshot(this.get(updated.id));
   }
 
@@ -580,6 +598,7 @@ export class SessionController {
     this.pausedRemainingMs.delete(sessionId);
     this.sessions.delete(sessionId);
     this.recentEvents.delete(sessionId);
+    this.operatorSessionConfirmed = false;
   }
 
   public markDisplayReady(displayToken: string, connectionId: string): void {

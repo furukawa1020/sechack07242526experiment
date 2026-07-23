@@ -24,6 +24,12 @@ function startRehearsal(): void {
   fireEvent.click(screen.getByRole("button", { name: PUBLIC_DEMO_COPY.rehearsal.start }));
 }
 
+function confirmRehearsalResponse(): void {
+  fireEvent.click(
+    screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.confirmResponse }),
+  );
+}
+
 function advance(milliseconds: number): void {
   act(() => vi.advanceTimersByTime(milliseconds));
 }
@@ -66,7 +72,7 @@ describe("public demo", () => {
     expect(main.querySelector("main")).toBeNull();
     expect(document.querySelector("article main")).toBeNull();
 
-    for (let index = 0; index < 4; index += 1) next();
+    for (let index = 0; index < 8; index += 1) next();
 
     expect(document.querySelectorAll("main")).toHaveLength(1);
     expect(within(main).getByRole("heading", { level: 1 })).toHaveTextContent(
@@ -86,8 +92,8 @@ describe("public demo", () => {
       ["この端末内", "状態は画面上のフグの ふくらみで表されています"],
     ] as const;
 
+    next();
     expected.forEach(([processing, result], index) => {
-      next();
       const stage = screen.getByLabelText("固定模擬データの表示確認");
       expect(stage.querySelector("[data-scene='result']")).not.toBeNull();
       expect(within(stage).getByText(`第${index + 1}提示 / 4`)).toBeInTheDocument();
@@ -136,6 +142,13 @@ describe("public demo", () => {
         expect(within(stage).queryByText(code, { exact: true })).not.toBeInTheDocument();
       }
       expect(stage.querySelector("[data-condition-code]")).toBeNull();
+
+      next();
+      expect(screen.getByTestId("public-demo-response")).toHaveTextContent(
+        `第${index + 1}提示は終了しました研究スタッフの案内をお待ちください。`,
+      );
+      expect(screen.queryByTestId("result-panel")).not.toBeInTheDocument();
+      next();
     });
 
     expect(cloudIconPath).not.toBeNull();
@@ -149,9 +162,12 @@ describe("public demo", () => {
     next();
     const cloudLabel = screen.getByTestId("result-panel").innerHTML;
     next();
+    next();
     const localLabel = screen.getByTestId("result-panel").innerHTML;
     next();
+    next();
     const cloudPuffer = screen.getByTestId("result-panel").innerHTML;
+    next();
     next();
     const localPuffer = screen.getByTestId("result-panel").innerHTML;
 
@@ -166,7 +182,7 @@ describe("public demo", () => {
     vi.stubGlobal("WebSocket", webSocketConstructor);
     render(<PublicDemoApp />);
 
-    for (let index = 0; index < 5; index += 1) next();
+    for (let index = 0; index < 9; index += 1) next();
 
     expect(screen.getByTestId("public-demo-summary")).toBeInTheDocument();
     expect(
@@ -185,12 +201,13 @@ describe("public demo", () => {
     render(<PublicDemoApp />);
     next();
     next();
-    expect(screen.getByText("第2提示 / 4（3 / 6画面）")).toBeInTheDocument();
+    next();
+    expect(screen.getByText("第2提示 / 4（4 / 10画面）")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: PUBLIC_DEMO_COPY.navigation.previous }));
 
-    expect(screen.getByText("第1提示 / 4（2 / 6画面）")).toBeInTheDocument();
-    expect(document.querySelector("[data-scene='result']")).not.toBeNull();
+    expect(screen.getByText("第1提示後の待機（3 / 10画面）")).toBeInTheDocument();
+    expect(document.querySelector("[data-scene='response']")).not.toBeNull();
   });
 
   it("returns to the top on every visible scene transition", () => {
@@ -243,6 +260,11 @@ describe("public demo", () => {
       advance(15_000);
       expect(stage).toHaveAttribute("data-rehearsal-phase", "reset");
       advance(7_000);
+      expect(stage).toHaveAttribute("data-rehearsal-phase", "response");
+      expect(screen.getByTestId("public-demo-response")).toHaveTextContent(
+        `第${position}提示は終了しました研究スタッフの案内をお待ちください。`,
+      );
+      confirmRehearsalResponse();
     }
 
     expect(app).toHaveAttribute("data-rehearsal-mode", "manual");
@@ -265,6 +287,7 @@ describe("public demo", () => {
     const firstLabelResult = screen.getByTestId("result-panel").innerHTML;
     advance(15_000);
     advance(7_000);
+    confirmRehearsalResponse();
     advance(8_000);
     advance(3_000);
     const secondLabelResult = screen.getByTestId("result-panel").innerHTML;
@@ -272,6 +295,7 @@ describe("public demo", () => {
 
     advance(15_000);
     advance(7_000);
+    confirmRehearsalResponse();
     advance(8_000);
     advance(3_000);
     const cloudPufferResult = screen.getByTestId("result-panel").innerHTML;
@@ -290,6 +314,7 @@ describe("public demo", () => {
     advance(6_000);
     expect(puffer).toHaveAttribute("data-puffer-motion", "resting");
     advance(1_000);
+    confirmRehearsalResponse();
     advance(8_000);
     advance(3_000);
 
@@ -315,6 +340,7 @@ describe("public demo", () => {
       advance(3_000);
       advance(15_000);
       advance(7_000);
+      confirmRehearsalResponse();
     }
 
     expect(screen.getByTestId("public-demo-summary")).toBeInTheDocument();

@@ -38,6 +38,7 @@ function Footer(): React.JSX.Element {
       <strong>{UI_COPY.footer.scenario}</strong>
       <span>{UI_COPY.footer.remember}</span>
       <span>{UI_COPY.footer.medical}</span>
+      <span>{UI_COPY.footer.withdrawal}</span>
     </footer>
   );
 }

@@ -45,26 +45,27 @@ export interface OperatorSessionSnapshot extends RuntimeSession {
  * It deliberately carries no person, document, evidence, signature, or time.
  */
 export interface OperatorSessionConfirmationChecks {
-  readonly researchGovernanceReviewed: boolean;
-  readonly consentProcedureReviewed: boolean;
-  readonly dataManagementReviewed: boolean;
-  readonly venueOperationReviewed: boolean;
+  readonly todayProcedureConfirmed: boolean;
+  readonly participantConsentConfirmed: boolean;
+  readonly stopOperationConfirmed: boolean;
+  readonly physicalDeviceSafetyConfirmed: boolean;
 }
 
 export interface OperatorSessionConfirmationInput {
-  readonly researchGovernanceReviewed: true;
-  readonly consentProcedureReviewed: true;
-  readonly dataManagementReviewed: true;
-  readonly venueOperationReviewed: true;
+  readonly todayProcedureConfirmed: true;
+  readonly participantConsentConfirmed: true;
+  readonly stopOperationConfirmed: true;
+  readonly physicalDeviceSafetyConfirmed: true;
 }
 
 export interface OperatorSessionConfirmationStatus {
   readonly confirmed: boolean;
   readonly checks: OperatorSessionConfirmationChecks;
-  readonly technicalStatus: "実施可能";
-  readonly participantMode: "有効";
-  readonly approvalEvidence: "本システム外で管理";
-  readonly approvalVerification: "実施しない";
+  readonly technicalReadiness: "GO";
+  readonly participantMode: "enabled";
+  readonly complianceMode: "external";
+  readonly approvalEvidence: "managed-outside-system";
+  readonly approvalVerifiedByApplication: false;
 }
 
 export interface OperatorRecentEvent {

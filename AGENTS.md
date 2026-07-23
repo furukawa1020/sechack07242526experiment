@@ -115,7 +115,13 @@
 
 不正な遷移を拒否する。すべての遷移をログに残す。
 
-正式productionリリースには`FORM_*`文書・機能、`MOCK_REHEARSAL`文書・起動物、`PUBLIC_DEMO`文書・成果物を含めない。これらはv1履歴または非参加者向け任意資料であり、v3のrelease/start gateではない。`goEvidence`の研究計画、倫理判断、提示前同意、データ管理計画、非参加者screen pilot 3〜5件、独立二名reviewは引き続きhard fail-closedの必須条件とする。
+正式productionリリースには`FORM_*`文書・機能、`MOCK_REHEARSAL`文書・起動物、`PUBLIC_DEMO`文書・成果物を含めない。これらはv1履歴または非参加者向け任意資料であり、v3のrelease/start gateではない。
+
+正式productionはexternal compliance modeを使用する。倫理承認の確認と証跡管理は研究責任者および当日の運用責任者が本システム外で行い、本アプリ、設定、Git、CI、manifest、ログへ承認PDF、文書参照、承認文書のSHA-256、確認者情報、署名、証跡保存先を要求・保存・生成しない。本アプリは倫理承認を検証した、承認済みである、二名照合済みであるとは表示しない。
+
+`compliance.mode=external`では、旧`goEvidence`、承認文書、承認hash、二名照合、reviewer identity、screen pilot件数、manual GO ticketをrelease/startのハードゲートにしない。非参加者screen pilotは任意の品質確認として実施してよいが、未実施でも参加者モードを拒否しない。開始条件は、参加者モードが有効であること、当日Operatorのセッション内確認、提示前同意の確認、緊急停止の利用可能性、必須runtime checkの成功だけとする。
+
+当日Operator確認は倫理承認の証跡ではない。氏名、メール、ID、署名、承認番号、承認文書、SHA-256を入力させず、サーバメモリまたは`sessionStorage`だけに保持し、永続ログ・データベース・`localStorage`へ保存しない。アプリまたはブラウザの再起動後は再確認を要求する。表示状態は`技術状態：実施可能`、`参加者モード：有効`、`承認証跡：本システム外で管理`、`本システムによる承認検証：実施しない`のように責務を分離する。
 
 ## 装置
 

@@ -5,7 +5,6 @@ import { pathToFileURL } from "node:url";
 
 import {
   hashProductionCriticalConfig,
-  hashProductionGoEvidence,
   loadExperimentConfig,
 } from "../src/shared/config-loader.js";
 import {
@@ -62,10 +61,15 @@ export interface PreflightReport {
   readonly formAuditAuditedOn: string | null;
   readonly formAuditContentSha256: string;
   readonly formAuditTwoPersonVerified: boolean;
-  readonly goEvidenceStatus: "GO" | "NO-GO" | "MISSING";
-  readonly goEvidenceCriticalConfigSha256: string;
+  readonly environment: ExperimentConfig["environment"];
+  readonly participantMode: ExperimentConfig["participantMode"];
+  readonly complianceMode: ExperimentConfig["compliance"]["mode"];
+  readonly evidenceStorage: ExperimentConfig["compliance"]["evidenceStorage"];
+  readonly verifiedByApplication: false;
+  readonly approvalEvidence: "managed-outside-system";
+  readonly approvalVerifiedByApplication: false;
+  readonly technicalReadiness: "GO" | "NO-GO";
   readonly computedCriticalConfigSha256: string;
-  readonly goEvidenceSha256: string;
   readonly bindHost: string;
   readonly port: number;
   readonly allowLan: boolean;
@@ -288,15 +292,54 @@ export function evaluatePreflightGates(
         : "開発確認にformAuditが設定されています。本番ランタイムには使用できません。",
   });
 
-  const goEvidence = productionPolicy.goEvidence;
   checks.push({
-    name: "goEvidence",
-    status: goEvidence.approved ? "pass" : production ? "fail" : "warning",
-    detail: goEvidence.approved
-      ? "研究計画、倫理判断、提示前同意、データ管理、3〜5件の画面パイロット、独立二名release照合の有効な証跡を確認しました。"
+    name: "compliance.external",
+    status: productionPolicy.complianceIssues.length === 0
+      ? production ? "pass" : "warning"
+      : production ? "fail" : "warning",
+    detail: productionPolicy.complianceIssues.length === 0
+      ? production
+        ? "外部コンプライアンスモードです。承認証跡はアプリ外で管理され、アプリは検証・保存しません。"
+        : "非本番モードです。外部コンプライアンス宣言は本番承認を表しません。"
       : production
-        ? `本番GO証跡ゲートを通過できません（${goEvidence.issues.join(", ")}）。`
-        : "本番GO証跡は未承認です。開発用Mock確認には影響しませんが、本番リリースは生成できません。",
+        ? `外部コンプライアンス境界が正式値と一致しません（${productionPolicy.complianceIssues.join(", ")}）。`
+        : "非本番設定は正式productionの外部コンプライアンス境界と異なります。",
+  });
+
+  checks.push({
+    name: "runtime.sessionSafety",
+    status: config.runtime.requireOperatorSessionConfirmation
+        && !config.runtime.persistOperatorConfirmation
+        && config.runtime.requireConsentConfirmation
+        && config.runtime.requireEmergencyStopCheck
+      ? "pass"
+      : "fail",
+    detail: config.runtime.requireOperatorSessionConfirmation
+        && !config.runtime.persistOperatorConfirmation
+        && config.runtime.requireConsentConfirmation
+        && config.runtime.requireEmergencyStopCheck
+      ? "セッションごとのOperator確認、同意確認、緊急停止確認を要求し、Operator確認を永続化しません。"
+      : "Operator・同意・緊急停止の実行時安全確認が正式値と一致しません。",
+  });
+
+  checks.push({
+    name: "privacy.externalCompliance",
+    status: !config.privacy.storeOperatorIdentity
+        && !config.privacy.storeApprovalEvidence
+        && !config.privacy.storeApprovalHash
+        && !config.privacy.storeIpAddress
+        && !config.privacy.analyticsEnabled
+        && !config.privacy.telemetryEnabled
+      ? "pass"
+      : "fail",
+    detail: !config.privacy.storeOperatorIdentity
+        && !config.privacy.storeApprovalEvidence
+        && !config.privacy.storeApprovalHash
+        && !config.privacy.storeIpAddress
+        && !config.privacy.analyticsEnabled
+        && !config.privacy.telemetryEnabled
+      ? "Operator識別情報、承認証跡・ハッシュ、IP、分析、テレメトリを保存しません。"
+      : "productionで禁止された識別情報・承認証跡・分析データの保存設定があります。",
   });
 
   checks.push({
@@ -357,7 +400,6 @@ export async function collectPreflightReport(
   );
   const config = loaded.config;
   const computedCriticalConfigSha256 = hashProductionCriticalConfig(config);
-  const goEvidenceSha256 = hashProductionGoEvidence(config);
   const resolvedLog = resolveLogPath(
     rootDirectory,
     options.dataDirectoryOverride ?? config.logging.directory,
@@ -491,10 +533,15 @@ export async function collectPreflightReport(
     formAuditAuditedOn: config.formAudit?.auditedOn ?? null,
     formAuditContentSha256: config.formAudit?.contentSha256 ?? "",
     formAuditTwoPersonVerified: config.formAudit?.twoPersonVerified ?? false,
-    goEvidenceStatus: config.goEvidence?.status ?? "MISSING",
-    goEvidenceCriticalConfigSha256: config.goEvidence?.criticalConfigSha256 ?? "",
+    environment: config.environment,
+    participantMode: config.participantMode,
+    complianceMode: config.compliance.mode,
+    evidenceStorage: config.compliance.evidenceStorage,
+    verifiedByApplication: config.compliance.verifiedByApplication,
+    approvalEvidence: "managed-outside-system",
+    approvalVerifiedByApplication: false,
+    technicalReadiness: checks.some((check) => check.status === "fail") ? "NO-GO" : "GO",
     computedCriticalConfigSha256,
-    goEvidenceSha256: goEvidenceSha256 ?? "",
     bindHost: config.bindHost,
     port: config.port,
     allowLan: config.network.allowLan,
@@ -541,10 +588,12 @@ export function renderPreflightReport(
   writeLine(`  固定状態: score=${report.fixedScore}, label=${report.fixedLabel}, pufferLevel=${report.pufferLevel}`);
   writeLine(`  外部アンケートURL: ${report.formUrl === "" ? "(未設定)" : report.formUrl}`);
   writeLine(`  アプリ内アンケート監査証跡: ${report.formAuditStatus}`);
-  writeLine(`  本番GO証跡: ${report.goEvidenceStatus}`);
-  writeLine(`  証跡対象設定SHA-256: ${report.goEvidenceCriticalConfigSha256 === "" ? "(未設定)" : report.goEvidenceCriticalConfigSha256}`);
-  writeLine(`  算出済み対象設定SHA-256: ${report.computedCriticalConfigSha256}`);
-  writeLine(`  GO証跡SHA-256: ${report.goEvidenceSha256 === "" ? "(未設定)" : report.goEvidenceSha256}`);
+  writeLine(`  技術状態: ${report.technicalReadiness === "GO" ? "実施可能" : "要確認"}`);
+  writeLine(`  参加者モード: ${report.participantMode === "enabled" ? "有効" : "無効"}`);
+  writeLine(`  コンプライアンスモード: ${report.complianceMode}`);
+  writeLine("  承認証跡: 本システム外で管理");
+  writeLine("  本システムによる承認検証: 実施しない");
+  writeLine(`  算出済み技術設定SHA-256: ${report.computedCriticalConfigSha256}`);
   writeLine(`  bind: ${report.bindHost}:${report.port}`);
   writeLine(`  allowLan: ${String(report.allowLan)}`);
   writeLine(`  allowExternalRuntimeRequests: ${String(report.allowExternalRuntimeRequests)}`);

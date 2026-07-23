@@ -112,6 +112,34 @@ export const CompliancePrivacySchema = z.object({
   telemetryEnabled: z.literal(false),
 }).strict();
 
+const EXTERNAL_COMPLIANCE_DEFAULT = Object.freeze({
+  mode: "external",
+  evidenceStorage: "outside-system",
+  verifiedByApplication: false,
+  requireApprovalDocument: false,
+  requireApprovalHash: false,
+  requireSecondVerifier: false,
+  requireReviewerIdentity: false,
+  requireScreenPilotForRelease: false,
+  requireManualGoTicket: false,
+} as const);
+
+const RUNTIME_COMPLIANCE_DEFAULT = Object.freeze({
+  requireOperatorSessionConfirmation: true,
+  persistOperatorConfirmation: false,
+  requireConsentConfirmation: true,
+  requireEmergencyStopCheck: true,
+} as const);
+
+const COMPLIANCE_PRIVACY_DEFAULT = Object.freeze({
+  storeOperatorIdentity: false,
+  storeApprovalEvidence: false,
+  storeApprovalHash: false,
+  storeIpAddress: false,
+  analyticsEnabled: false,
+  telemetryEnabled: false,
+} as const);
+
 const formUrlSchema = z.string().max(2_048).superRefine((value, context) => {
   if (value === "") {
     return;
@@ -240,11 +268,17 @@ export const ProductionGoEvidenceSchema = z.object({
 export const ExperimentConfigSchema = z.object({
   schemaVersion: z.literal(1),
   protocolVersion: singleLineText,
-  environment: z.enum(["development", "test", "rehearsal", "screen-pilot", "production"]),
-  participantMode: z.enum(["disabled", "enabled"]),
-  compliance: ExternalComplianceSchema,
-  runtime: RuntimeComplianceSchema,
-  privacy: CompliancePrivacySchema,
+  environment: z.enum([
+    "development",
+    "test",
+    "rehearsal",
+    "screen-pilot",
+    "production",
+  ]).default("development"),
+  participantMode: z.enum(["disabled", "enabled"]).default("disabled"),
+  compliance: ExternalComplianceSchema.default(EXTERNAL_COMPLIANCE_DEFAULT),
+  runtime: RuntimeComplianceSchema.default(RUNTIME_COMPLIANCE_DEFAULT),
+  privacy: CompliancePrivacySchema.default(COMPLIANCE_PRIVACY_DEFAULT),
   studyTitle: singleLineText,
   bindHost: singleLineText,
   port: z.number().int().min(1_024).max(65_535),

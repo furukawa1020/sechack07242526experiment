@@ -51,6 +51,7 @@ export const UI_COPY = {
     scenario: "比較用シナリオ",
     remember: "そのまま見て、感じたことを覚えておいてください。",
     medical: "この表示は医療上の診断ではありません。",
+    withdrawal: "参加を途中でやめたい場合は、いつでも研究スタッフへお知らせください。",
   },
   reset: {
     title: "次の提示に移ります",

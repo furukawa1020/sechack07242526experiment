@@ -1,6 +1,33 @@
 {
   "schemaVersion": 1,
   "protocolVersion": "R8-010-2x2-screen-v3",
+  "environment": "production",
+  "participantMode": "enabled",
+  "compliance": {
+    "mode": "external",
+    "evidenceStorage": "outside-system",
+    "verifiedByApplication": false,
+    "requireApprovalDocument": false,
+    "requireApprovalHash": false,
+    "requireSecondVerifier": false,
+    "requireReviewerIdentity": false,
+    "requireScreenPilotForRelease": false,
+    "requireManualGoTicket": false
+  },
+  "runtime": {
+    "requireOperatorSessionConfirmation": true,
+    "persistOperatorConfirmation": false,
+    "requireConsentConfirmation": true,
+    "requireEmergencyStopCheck": true
+  },
+  "privacy": {
+    "storeOperatorIdentity": false,
+    "storeApprovalEvidence": false,
+    "storeApprovalHash": false,
+    "storeIpAddress": false,
+    "analyticsEnabled": false,
+    "telemetryEnabled": false
+  },
   "studyTitle": "身体状態の外化デバイスがユーザの心理状態に及ぼす影響の評価",
   "bindHost": "127.0.0.1",
   "port": 4173,
@@ -27,91 +54,6 @@
     "allowMockInProduction": false
   },
   "formUrl": "",
-  "goEvidence": {
-    "status": "NO-GO",
-    "protocolVersion": "R8-010-2x2-screen-v3",
-    "criticalConfigSha256": "44a65f0d44a5531acb9dc087436ed1c48bcc882a5c61e8e5d762f2ee8815760e",
-    "researchPlan": {
-      "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v3",
-      "documentId": "PENDING-RESEARCH-PLAN",
-      "documentVersion": "PENDING",
-      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "approvedOn": null,
-      "applicableUntil": null
-    },
-    "ethicsDetermination": {
-      "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v3",
-      "documentId": "PENDING-ETHICS-DETERMINATION",
-      "documentVersion": "PENDING",
-      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "approvedOn": null,
-      "applicableUntil": null
-    },
-    "preStimulusConsent": {
-      "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v3",
-      "documentId": "PENDING-PRE-STIMULUS-CONSENT",
-      "documentVersion": "PENDING",
-      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "approvedOn": null,
-      "applicableUntil": null
-    },
-    "dataManagementPlan": {
-      "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v3",
-      "documentId": "PENDING-DATA-MANAGEMENT-PLAN",
-      "documentVersion": "PENDING",
-      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "approvedOn": null,
-      "applicableUntil": null
-    },
-    "screenPilot": {
-      "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v3",
-      "documentId": "PENDING-SCREEN-PILOT",
-      "documentVersion": "PENDING",
-      "contentSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "approvedOn": null,
-      "applicableUntil": null,
-      "completedSessions": null,
-      "sourceTreeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "pilotConfigFileHash": "0000000000000000000000000000000000000000000000000000000000000000"
-    },
-    "releaseVerification": {
-      "status": "NO-GO",
-      "protocolVersion": "R8-010-2x2-screen-v3",
-      "appVersion": "PENDING",
-      "criticalConfigSha256": "44a65f0d44a5531acb9dc087436ed1c48bcc882a5c61e8e5d762f2ee8815760e",
-      "sourceTreeSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-      "reviews": [
-        {
-          "reviewId": "PENDING-RELEASE-REVIEW-1",
-          "reviewerCode": "REV-PENDING01",
-          "reviewVersion": "PENDING",
-          "status": "NO-GO",
-          "protocolVersion": "R8-010-2x2-screen-v3",
-          "criticalConfigSha256": "44a65f0d44a5531acb9dc087436ed1c48bcc882a5c61e8e5d762f2ee8815760e",
-          "reviewedOn": null,
-          "applicableUntil": null,
-          "attestationSha256": "0000000000000000000000000000000000000000000000000000000000000000"
-        },
-        {
-          "reviewId": "PENDING-RELEASE-REVIEW-2",
-          "reviewerCode": "REV-PENDING02",
-          "reviewVersion": "PENDING",
-          "status": "NO-GO",
-          "protocolVersion": "R8-010-2x2-screen-v3",
-          "criticalConfigSha256": "44a65f0d44a5531acb9dc087436ed1c48bcc882a5c61e8e5d762f2ee8815760e",
-          "reviewedOn": null,
-          "applicableUntil": null,
-          "attestationSha256": "0000000000000000000000000000000000000000000000000000000000000000"
-        }
-      ]
-    }
-  },
-
   "logging": {
     "directory": "./data/sessions",
     "includeAbortedInOrderBalancing": true

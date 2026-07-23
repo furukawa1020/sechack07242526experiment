@@ -9,13 +9,16 @@ import {
   PUBLIC_DEMO_REHEARSAL_TIMING_MS,
   PUBLIC_DEMO_SUMMARY_STEP,
   PUBLIC_DEMO_TOTAL_STEPS,
+  isPublicDemoResponseStep,
+  publicDemoPositionForStep,
+  publicDemoPresentationStep,
   publicDemoStepLabel,
   type DemoProcessingLocation,
   type PublicDemoCondition,
   type PublicDemoRehearsalTimingMs,
 } from "./content.js";
 
-type PublicDemoRehearsalPhase = "handling" | "processing" | "result" | "reset";
+type PublicDemoRehearsalPhase = "handling" | "processing" | "result" | "reset" | "response";
 type PublicDemoConditionIndex = 0 | 1 | 2 | 3;
 type PublicDemoPufferMotion = "resting" | "inflating" | "holding" | "deflating";
 
@@ -56,6 +59,8 @@ function nextRehearsalFrame(frame: PublicDemoRehearsalFrame): PublicDemoRehearsa
     case "result":
       return { ...frame, phase: "reset" };
     case "reset":
+      return { ...frame, phase: "response" };
+    case "response":
       return frame.conditionIndex === PUBLIC_DEMO_CONDITIONS.length - 1
         ? null
         : {
@@ -367,6 +372,24 @@ function RehearsalResetScene({
   );
 }
 
+function ResponseCheckpointScene({ position }: { readonly position: number }): React.JSX.Element {
+  return (
+    <section
+      aria-labelledby={`public-demo-response-title-${position}`}
+      className="public-demo-response"
+      data-scene="response"
+      data-testid="public-demo-response"
+    >
+      <div>
+        <h1 id={`public-demo-response-title-${position}`}>
+          {PUBLIC_DEMO_COPY.response.title(position)}
+        </h1>
+        <p>{PUBLIC_DEMO_COPY.response.body}</p>
+      </div>
+    </section>
+  );
+}
+
 function RehearsalScene({
   frame,
   timingMs,
@@ -379,6 +402,9 @@ function RehearsalScene({
 
   if (frame.phase === "reset") {
     return <RehearsalResetScene condition={condition} position={position} timingMs={timingMs} />;
+  }
+  if (frame.phase === "response") {
+    return <ResponseCheckpointScene position={position} />;
   }
 
   const rightPanel =
@@ -439,9 +465,12 @@ export function Scene({ step }: { readonly step: number }): React.JSX.Element {
   if (step === PUBLIC_DEMO_INTRO_STEP) return <IntroScene />;
   if (step === PUBLIC_DEMO_SUMMARY_STEP) return <SummaryScene />;
 
-  const condition = PUBLIC_DEMO_CONDITIONS[step - PUBLIC_DEMO_FIRST_PRESENTATION_STEP];
+  const position = publicDemoPositionForStep(step);
+  if (isPublicDemoResponseStep(step)) return <ResponseCheckpointScene position={position} />;
+
+  const condition = PUBLIC_DEMO_CONDITIONS[position - PUBLIC_DEMO_FIRST_PRESENTATION_STEP];
   if (condition === undefined) throw new RangeError(`Public demo step is out of range: ${step}`);
-  return <PresentationScene condition={condition} position={step} />;
+  return <PresentationScene condition={condition} position={position} />;
 }
 
 export function PublicDemoApp({
@@ -459,6 +488,7 @@ export function PublicDemoApp({
 
   useEffect(() => {
     if (rehearsalFrame === null) return undefined;
+    if (rehearsalFrame.phase === "response") return undefined;
     const phaseDurationMs = rehearsalTimingMs[rehearsalFrame.phase];
     const timer = window.setTimeout(() => {
       const nextFrame = nextRehearsalFrame(rehearsalFrame);
@@ -479,9 +509,20 @@ export function PublicDemoApp({
 
   const stopRehearsal = (): void => {
     if (rehearsalFrame !== null) {
-      setStep(rehearsalFrame.conditionIndex + PUBLIC_DEMO_FIRST_PRESENTATION_STEP);
+      setStep(publicDemoPresentationStep(rehearsalFrame.conditionIndex + 1));
     }
     setRehearsalFrame(null);
+  };
+
+  const confirmRehearsalResponse = (): void => {
+    if (rehearsalFrame?.phase !== "response") return;
+    const nextFrame = nextRehearsalFrame(rehearsalFrame);
+    if (nextFrame === null) {
+      setStep(PUBLIC_DEMO_SUMMARY_STEP);
+      setRehearsalFrame(null);
+      return;
+    }
+    setRehearsalFrame(nextFrame);
   };
 
   const rehearsalPhaseLabel =
@@ -528,10 +569,20 @@ export function PublicDemoApp({
         <button
           className="public-demo-next"
           type="button"
-          disabled={rehearsalRunning || step === PUBLIC_DEMO_SUMMARY_STEP}
-          onClick={() => setStep((current) => Math.min(PUBLIC_DEMO_SUMMARY_STEP, current + 1))}
+          disabled={
+            rehearsalRunning
+              ? rehearsalFrame?.phase !== "response"
+              : step === PUBLIC_DEMO_SUMMARY_STEP
+          }
+          onClick={
+            rehearsalFrame?.phase === "response"
+              ? confirmRehearsalResponse
+              : () => setStep((current) => Math.min(PUBLIC_DEMO_SUMMARY_STEP, current + 1))
+          }
         >
-          {PUBLIC_DEMO_COPY.navigation.next}
+          {rehearsalFrame?.phase === "response"
+            ? PUBLIC_DEMO_COPY.navigation.confirmResponse
+            : PUBLIC_DEMO_COPY.navigation.next}
         </button>
         <button
           aria-pressed={rehearsalRunning}

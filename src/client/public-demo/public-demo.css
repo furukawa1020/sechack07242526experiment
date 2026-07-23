@@ -413,6 +413,37 @@ output {
   line-height: 1.75;
 }
 
+.public-demo-response {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: clamp(30px, 6vh, 72px) clamp(42px, 8vw, 150px);
+  text-align: center;
+}
+
+.public-demo-response > div {
+  width: min(1080px, 100%);
+  padding: clamp(42px, 7vh, 76px) clamp(30px, 6vw, 72px);
+  border-top: 3px solid #245aa6;
+  border-bottom: 1px solid #d8dde6;
+}
+
+.public-demo-response h1 {
+  margin: 0;
+  color: #245aa6;
+  font-size: clamp(36px, 4vw, 58px);
+  line-height: 1.35;
+}
+
+.public-demo-response p {
+  margin: clamp(22px, 3vh, 34px) 0 0;
+  color: #536176;
+  font-size: clamp(20px, 1.7vw, 28px);
+  font-weight: 700;
+  line-height: 1.7;
+}
+
 .public-demo-participant-footer {
   display: flex;
   align-items: center;

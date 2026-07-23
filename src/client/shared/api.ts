@@ -115,6 +115,65 @@ export interface CreateSessionInput {
   readonly orderCode: OrderCode | "auto";
 }
 
+export interface OperatorSessionConfirmationChecks {
+  readonly todayProcedureConfirmed: boolean;
+  readonly participantConsentConfirmed: boolean;
+  readonly stopOperationConfirmed: boolean;
+  readonly physicalDeviceSafetyConfirmed: boolean;
+}
+
+export interface OperatorSessionConfirmationStatus {
+  readonly confirmed: boolean;
+  readonly checks: OperatorSessionConfirmationChecks;
+  readonly technicalReadiness: "GO";
+  readonly participantMode: "enabled";
+  readonly complianceMode: "external";
+  readonly approvalEvidence: "managed-outside-system";
+  readonly approvalVerifiedByApplication: false;
+}
+
+export type OperatorSessionConfirmationInput = Readonly<{
+  [Key in keyof OperatorSessionConfirmationChecks]: true;
+}>;
+
+function parseOperatorSessionConfirmation(
+  value: unknown,
+): OperatorSessionConfirmationStatus | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Readonly<Record<string, unknown>>;
+  const checksValue = record["checks"];
+  if (typeof checksValue !== "object" || checksValue === null || Array.isArray(checksValue)) {
+    return null;
+  }
+  const checks = checksValue as Readonly<Record<string, unknown>>;
+  if (
+    typeof record["confirmed"] !== "boolean"
+    || typeof checks["todayProcedureConfirmed"] !== "boolean"
+    || typeof checks["participantConsentConfirmed"] !== "boolean"
+    || typeof checks["stopOperationConfirmed"] !== "boolean"
+    || typeof checks["physicalDeviceSafetyConfirmed"] !== "boolean"
+    || record["technicalReadiness"] !== "GO"
+    || record["participantMode"] !== "enabled"
+    || record["complianceMode"] !== "external"
+    || record["approvalEvidence"] !== "managed-outside-system"
+    || record["approvalVerifiedByApplication"] !== false
+  ) return null;
+  return {
+    confirmed: record["confirmed"],
+    checks: {
+      todayProcedureConfirmed: checks["todayProcedureConfirmed"],
+      participantConsentConfirmed: checks["participantConsentConfirmed"],
+      stopOperationConfirmed: checks["stopOperationConfirmed"],
+      physicalDeviceSafetyConfirmed: checks["physicalDeviceSafetyConfirmed"],
+    },
+    technicalReadiness: "GO",
+    participantMode: "enabled",
+    complianceMode: "external",
+    approvalEvidence: "managed-outside-system",
+    approvalVerifiedByApplication: false,
+  };
+}
+
 export const experimentApi = {
   async getOperatorConfig(): Promise<{
     readonly researchIdPattern: string;
@@ -138,6 +197,25 @@ export const experimentApi = {
       throw invalidResponse();
     }
     return { researchIdPattern, protocolVersion, rehearsal };
+  },
+
+  async getOperatorSessionConfirmation(): Promise<OperatorSessionConfirmationStatus> {
+    const raw = await requestJson("/api/operator/session-confirmation");
+    const parsed = parseOperatorSessionConfirmation(raw);
+    if (parsed === null) throw invalidResponse();
+    return parsed;
+  },
+
+  async confirmOperatorSession(
+    input: OperatorSessionConfirmationInput,
+  ): Promise<OperatorSessionConfirmationStatus> {
+    const raw = await requestJson("/api/operator/session-confirmation", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    const parsed = parseOperatorSessionConfirmation(raw);
+    if (parsed === null) throw invalidResponse();
+    return parsed;
   },
 
   async createSession(input: CreateSessionInput): Promise<CreatedSession> {

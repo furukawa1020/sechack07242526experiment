@@ -105,9 +105,9 @@ export const CONDITIONS = {
 
 - 研究スタッフのPCでローカルサーバを起動
 - 同じPCの別ウィンドウ、または外部ディスプレイで参加者画面を表示
-- 参加者は提示開始前に、アプリ外の承認済み経路で研究説明を読み、参加同意を記録する。この経路は研究説明と同意の双方を提示前に提供・記録する
+- 参加者は提示開始前に、研究責任者が定めたアプリ外の経路で研究説明を読み、参加同意を記録する。この経路は研究説明と同意の双方を提示前に提供・記録する
 - 外部アンケートを用いる場合、その告知・操作・送信は研究スタッフがアプリ外で行う。アプリは各提示後に中立な待機画面を表示するが、外部回答に関する名称、URL、QRコード、回答内容、回答方法、回答状況を保持しない
-- スタッフは同意記録そのものをアプリへ複製せず、承認済み手順で同意済みを確認する
+- スタッフは同意記録そのものをアプリへ複製せず、当日のセッション内確認で同意済みを確認する
 - スタッフ画面で研究用IDと提示順を設定
 - 正式装置モードが`screen`であり、USB実機が接続されていないことを確認
 - 4条件を自動提示し、各提示のreset後に`response`で停止する
@@ -308,6 +308,11 @@ CとDでDOM構造、文字、位置、サイズ、画面上のフグ、装置抽
 
 必須項目：
 
+- 技術状態：`実施可能`
+- 参加者モード：`有効`
+- 承認証跡：`本システム外で管理`
+- 本システムによる承認検証：`実施しない`
+- 外部管理事項と当日運用のセッション内確認
 - 研究用ID
 - 同意確認済みチェック
 - 提示順：自動割付 / 手動
@@ -322,6 +327,17 @@ CとDでDOM構造、文字、位置、サイズ、画面上のフグ、装置抽
 
 同意確認済みチェックは、スタッフが承認済み手順の完了を確認したという運用上の開始条件であり、参加者の同意記録そのものではない。同意文、回答内容、確認者氏名をこのアプリへ複製しない。
 
+正式productionは`compliance.mode=external`を使用する。倫理承認資料の確認と保管は研究責任者および当日の運用責任者が本システム外で行い、本アプリは承認の有無を審査・検証しない。Operatorには単独の「承認済み」を表示せず、技術状態、参加者モード、外部証跡管理、アプリによる非検証を分けて表示する。
+
+Operatorはブラウザまたはアプリのセッションごとに、次の「外部管理事項と当日運用の確認」を完了する。
+
+- 本日の実施が、研究責任者から指示された手順に従っている
+- 参加者へ研究説明を行い、Webフォームによる同意を確認してから開始する
+- 実験中止操作を確認した
+- 実機を使用する場合、STOPおよび収縮動作を確認した
+
+この確認で氏名、メールアドレス、ID、署名、承認番号、承認文書、文書ハッシュを入力させない。確認状態はサーバメモリまたは`sessionStorage`だけに保持し、実験ログ、データベース、`localStorage`、manifestへ保存しない。アプリまたはブラウザの再起動後は再確認を要求する。この確認は倫理承認の証跡ではない。
+
 研究用ID：
 
 - デフォルト正規表現：`^SH26-[0-9]{3}$`
@@ -330,6 +346,8 @@ CとDでDOM構造、文字、位置、サイズ、画面上のフグ、装置抽
 
 開始条件：
 
+- `participantMode=enabled`
+- 当日のOperatorセッション内確認済み
 - 同意確認済み
 - 有効な研究用ID
 - 提示順確定
@@ -337,6 +355,8 @@ CとDでDOM構造、文字、位置、サイズ、画面上のフグ、装置抽
 - 装置ready
 - フグがidle/deflated
 - 設定検証成功
+- 緊急停止が利用可能
+- 必須runtime check成功
 
 `R8-010-2x2-screen-v3`の正式開始条件では、Device modeが`screen`であることも必須とする。`screen`のreadyはインプロセスの`ScreenPufferDevice`と参加者画面の描画準備完了を意味し、USB機器の接続状態を意味しない。`mock`または`serial`なら正式セッションを開始しない。
 
@@ -528,11 +548,21 @@ stateDiagram-v2
 
 `R8-010-2x2-screen-v3`の正式設定は`device.mode=screen`、`allowMockInProduction=false`、空の`serialPath`、空の`formUrl`、不在の`formAudit`とする。`mock`は開発・テスト・明示的な模擬リハーサルだけに許可する。`serial`は将来の別プロトコルへ移行しない限り本番ゲートで拒否する。
 
-正式productionは、研究計画、倫理判断、提示開始前の同意手順、データ管理計画、研究チームの非参加者による3〜5件の画面版技術パイロット、および独立二名の設定候補照合を`goEvidence`として検証する。証跡は同じprotocolVersionと、`goEvidence`自体を除く正式設定のcanonical SHA-256へ結び付ける。確認者の氏名、メールアドレス、署名画像、参加者情報は設定やmanifestへ入れず、外部管理された文書の非個人識別ID、版、SHA-256、承認日、今回の実施への適用期限だけを記録する。
+正式productionはexternal compliance modeを使用する。機械状態の意味は次で固定する。
 
-`goEvidence.screenPilot`は、承認管理票に加えて実施時の`sourceTreeSha256`と`pilotConfigFileHash`を必須とする。pilotのsource treeは`releaseVerification.sourceTreeSha256`と完全一致させる。両経路のtree SHA-256は、自己参照を避けるため固定production設定だけを除外し、固定pilot設定を含む他の全追跡entryを対象にする。productionリリース生成時は候補commitの`config/experiment.screen-pilot.json`のバイトSHA-256を再計算し、`pilotConfigFileHash`と一致しなければ拒否する。
+```text
+technicalReadiness = GO
+participantMode = enabled
+complianceMode = external
+approvalEvidence = managed-outside-system
+approvalVerifiedByApplication = false
+```
 
-本番preflight、リリース生成、manifest検証、production起動のすべてが、`goEvidence`の欠落、NO-GO、期限切れ、protocolVersion不一致、設定SHA-256不一致、仮識別子、ゼロSHA、同一照合者コードをフェイルクローズで拒否する。v1用のフォーム監査はv3のrelease/start gateに含めない。
+設定上は`compliance.mode=external`、`compliance.evidenceStorage=outside-system`、`compliance.verifiedByApplication=false`とし、承認PDF、承認文書のコピー・参照、承認文書のSHA-256、確認者情報、署名、証跡保存先を設定、Git、CI、manifest、ログへ要求・保存・生成しない。
+
+旧`goEvidence`、承認文書、承認hash、二名照合、reviewer identity、screen pilot件数、manual GO ticketは、正式productionのpreflight、リリース生成、manifest検証、起動の条件に含めない。開始条件は、external compliance mode、参加者モード有効、当日のOperatorセッション内確認、提示前の参加者同意確認、緊急停止の利用可能性、必須runtime check成功だけとする。
+
+本アプリは倫理承認を検証済み、承認済み、二名照合済みとは表示しない。倫理承認の確認と証跡管理は本システム外の責務である。非参加者screen pilotは任意の品質確認として実施できるが、件数や実施有無を参加者モードのハードゲートにしない。v1用のフォーム監査もv3のrelease/start gateに含めない。
 
 正式production成果物には`FORM_*`文書・機能、`MOCK_REHEARSAL`文書・起動物、`PUBLIC_DEMO`文書・成果物を含めない。これらはv1履歴または非参加者用の任意資料であり、screen-v3の正式参加者UI、release/start gate、会場運用へ混在させない。
 
@@ -641,14 +671,14 @@ MockDevice：
 
 自動テスト用`test`ランタイム：
 
-- `mock`または`screen`だけを許可し、Serial、LAN、外部通信、GO証跡、本番ログ先、正式研究用IDを拒否
+- `mock`または`screen`だけを許可し、Serial、LAN、外部通信、本番ログ先、正式研究用IDを拒否
 - 参加者画面とOperatorの両方へ非参加者用の模擬表示を常設し、外部回答導線や完了文言を出さない
 - `TEST-001`または`DEMO-001`形式の合成IDと、`data/test`、`data/e2e-sessions`、`data/mock-sessions`配下の隔離ログだけを許可
 - ビルド済み`screen`画面の試験であっても、本番GO、同意取得、参加者セッションとして扱わない
 
-ソース用`development`ランタイムも非参加者専用とし、Mock、loopback、外部通信なし、外部回答送信なし、GO証跡なし、`DEV-001`形式、`data/dev-sessions`配下のログを起動時に強制する。参加者画面とOperatorへ同じ模擬表示を常設し、正式研究用IDや実参加者を扱わない。
+ソース用`development`ランタイムも非参加者専用とし、Mock、loopback、外部通信なし、外部回答送信なし、`DEV-001`形式、`data/dev-sessions`配下のログを起動時に強制する。参加者画面とOperatorへ同じ模擬表示を常設し、正式研究用IDや実参加者を扱わない。
 
-初回GO前の`screen-pilot`ランタイムは、研究チームの非参加者が同じ画面刺激を3〜5件確認する専用経路とする。`npm run screen-pilot`は毎回再ビルドし、Git worktreeルート、追跡・未追跡変更のないHEAD、固定pilot設定のGit追跡とHEADバイト完全一致を検証してから起動する。`device.mode=screen`、正式固定値・4順序・提示時間、loopback、外部通信なし、外部回答送信なし、GO監査証跡なし、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。検証した`sourceCommit`、固定production設定だけを除外した全追跡treeの`sourceTreeSha256`、pilot設定バイトの`configFileHash`を表示し、全PILOT JSONLイベントへ同じ3値を結び付ける。汎用`startServer`からの直接起動は拒否し、`node dist-server/screen-pilot.js`の直接実行や古い・改変済みビルドの流用は承認された運用経路としない。Mockリハーサル、公開レビュー、自動E2E、実参加者は事前技術パイロット件数へ含めない。3〜5件の終了状態とログSHA-256を外部管理票へ記録し、その管理票のSHA-256、実施時`sourceTreeSha256`、実施時`configFileHash`をそれぞれ`goEvidence.screenPilot.contentSha256`、`sourceTreeSha256`、`pilotConfigFileHash`へ結び付ける。正式リリースへこの起動entryとpilot設定・ログを同梱しない。
+`screen-pilot`ランタイムは、研究チームの非参加者が同じ画面刺激を任意に品質確認する専用経路とする。`npm run screen-pilot`は毎回再ビルドし、Git worktreeルート、追跡・未追跡変更のないHEAD、固定pilot設定のGit追跡とHEADバイト完全一致を検証してから起動する。`device.mode=screen`、正式固定値・4順序・提示時間、loopback、外部通信なし、外部回答送信なし、`PILOT-001`形式、`data/screen-pilot-sessions`の隔離ログ、非参加者表示を起動時に強制する。技術的な再現性のためsource commit、source tree SHA-256、pilot設定バイトSHA-256をPILOTログへ記録してよいが、これらは倫理承認証跡ではなく、件数・内容・ハッシュを正式release/startの条件にしない。正式リリースへこの起動entryとpilot設定・ログを同梱しない。
 
 ScreenPufferDevice：
 
@@ -846,7 +876,7 @@ E2Eサーバは明示的な`test`モードで起動し、参加者画面とOpera
 - `npm ci`と`npm run build`が成功
 - 非参加者の動作確認は`npm run rehearsal`で起動でき、本番データ・本番割付へ混入しない
 - 非参加者の画面版技術パイロットは`npm run screen-pilot`でだけ起動し、正式固定値・時間・順序とScreenPufferDeviceを使いながら、`PILOT-xxx`、外部回答送信なし、loopback、隔離ログ、本番利用不可を強制する
-- 正式起動は承認済みproduction設定を明示し、preflightがPASSした場合だけ成功する。現在のNO-GO設定では起動とリリース生成を拒否する
+- 正式起動はexternal compliance設定を明示し、参加者モード、当日Operatorセッション内確認、提示前同意、緊急停止、必須runtime checkがすべて有効な場合だけ開始できる
 - `ScreenPufferDevice`だけで実機なしの正式画面を実行可能
 - MockDeviceだけで開発・模擬リハーサルを実演可能
 - 自動テストは非参加者表示、合成ID、隔離ログ、外部回答送信なしを強制し、本番と識別できる
@@ -860,7 +890,9 @@ E2Eサーバは明示的な`test`モードで起動し、参加者画面とOpera
 - 外部自動通信なし
 - 全ログが研究用IDで対応
 - PIIなし
-- `goEvidence`の6要件が一つでも未承認なら本番preflight・リリース・起動が失敗する
+- 承認証跡を本システム内へ要求・保存・検証せず、技術状態と承認証跡の外部管理状態を分けて表示する
+- 当日Operator確認が未完了、提示前同意が未確認、緊急停止が利用不能、または必須runtime check失敗なら第1提示を開始できない
+- screen pilot件数が0でも、それだけを理由にpreflight・リリース・起動を拒否しない
 - 研究用ID単位の読み取り専用Previewと保持期限レポートが正式ログだけを対象に動作し、外部アンケート回答を取得しない。分析除外・削除はアプリ内で常時拒否され、研究責任者が承認した外部手順にだけ引き渡す
 - 緊急停止が動作
 - 全テスト成功
@@ -883,9 +915,10 @@ E2Eサーバは明示的な`test`モードで起動し、参加者画面とOpera
 - 提示順
 - 同意
 - 15分以内
-- 研究チームの非参加者によるscreen技術パイロット3〜5件と、候補commit・設定SHA-256・ログSHA-256の外部記録
+- 必要に応じた非参加者screen技術パイロット（任意の品質確認であり、未実施でも参加者モードを拒否しない）
 - 研究責任者による最終文言確認
-- 研究計画、倫理判断、提示前同意、データ管理、3〜5件のscreenパイロット、独立二名照合のGO証跡と対象設定SHA-256が一致
+- 承認証跡と実施条件は本システム外で管理し、本アプリが承認を検証したとは表示しない
+- Operatorの当日セッション内確認、参加者ごとの提示前同意確認、緊急停止、必須runtime check
 - 撤回・除外・削除・保持期限と、外部アンケートを用いる場合のアプリ外管理手順をデータ管理計画で承認
 - 固定模擬データ、本人非測定、生体データ非取得の説明が承認済み研究計画と一致
 - 物理フグから画面上フグへの刺激変更について、研究責任者の承認と所属機関で必要な倫理審査・変更手続きが完了

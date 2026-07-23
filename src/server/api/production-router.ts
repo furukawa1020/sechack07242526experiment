@@ -8,6 +8,12 @@ import type { SessionController } from "../sessions/session-controller.js";
 const SessionIdSchema = z.string().uuid();
 const DisplayTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/u);
 const EmptyBodySchema = z.object({}).strict();
+const OperatorSessionConfirmationSchema = z.object({
+  todayProcedureConfirmed: z.literal(true),
+  participantConsentConfirmed: z.literal(true),
+  stopOperationConfirmed: z.literal(true),
+  physicalDeviceSafetyConfirmed: z.literal(true),
+}).strict();
 const CreateSessionSchema = z
   .object({
     researchId: z.string().min(1).max(64),
@@ -59,6 +65,17 @@ export function createProductionApiRouter(
       protocolVersion: config.protocolVersion,
       rehearsal: controller.isRehearsal,
     });
+  });
+
+  router.get("/operator/session-confirmation", (_request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.json(controller.getOperatorSessionConfirmation());
+  });
+
+  router.post("/operator/session-confirmation", (request, response) => {
+    const input = OperatorSessionConfirmationSchema.parse(request.body);
+    response.setHeader("Cache-Control", "no-store");
+    response.json(controller.confirmOperatorSession(input));
   });
 
   router.post(
