@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createRelease,
   hashTrackedSourceTreeAtCommit,
-  inspectProductionSourceEvidence,
+  inspectProductionSourceIntegrity,
   parseCreateReleaseArguments,
   runCreateRelease,
 } from "../../../scripts/create-release.js";
@@ -68,6 +68,33 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
   const source: Record<string, unknown> = {
     schemaVersion: 1,
     protocolVersion,
+    environment: "production",
+    participantMode: "enabled",
+    compliance: {
+      mode: "external",
+      evidenceStorage: "outside-system",
+      verifiedByApplication: false,
+      requireApprovalDocument: false,
+      requireApprovalHash: false,
+      requireSecondVerifier: false,
+      requireReviewerIdentity: false,
+      requireScreenPilotForRelease: false,
+      requireManualGoTicket: false,
+    },
+    runtime: {
+      requireOperatorSessionConfirmation: true,
+      persistOperatorConfirmation: false,
+      requireConsentConfirmation: true,
+      requireEmergencyStopCheck: true,
+    },
+    privacy: {
+      storeOperatorIdentity: false,
+      storeApprovalEvidence: false,
+      storeApprovalHash: false,
+      storeIpAddress: false,
+      analyticsEnabled: false,
+      telemetryEnabled: false,
+    },
     studyTitle: "リリース合成設定",
     bindHost: overrides.bindHost ?? "127.0.0.1",
     port: overrides.port ?? 4173,
@@ -101,73 +128,7 @@ function configSource(overrides: ConfigOverrides = {}): Record<string, unknown> 
     },
   };
   if (overrides.formAudit !== undefined) source["formAudit"] = overrides.formAudit;
-  if (mode !== "screen" || formUrl !== "" || overrides.formAudit !== undefined) return source;
-  let criticalConfigSha256: string;
-  try {
-    criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
-  } catch {
-    // Invalid-config tests must reach the real loader and fail there rather
-    // than being made synthetically valid by this approved-evidence helper.
-    return source;
-  }
-  const approval = (documentId: string, contentSha256: string) => ({
-    status: "GO",
-    protocolVersion,
-    documentId,
-    documentVersion: "1.0",
-    contentSha256,
-    approvedOn: TODAY_IN_JAPAN,
-    applicableUntil: TODAY_IN_JAPAN,
-  });
-  return {
-    ...source,
-    goEvidence: {
-      status: "GO",
-      protocolVersion,
-      criticalConfigSha256,
-      researchPlan: approval("PLAN-001", fixtureDigest("research-plan")),
-      ethicsDetermination: approval("ETHICS-001", fixtureDigest("ethics")),
-      preStimulusConsent: approval("CONSENT-001", fixtureDigest("consent")),
-      dataManagementPlan: approval("DATA-PLAN-001", fixtureDigest("data-plan")),
-      screenPilot: {
-        ...approval("SCREEN-PILOT-001", fixtureDigest("screen-pilot")),
-        completedSessions: 3,
-        sourceTreeSha256: fixtureDigest("source-tree"),
-        pilotConfigFileHash: fixtureDigest("pilot-config"),
-      },
-      releaseVerification: {
-        status: "GO",
-        protocolVersion,
-        appVersion: "9.8.7",
-        criticalConfigSha256,
-        sourceTreeSha256: fixtureDigest("source-tree"),
-        reviews: [
-          {
-            reviewId: "RELEASE-REVIEW-001",
-            reviewerCode: "REV-0001",
-            reviewVersion: "1.0",
-            status: "GO",
-            protocolVersion,
-            criticalConfigSha256,
-            reviewedOn: TODAY_IN_JAPAN,
-            applicableUntil: TODAY_IN_JAPAN,
-            attestationSha256: fixtureDigest("release-attestation-1"),
-          },
-          {
-            reviewId: "RELEASE-REVIEW-002",
-            reviewerCode: "REV-0002",
-            reviewVersion: "1.0",
-            status: "GO",
-            protocolVersion,
-            criticalConfigSha256,
-            reviewedOn: TODAY_IN_JAPAN,
-            applicableUntil: TODAY_IN_JAPAN,
-            attestationSha256: fixtureDigest("release-attestation-2"),
-          },
-        ],
-      },
-    },
-  };
+  return source;
 }
 
 function mockRehearsalConfigSource(overrides: ConfigOverrides = {}): Record<string, unknown> {
@@ -180,6 +141,8 @@ function mockRehearsalConfigSource(overrides: ConfigOverrides = {}): Record<stri
       researchIdPattern: "^DEMO-[0-9]{3}$",
       ...overrides,
     }),
+    environment: "rehearsal",
+    participantMode: "disabled",
     formAudit: undefined,
     goEvidence: undefined,
   };
@@ -361,30 +324,6 @@ async function createReleaseSource(overrides: ConfigOverrides = {}): Promise<str
   await runGit(root, ["config", "user.email", "release-fixture@example.invalid"]);
   await runGit(root, ["add", "--all"]);
   await runGit(root, ["commit", "--quiet", "-m", "Create release fixture"]);
-  const evidenceCommit = await runGit(root, ["rev-parse", "HEAD"]);
-  const sourceTreeSha256 = await hashTrackedSourceTreeAtCommit(root, evidenceCommit);
-  const pilotConfigFileHash = createHash("sha256").update(
-    await readFile(join(root, "config", "experiment.screen-pilot.json")),
-  ).digest("hex");
-  const productionConfigPath = join(root, "config", "experiment.production.json");
-  const productionConfig = JSON.parse(
-    await readFile(productionConfigPath, "utf8"),
-  ) as Record<string, unknown>;
-  const goEvidence = productionConfig["goEvidence"];
-  if (goEvidence !== null && typeof goEvidence === "object") {
-    const releaseVerification = (goEvidence as Record<string, unknown>)["releaseVerification"];
-    if (releaseVerification !== null && typeof releaseVerification === "object") {
-      (releaseVerification as Record<string, unknown>)["sourceTreeSha256"] = sourceTreeSha256;
-    }
-    const screenPilot = (goEvidence as Record<string, unknown>)["screenPilot"];
-    if (screenPilot !== null && typeof screenPilot === "object") {
-      (screenPilot as Record<string, unknown>)["sourceTreeSha256"] = sourceTreeSha256;
-      (screenPilot as Record<string, unknown>)["pilotConfigFileHash"] = pilotConfigFileHash;
-    }
-    await writeFile(productionConfigPath, JSON.stringify(productionConfig), "utf8");
-    await runGit(root, ["add", "--", "config/experiment.production.json"]);
-    await runGit(root, ["commit", "--quiet", "-m", "Bind production source evidence"]);
-  }
   await runGit(root, ["remote", "add", "origin", SYNTHETIC_SOURCE_REPOSITORY]);
   return root;
 }
@@ -727,21 +666,22 @@ describe("deployment manifest verification", () => {
 });
 
 describe("release creation", () => {
-  it("reports the clean HEAD values required for independent release review", async () => {
+  it("reports optional technical source-integrity values without approval evidence", async () => {
     const root = await createReleaseSource();
-    const summary = await inspectProductionSourceEvidence(root);
+    const summary = await inspectProductionSourceIntegrity(root);
     const config = parseExperimentConfig(
       JSON.parse(
         await readFile(join(root, "config", "experiment.production.json"), "utf8"),
       ) as unknown,
     );
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       appVersion: "9.8.7",
       criticalConfigSha256: hashProductionCriticalConfig(config),
-      pilotConfigFileHash: config.goEvidence?.screenPilot.pilotConfigFileHash,
       sourceCommit: await runGit(root, ["rev-parse", "HEAD"]),
-      sourceTreeSha256: config.goEvidence?.releaseVerification.sourceTreeSha256,
     });
+    expect(summary.sourceTreeSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(summary).not.toHaveProperty("pilotConfigFileHash");
+    expect(summary).not.toHaveProperty("goEvidence");
   });
 
   it("never lets production tests reuse existing build artifacts", async () => {

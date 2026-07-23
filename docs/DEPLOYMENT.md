@@ -130,10 +130,10 @@ npm.cmd run test:e2e
 npm.cmd run build
 ```
 
-続けて技術的なsource整合を確認し、リリースを生成する。
+必要に応じて技術的なsource integrityを診断し、続けてリリースを生成する。`release:source-integrity`は任意の改変検出・再現性診断であり、倫理承認証跡の作成・検証やrelease/startの必須条件ではない。
 
 ```powershell
-npm.cmd run release:source-evidence
+npm.cmd run release:source-integrity
 npm.cmd run deploy:prepare -- --config config/experiment.production.json
 ```
 

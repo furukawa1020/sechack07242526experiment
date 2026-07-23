@@ -67,6 +67,41 @@ function validConfig(): Record<string, unknown> {
   };
 }
 
+function externalProductionConfig(
+  source: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...source,
+    environment: "production",
+    participantMode: "enabled",
+    compliance: {
+      mode: "external",
+      evidenceStorage: "outside-system",
+      verifiedByApplication: false,
+      requireApprovalDocument: false,
+      requireApprovalHash: false,
+      requireSecondVerifier: false,
+      requireReviewerIdentity: false,
+      requireScreenPilotForRelease: false,
+      requireManualGoTicket: false,
+    },
+    runtime: {
+      requireOperatorSessionConfirmation: true,
+      persistOperatorConfirmation: false,
+      requireConsentConfirmation: true,
+      requireEmergencyStopCheck: true,
+    },
+    privacy: {
+      storeOperatorIdentity: false,
+      storeApprovalEvidence: false,
+      storeApprovalHash: false,
+      storeIpAddress: false,
+      analyticsEnabled: false,
+      telemetryEnabled: false,
+    },
+  };
+}
+
 function withApprovedGoEvidence(source: Record<string, unknown>): Record<string, unknown> {
   const protocolVersion = String(source["protocolVersion"]);
   const criticalConfigSha256 = hashProductionCriticalConfig(parseExperimentConfig(source));
@@ -314,11 +349,11 @@ describe("config file loading", () => {
       .rejects.toThrow(/Mock device mode is unconditionally disabled/iu);
   });
 
-  it("fails production loading closed unless form integration is absent and a current, bound two-person GO exists", async () => {
+  it("loads external-compliance production without in-application approval evidence", async () => {
     const root = await mkdtemp(join(tmpdir(), "sechack-production-audit-"));
     const configDirectory = join(root, "config");
     await mkdir(configDirectory);
-    const source = {
+    const source = externalProductionConfig({
       ...validConfig(),
       protocolVersion: SCREEN_PROTOCOL_VERSION,
       formUrl: "",
@@ -327,7 +362,7 @@ describe("config file loading", () => {
         mode: "screen",
         serialPath: "",
       },
-    };
+    });
     Reflect.deleteProperty(source, "formAudit");
     const configPath = join(configDirectory, "production.json");
     await writeFile(configPath, JSON.stringify(source), "utf8");
@@ -336,28 +371,31 @@ describe("config file loading", () => {
       rootDirectory: root,
       production: true,
       currentDate: new Date("2026-07-21T12:00:00Z"),
-    })).rejects.toThrow(/GO evidence gate.*missing/iu);
-
-    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence(source)), "utf8");
-    await expect(loadExperimentConfig("config/production.json", {
-      rootDirectory: root,
-      production: true,
-      currentDate: new Date("2026-07-21T12:00:00Z"),
     })).resolves.toMatchObject({
       config: { protocolVersion: SCREEN_PROTOCOL_VERSION, device: { mode: "screen" } },
     });
 
-    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
+    await writeFile(configPath, JSON.stringify({
+      ...source,
+      approvalStatus: "PENDING",
+      goEvidence: { status: "NO-GO", protocolVersion: "legacy" },
+    }), "utf8");
+    await expect(loadExperimentConfig("config/production.json", {
+      rootDirectory: root,
+      production: true,
+    })).resolves.toMatchObject({ config: { goEvidence: undefined } });
+
+    await writeFile(configPath, JSON.stringify({
       ...source,
       formUrl: STUDY_FORM_URL,
-    })), "utf8");
+    }), "utf8");
     await expect(loadExperimentConfig("config/production.json", {
       rootDirectory: root,
       production: true,
       currentDate: new Date("2026-07-21T12:00:00Z"),
     })).rejects.toThrow(/production-form-url-not-empty/iu);
 
-    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
+    await writeFile(configPath, JSON.stringify({
       ...source,
       formAudit: {
         status: "GO",
@@ -367,7 +405,7 @@ describe("config file loading", () => {
         contentSha256: AUDIT_CONTENT_SHA256,
         twoPersonVerified: true,
       },
-    })), "utf8");
+    }), "utf8");
     await expect(loadExperimentConfig("config/production.json", {
       rootDirectory: root,
       production: true,
@@ -379,22 +417,22 @@ describe("config file loading", () => {
     const root = await mkdtemp(join(tmpdir(), "sechack-production-device-policy-"));
     const configDirectory = join(root, "config");
     await mkdir(configDirectory);
-    const screenBase = {
+    const screenBase = externalProductionConfig({
       ...validConfig(),
       protocolVersion: SCREEN_PROTOCOL_VERSION,
       formUrl: "",
-    };
+    });
     Reflect.deleteProperty(screenBase, "formAudit");
     const configPath = join(configDirectory, "production.json");
 
-    await writeFile(configPath, JSON.stringify(withApprovedGoEvidence({
+    await writeFile(configPath, JSON.stringify({
       ...screenBase,
       device: {
         ...(validConfig()["device"] as Record<string, unknown>),
         mode: "screen",
         serialPath: "",
       },
-    })), "utf8");
+    }), "utf8");
     await expect(loadExperimentConfig("config/production.json", {
       rootDirectory: root,
       production: true,
@@ -420,7 +458,7 @@ describe("config file loading", () => {
     })).rejects.toThrow(/screen-fixed-state-mismatch/iu);
 
     await writeFile(configPath, JSON.stringify({
-      ...validConfig(),
+      ...externalProductionConfig(validConfig()),
       formUrl: "",
       device: {
         ...(validConfig()["device"] as Record<string, unknown>),

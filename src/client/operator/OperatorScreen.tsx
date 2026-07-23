@@ -688,10 +688,7 @@ export function OperatorScreen(): React.JSX.Element {
     announceOperator: true,
   });
   useEffect(() => {
-    if (realtime.status !== "open") {
-      setOperatorConfirmationLoaded(false);
-      return;
-    }
+    if (realtime.status !== "open") return;
     let current = true;
     void experimentApi.getOperatorSessionConfirmation().then((status) => {
       if (current) {
@@ -884,7 +881,8 @@ export function OperatorScreen(): React.JSX.Element {
   const isScreen = displayedDevice.mode === "screen";
   const isRehearsal = rehearsal || session?.rehearsal === true || displayedDevice.mode === "mock";
   const events = session?.recentEvents ?? [];
-  const operatorGateSatisfied = operatorConfirmationLoaded && (
+  const operatorConfirmationAvailable = operatorConfirmationLoaded && realtime.status === "open";
+  const operatorGateSatisfied = operatorConfirmationAvailable && (
     operatorConfirmation.participantMode === "disabled"
     || operatorConfirmation.confirmed
   );
@@ -937,7 +935,7 @@ export function OperatorScreen(): React.JSX.Element {
           <OperatorSessionGate
             status={operatorConfirmation}
             draft={operatorConfirmationDraft}
-            loaded={operatorConfirmationLoaded}
+            loaded={operatorConfirmationAvailable}
             busy={busy}
             onDraft={setOperatorConfirmationDraft}
             onConfirm={() => { void confirmOperatorSession(); }}
