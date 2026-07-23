@@ -30,7 +30,9 @@ describe("server build", () => {
   it("cleans stale output and produces the same complete output from another working directory", async () => {
     await execFileAsync(process.execPath, [CLIENT_BUILD_SCRIPT, "client"], {
       cwd: tmpdir(),
-      env: { ...process.env, NODE_ENV: "production" },
+      // The build script must remain production-deterministic even when it is
+      // invoked by a test runner that exports NODE_ENV=test.
+      env: { ...process.env, NODE_ENV: "test" },
     });
     await mkdir(SERVER_OUTPUT_DIRECTORY, { recursive: true });
     const staleOutput = resolve(SERVER_OUTPUT_DIRECTORY, "stale.js");
@@ -72,6 +74,19 @@ describe("server build", () => {
         .startProductionReleaseCli,
     ).toEqual(expect.any(Function));
     expect(productionEntry).not.toHaveProperty("startServer");
+
+    const isolatedImportSource = [
+      `const entry = await import(${JSON.stringify(
+        `${pathToFileURL(resolve(SERVER_OUTPUT_DIRECTORY, "index.js")).href}?isolated=${Date.now()}`,
+      )});`,
+      "console.log(JSON.stringify(Object.keys(entry)));",
+    ].join("\n");
+    const isolatedImport = await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "--eval", isolatedImportSource],
+      { cwd: tmpdir() },
+    );
+    expect(JSON.parse(isolatedImport.stdout.trim())).toEqual(["startProductionReleaseCli"]);
 
     const rehearsalSource = await readFile(
       resolve(SERVER_OUTPUT_DIRECTORY, "rehearsal.js"),

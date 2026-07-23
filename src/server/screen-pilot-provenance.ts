@@ -59,6 +59,12 @@ export interface ScreenPilotLaunchCapability {
   readonly clientAssets: readonly ScreenPilotArtifactEvidence[];
 }
 
+export interface ScreenPilotEmbeddedBuildEvidence {
+  readonly schemaVersion: 1;
+  readonly sourceEvidence: ScreenPilotSourceEvidence;
+  readonly clientAssets: readonly ScreenPilotArtifactEvidence[];
+}
+
 export interface VerifiedScreenPilotLaunch extends VerifiedScreenPilotSource {
   readonly clientAssets: FormalProductionClientAssets;
 }
@@ -390,6 +396,89 @@ function artifactsMatch(
   });
 }
 
+function assertSourceEvidenceShape(
+  value: unknown,
+): asserts value is ScreenPilotSourceEvidence {
+  if (
+    value === null
+    || typeof value !== "object"
+    || !SOURCE_COMMIT_PATTERN.test(String(
+      (value as Partial<ScreenPilotSourceEvidence>).sourceCommit,
+    ))
+    || !SHA256_PATTERN.test(String(
+      (value as Partial<ScreenPilotSourceEvidence>).sourceTreeSha256,
+    ))
+    || !SHA256_PATTERN.test(String(
+      (value as Partial<ScreenPilotSourceEvidence>).configFileHash,
+    ))
+  ) {
+    throw new Error("Screen-pilot source evidence has an invalid structure.");
+  }
+}
+
+function assertClientEvidenceShape(
+  value: unknown,
+): asserts value is readonly ScreenPilotArtifactEvidence[] {
+  if (
+    !Array.isArray(value)
+    || value.length === 0
+    || value.length > MAX_PILOT_ASSET_COUNT
+    || value.filter((entry: unknown) => (
+      entry !== null
+      && typeof entry === "object"
+      && (entry as Partial<ScreenPilotArtifactEvidence>).path === "dist/index.html"
+    )).length !== 1
+    || !value.every((entry: unknown) => {
+      if (entry === null || typeof entry !== "object") return false;
+      const artifact = entry as Partial<ScreenPilotArtifactEvidence>;
+      return typeof artifact.path === "string"
+        && artifact.path.startsWith("dist/")
+        && !artifact.path.includes("..")
+        && !isAbsolute(artifact.path)
+        && /\.(?:html|js|css)$/u.test(artifact.path)
+        && Number.isSafeInteger(artifact.bytes)
+        && Number(artifact.bytes) > 0
+        && Number(artifact.bytes) <= MAX_PILOT_FILE_BYTES
+        && SHA256_PATTERN.test(String(artifact.sha256));
+    })
+  ) {
+    throw new Error("Screen-pilot client build evidence has an invalid structure.");
+  }
+  const paths = value.map((entry) => entry.path);
+  if (new Set(paths).size !== paths.length) {
+    throw new Error("Screen-pilot client build evidence contains duplicate paths.");
+  }
+}
+
+export function parseScreenPilotEmbeddedBuildEvidence(
+  source: string,
+): ScreenPilotEmbeddedBuildEvidence {
+  if (source === "UNVERIFIED") {
+    throw new Error("Screen-pilot bundle was not produced by the verified launcher build.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    throw new Error("Screen-pilot embedded build evidence is malformed.", { cause: error });
+  }
+  if (
+    parsed === null
+    || typeof parsed !== "object"
+    || (parsed as Partial<ScreenPilotEmbeddedBuildEvidence>).schemaVersion !== 1
+  ) {
+    throw new Error("Screen-pilot embedded build evidence has an invalid structure.");
+  }
+  const candidate = parsed as Partial<ScreenPilotEmbeddedBuildEvidence>;
+  assertSourceEvidenceShape(candidate.sourceEvidence);
+  assertClientEvidenceShape(candidate.clientAssets);
+  return Object.freeze({
+    schemaVersion: 1,
+    sourceEvidence: Object.freeze({ ...candidate.sourceEvidence }),
+    clientAssets: Object.freeze(candidate.clientAssets.map((entry) => Object.freeze({ ...entry }))),
+  });
+}
+
 export async function createScreenPilotLaunchCapability(
   rootDirectory: string,
   expectedSourceEvidence: ScreenPilotSourceEvidence,
@@ -420,34 +509,33 @@ function assertCapabilityShape(value: unknown): asserts value is ScreenPilotLaun
     || !Number.isSafeInteger(capability.launcherPid)
     || !Number.isSafeInteger(capability.createdAtMs)
     || capability.sourceEvidence === undefined
-    || !SOURCE_COMMIT_PATTERN.test(capability.sourceEvidence.sourceCommit)
-    || !SHA256_PATTERN.test(capability.sourceEvidence.sourceTreeSha256)
-    || !SHA256_PATTERN.test(capability.sourceEvidence.configFileHash)
     || capability.bundle === undefined
     || capability.bundle.path !== PILOT_BUNDLE_PATH
     || !SHA256_PATTERN.test(capability.bundle.sha256)
     || !Number.isSafeInteger(capability.bundle.bytes)
-    || !Array.isArray(capability.clientAssets)
-    || capability.clientAssets.length === 0
-    || !capability.clientAssets.every((entry) => (
-      entry.path.startsWith("dist/")
-      && /\.(?:html|js|css)$/u.test(entry.path)
-      && Number.isSafeInteger(entry.bytes)
-      && entry.bytes > 0
-      && SHA256_PATTERN.test(entry.sha256)
-    ))
   ) {
     throw new Error("Screen-pilot capability has an invalid structure.");
   }
+  assertSourceEvidenceShape(capability.sourceEvidence);
+  assertClientEvidenceShape(capability.clientAssets);
 }
 
 export async function consumeScreenPilotLaunchCapability(
   value: unknown,
   entryPath: string,
+  embeddedBuildEvidence: ScreenPilotEmbeddedBuildEvidence,
   parentPid = process.ppid,
   nowMs = Date.now(),
 ): Promise<VerifiedScreenPilotLaunch> {
   assertCapabilityShape(value);
+  assertSourceEvidenceShape(embeddedBuildEvidence.sourceEvidence);
+  assertClientEvidenceShape(embeddedBuildEvidence.clientAssets);
+  if (!evidenceMatches(value.sourceEvidence, embeddedBuildEvidence.sourceEvidence)) {
+    throw new Error("Screen-pilot capability does not match its embedded clean source build.");
+  }
+  if (!artifactsMatch(value.clientAssets, embeddedBuildEvidence.clientAssets)) {
+    throw new Error("Screen-pilot capability does not match its embedded client build.");
+  }
   if (consumedCapabilityNonces.has(value.nonce)) {
     throw new Error("Screen-pilot capability has already been consumed.");
   }
@@ -471,7 +559,7 @@ export async function consumeScreenPilotLaunchCapability(
   if (!artifactsMatch([artifacts.bundle], [value.bundle])) {
     throw new Error("The running screen-pilot bundle is stale or modified.");
   }
-  if (!artifactsMatch(artifacts.clientEvidence, value.clientAssets)) {
+  if (!artifactsMatch(artifacts.clientEvidence, embeddedBuildEvidence.clientAssets)) {
     throw new Error("Screen-pilot dist assets are stale or modified.");
   }
   return Object.freeze({
