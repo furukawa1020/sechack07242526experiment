@@ -881,18 +881,22 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
     );
   }
 
-  const serverBuildNames =
+  const serverBuildFiles =
     releaseKind === "production"
       ? ([
-          "index.js",
-          "preflight.js",
-          "healthcheck.js",
-          "verify-release.js",
+          { source: "index.js", packaged: "index.js" },
+          { source: "preflight.js", packaged: "preflight.js" },
+          { source: "healthcheck.js", packaged: "healthcheck.js" },
+          { source: "verify-release.js", packaged: "verify-release.js" },
         ] as const)
-      : (["rehearsal.js", "healthcheck.js", "verify-release.js"] as const);
+      : ([
+          { source: "rehearsal.js", packaged: "rehearsal.js" },
+          { source: "rehearsal-healthcheck.js", packaged: "healthcheck.js" },
+          { source: "rehearsal-verify-release.js", packaged: "verify-release.js" },
+        ] as const);
   const requiredBuildFiles = [
     resolve(rootDirectory, "dist", "index.html"),
-    ...serverBuildNames.map((name) => resolve(rootDirectory, "dist-server", name)),
+    ...serverBuildFiles.map(({ source }) => resolve(rootDirectory, "dist-server", source)),
   ];
   for (const path of requiredBuildFiles) await requireRegularFile(path);
 
@@ -920,10 +924,10 @@ export async function createRelease(options: CreateReleaseOptions = {}): Promise
       resolve(stagingDirectory, "dist"),
     );
     await mkdir(resolve(stagingDirectory, "dist-server"));
-    for (const name of serverBuildNames) {
+    for (const { source, packaged } of serverBuildFiles) {
       await copyRegularFileStable(
-        resolve(rootDirectory, "dist-server", name),
-        resolve(stagingDirectory, "dist-server", name),
+        resolve(rootDirectory, "dist-server", source),
+        resolve(stagingDirectory, "dist-server", packaged),
       );
     }
     await mkdir(resolve(stagingDirectory, "config"));
